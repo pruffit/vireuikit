@@ -22,11 +22,13 @@ float vgValueNoise(float2 p) {
  *  oklab.ts's `glsl()`. */
 const glslFloat = (v: number): string => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 
-/** The field's phase wraps every this many seconds (see `web/medium.ts`'s CPU-side accumulator).
- *  Chosen so every octave rate below times this period lands on an integer — that integer is the
- *  z-lattice period `vgValueNoise3Periodic` wraps on, which is what makes the wrap exact rather
- *  than merely small. 1000s (~16.7 minutes) is long enough that a wrap is rare, while every rate
- *  in `MEDIUM_TIME_OCTAVES` still divides it evenly. */
+/** The field's phase wraps every this many PHASE units (curlSpeed·seconds), NOT seconds of real
+ *  time: `web/medium.ts`'s CPU-side accumulator does `phase += dt * curlSpeed`, so the wall-clock
+ *  wrap period is `MEDIUM_TIME_PERIOD / curlSpeed` — about 2.3h (8333s) at the shipped default
+ *  (`curlSpeed = 0.12`), verified against that default in `medium-noise-periodicity.test.ts` so
+ *  this comment can't silently drift out of sync with it. Chosen so every octave rate below times
+ *  this period lands on an integer — that integer is the z-lattice period `vgValueNoise3Periodic`
+ *  wraps on, which is what makes the wrap exact rather than merely small. */
 export const MEDIUM_TIME_PERIOD = 1000;
 
 type MediumTimeOctave = {

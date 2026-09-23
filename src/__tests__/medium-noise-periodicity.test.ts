@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MEDIUM_DEFAULTS } from '../medium';
 // Direct module path, not the package barrel: vgPotentialJS/vgValueNoise3PeriodicJS/
 // mediumOctavePeriod/MEDIUM_TIME_OCTAVES are internal to this package (see medium/index.ts) —
 // tests reach them here instead of through the public API.
@@ -29,6 +30,15 @@ describe('MEDIUM_TIME_OCTAVES: the periods a phase wrap relies on', () => {
   it('the periods are exactly 600, 1700, 900, 150 at T = 1000', () => {
     expect(MEDIUM_TIME_PERIOD).toBe(1000);
     expect(MEDIUM_TIME_OCTAVES.map((o) => mediumOctavePeriod(o.rate))).toEqual([600, 1700, 900, 150]);
+  });
+
+  // MEDIUM_TIME_PERIOD is in PHASE units (curlSpeed·seconds), not seconds — the wall-clock wrap
+  // period is MEDIUM_TIME_PERIOD / curlSpeed (see the comment on MEDIUM_TIME_PERIOD). This ties
+  // that comment's stated ~2.3h figure to the ACTUAL shipped default, so a future change to
+  // curlSpeed fails here instead of leaving a stale number in a comment nobody revisits.
+  it('wraps every ~2.3h of real time at the shipped default curlSpeed', () => {
+    const wallClockSeconds = MEDIUM_TIME_PERIOD / MEDIUM_DEFAULTS.curlSpeed;
+    expect(wallClockSeconds / 3600).toBeCloseTo(2.3148, 3);
   });
 
   it('mediumOctavePeriod refuses a rate that would not wrap seamlessly', () => {
