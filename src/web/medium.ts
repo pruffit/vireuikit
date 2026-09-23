@@ -6,6 +6,7 @@
 // Vapor and condensate form ONE conserved sum — water; tracks aren't part of it, and their decay
 // and stamping haven't been folded into that accounting.
 import {
+  depthFarOffsetPx,
   MEDIUM_COMPOSITE_SHADER,
   MEDIUM_CONDENSATE_CORRECT_SHADER,
   MEDIUM_CONDENSATE_FORWARD_SHADER,
@@ -535,7 +536,10 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     setUniform(gl, compositeLoc('u_condensateTint'), p.condensateTint);
     setUniform(gl, compositeLoc('u_condensateGain'), p.condensateGain);
     setUniform(gl, compositeLoc('u_farScale'), p.depthFarScale);
-    setUniform(gl, compositeLoc('u_farOffset'), p.depthFarOffset);
+    // Resolved against the GRID's own size (baseSrc is already grid-px), not content size — a
+    // fixed fraction of a wrapping axis, not a fixed pixel count (see depthFarOffsetPx's own
+    // comment for why a fixed grid-px value doesn't survive every grid size).
+    setUniform(gl, compositeLoc('u_farOffset'), depthFarOffsetPx(p.depthFarOffsetFrac, gridW, gridH));
     setUniform(gl, compositeLoc('u_farBlurRadius'), p.depthFarBlurRadius);
     setUniform(gl, compositeLoc('u_farWeight'), p.depthFarWeight);
     setUniform(gl, compositeLoc('u_gravityBoost'), p.gravityBottomBoost);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  depthFarOffsetPx,
   LINEAR_TO_LMS,
   LMS_TO_LINEAR,
   LMS_TO_OKLAB,
@@ -8,6 +9,7 @@ import {
   oklabToSrgb,
   srgbToOklab,
   VG_OKLAB_TO_SRGB,
+  wrappedDistanceFromZero,
 } from '../medium';
 
 const COLORS: readonly (readonly [number, number, number])[] = [
@@ -113,11 +115,32 @@ describe('medium depth: parallax, aerial perspective, gravity', () => {
     expect(MEDIUM_DEFAULTS.depthFarScale).toBeGreaterThan(1);
   });
 
-  it('the far offset is bigger than one curl-noise wavelength, or the two planes would echo', () => {
+  // The offset is a FRACTION of the grid, not a fixed grid-px value, so its EFFECTIVE (wrapped)
+  // distance from zero has to stay comfortably above a curl-noise wavelength at every grid size
+  // this package is expected to run at — not just the one gate/example that happened to get
+  // tested. A fixed grid-px offset can look fine at one size and echo at another (see
+  // depthFarOffsetPx's own comment: this shipped once as [41, 67] grid-px, fine at 96px, but 67
+  // wraps to 5px at the 72px height this package's own README uses as its example).
+  it('the far offset stays well above one curl-noise wavelength across supported grid sizes', () => {
     const wavelength = 1 / MEDIUM_DEFAULTS.curlFreq;
-    for (const v of MEDIUM_DEFAULTS.depthFarOffset) {
-      expect(Math.abs(v)).toBeGreaterThan(wavelength);
+    const margin = 1.2; // comfortable headroom, not a hair's breadth over the line
+    for (const size of [64, 72, 96, 128, 192, 256]) {
+      const [offsetX, offsetY] = depthFarOffsetPx(MEDIUM_DEFAULTS.depthFarOffsetFrac, size, size);
+      expect(wrappedDistanceFromZero(offsetX, size)).toBeGreaterThan(wavelength * margin);
+      expect(wrappedDistanceFromZero(offsetY, size)).toBeGreaterThan(wavelength * margin);
     }
+  });
+
+  // Regression documentation, not a test of current behavior: proves the FAILURE MODE a fixed
+  // grid-px offset produced (this shipped once, before depthFarOffsetFrac replaced it) — 67 grid-px
+  // at the README's own 72px grid height wraps to just 5px, well under one wavelength, which is
+  // exactly the "the far plane nearly re-reads the near one" bug the fraction-based offset exists
+  // to prevent.
+  it('a fixed grid-px offset (the bug depthFarOffsetFrac replaces) would have wrapped into an echo', () => {
+    const wavelength = 1 / MEDIUM_DEFAULTS.curlFreq;
+    const buggyOffsetPx = 67;
+    const gridHeight = 72;
+    expect(wrappedDistanceFromZero(buggyOffsetPx, gridHeight)).toBeLessThan(wavelength);
   });
 
   it('the far plane blurs and is weighted down, never sharper or louder than the near plane', () => {

@@ -27,7 +27,8 @@ import { VG_OKLAB_TO_SRGB } from './oklab';
 // paint).
 //
 // DEPTH: a far plane is not a second simulation — it is the SAME vapor/condensate buffers, read a
-// second time at a different scale and offset (see MEDIUM_DEFAULTS.depthFarScale/depthFarOffset).
+// second time at a different scale and offset (see MEDIUM_DEFAULTS.depthFarScale/depthFarOffsetFrac
+// — u_farOffset itself arrives already resolved to grid-px, see depthFarOffsetPx in params.ts).
 // Reading the identical evolving field through two different "lenses" gives parallax and finer
 // far-plane structure from one number (`depthFarScale`) with no extra grid to step, and a cheap
 // 4-tap blur gives the far plane aerial perspective's blur AND lower contrast from one mechanism

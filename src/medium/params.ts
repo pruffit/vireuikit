@@ -71,17 +71,22 @@ export type VireUIKitMediumParams = {
    *  evolving field reads as both finer-grained structure (features occupy fewer screen-px) and,
    *  because the field's own motion maps to screen motion as v/k, slower apparent motion — parallax
    *  and scale-of-structure from one number, with no second simulation. Measured against
-   *  `check-medium.mjs`'s parallax gate: 1.6 puts the far/near screen-speed ratio at 0.77 (the
-   *  naive 1/1.6 = 0.625 undershoots it — a finite blob's own centroid shifts under the resample
-   *  too, see the gate's own comment), comfortably inside a band that reads as depth without the
-   *  far plane looking frozen. */
+   *  `check-medium.mjs`'s parallax gate (a cross-correlation best-shift, not a centroid — see the
+   *  gate's own comment on why): 1.6 puts the far/near screen-speed ratio at 0.630, matching the
+   *  naive prediction 1/1.6 = 0.625 almost exactly, comfortably inside a band that reads as depth
+   *  without the far plane looking frozen. */
   depthFarScale: number;
-  /** Fixed offset (grid-px) into the shared field for the far plane. Without it, the far plane
-   *  would be the near plane's exact image at a different zoom, perfectly co-located — a magnifying
-   *  glass, not a second plane. The field's texture wraps (`gl.REPEAT`), so an offset simply reads
-   *  a different part of the same periodic field. Chosen larger than a curl-noise wavelength
-   *  (`1/curlFreq ≈ 22` grid-px at the shipped `curlFreq`) so the two planes' structure doesn't echo. */
-  depthFarOffset: readonly [number, number];
+  /** Offset into the shared field for the far plane, as a FRACTION of the grid's own width/height
+   *  (per axis) rather than a fixed grid-px value — the field wraps (`gl.REPEAT`), so a fixed
+   *  grid-px offset's EFFECTIVE (wrapped) distance from zero depends on whatever grid size it
+   *  happens to run at, and can land close to zero by accident at a size nobody tested against.
+   *  (This shipped once as `[41, 67]` grid-px: harmless at the 96px grid the depth gates tested
+   *  against, but 67 wraps to just 5px at the 72px grid height this package's own README uses as
+   *  its example — the far plane nearly re-read the near one, exactly the echo depth exists to
+   *  avoid.) A fraction keeps the wrapped distance proportional to the grid at any size — see
+   *  `depthFarOffsetPx` below and `check-medium.mjs`'s decorrelation gate, which measures this
+   *  directly at the README's own 128x72. */
+  depthFarOffsetFrac: readonly [number, number];
   /** Grid-px tap radius for the far plane's 4-tap box blur. A spatial average cannot raise local
    *  variance, so the same blur that softens the far plane's edges also, by construction, lowers
    *  its measured contrast — one mechanism for both aerial-perspective cues (no separate contrast
@@ -97,16 +102,24 @@ export type VireUIKitMediumParams = {
   depthFarWeight: number;
   /** grid-px/s — a small downward drift added to VAPOR's own velocity, on top of the shared
    *  curl-noise field (condensate already settles faster via `condensateSettleSpeed`). An order of
-   *  magnitude below it so the gas reads as "barely noticeable" drift rather than visibly falling. */
+   *  magnitude below it so the gas reads as "barely noticeable" drift rather than visibly falling.
+   *  ADDS NO DENSITY: on this periodic (`gl.REPEAT`) grid a uniform drift only ever translates the
+   *  field and wraps it back in at the top — it cannot accumulate mass anywhere, the way a real
+   *  floor would. It is a motion cue (which way is down), not a source of "denser at the bottom" —
+   *  that reading comes entirely from `gravityBottomBoost` below. See
+   *  `check-medium.mjs`'s vapor-drift gate, which checks DIRECTION over a short window rather than
+   *  a density ratio, for exactly this reason. */
   gravityVaporDrift: number;
   /** Density boost at the very bottom of the frame, added on top of 1 — a COMPOSITING-only effect:
-   *  it scales how the already-conserved vapor/condensate density is displayed, never the
+   *  it scales how the already-conserved vapor/condensate density is DISPLAYED, never the
    *  simulated buffers themselves, so it cannot threaten the water-conservation invariant by
-   *  construction (the cheaper of the two options the design allows for this). Large in absolute
-   *  terms because `baseWeight` (0.9) dominates the Oklab mix wherever gas density is thin — a
-   *  small boost gets diluted into an invisible change in the final color; measured this large to
-   *  clear the medium's own residual seed-position bias and register as a real, visible band (see
-   *  the gravity-visible gate). */
+   *  construction, and — unlike `gravityVaporDrift` above — this is the mechanism that actually
+   *  produces "denser at the bottom": it is a steady-state property of the compositing math, true
+   *  from the very first frame, independent of any warmup or mixing time (see
+   *  `check-medium.mjs`'s boost gate, which measures it with zero simulated steps for exactly that
+   *  reason). Large in absolute terms because `baseWeight` (0.9) dominates the Oklab mix wherever
+   *  gas density is thin — a small boost gets diluted into an invisible change in the final color;
+   *  measured this large to register as a real, visible band against that dilution. */
   gravityBottomBoost: number;
   /** Fraction of frame height (0 top, 1 bottom) where the bottom boost starts ramping in via
    *  `smoothstep`. The brief asks for a denser LAYER at the floor of the chamber, not a boost that
@@ -134,13 +147,39 @@ export const MEDIUM_DEFAULTS: VireUIKitMediumParams = {
   baseColor: BASE_COLOR,
   baseWeight: 0.9,
   depthFarScale: 1.6,
-  depthFarOffset: [41, 67],
+  depthFarOffsetFrac: [0.47, 0.53],
   depthFarBlurRadius: 5,
   depthFarWeight: 0.5,
   gravityVaporDrift: 0.6,
   gravityBottomBoost: 2,
   gravityBottomBoostStart: 0.75,
 };
+
+/**
+ * Resolves the far plane's fractional offset (`depthFarOffsetFrac`) into grid-px for a GIVEN grid
+ * size — pure and exported so the wrap-safety it exists for is directly testable (see
+ * `medium-depth-offset.test.ts`) without spinning up a WebGL2 context. Per-axis: `gridWidth` and
+ * `gridHeight` are independent, and a non-square grid (the README's own 128x72 example) shouldn't
+ * distort one axis relative to the other.
+ */
+export function depthFarOffsetPx(
+  offsetFrac: readonly [number, number],
+  gridWidth: number,
+  gridHeight: number,
+): readonly [number, number] {
+  return [offsetFrac[0] * gridWidth, offsetFrac[1] * gridHeight];
+}
+
+/**
+ * How far a value lands from the nearest wrap boundary (0 or `period`) on a periodic axis of the
+ * given `period` — the quantity that actually matters for decorrelation, not the raw offset value
+ * itself (a raw offset near the period is effectively a tiny one once the field wraps). Exported
+ * for the same reason as `depthFarOffsetPx`: a plain number, testable without a GPU.
+ */
+export function wrappedDistanceFromZero(value: number, period: number): number {
+  const wrapped = ((value % period) + period) % period;
+  return Math.min(wrapped, period - wrapped);
+}
 
 /** The material probe can't see texture finer than this: there is no gain in a denser simulation
  *  grid than the probe's own floor. */
