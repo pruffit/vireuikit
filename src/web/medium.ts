@@ -12,6 +12,7 @@ import {
   MEDIUM_CONDENSATE_REACT_SHADER,
   MEDIUM_DEFAULTS,
   MEDIUM_EMIT_SHADER,
+  MEDIUM_RESAMPLE_SHADER,
   MEDIUM_SEED_SHADER,
   MEDIUM_TIME_PERIOD,
   MEDIUM_TRACK_ADVECT_SHADER,
@@ -34,7 +35,9 @@ import {
 } from 'vireglass/web';
 
 export type MediumRuntime = {
-  /** Recreates the grid and reseeds it if the size changed (or this is the first call). */
+  /** Recreates the grid on the first call (seeding it); on a later call with a different size,
+   *  RESAMPLES the old vapor/condensate/track state into the new size instead of reseeding — see
+   *  `resizeGrid` below for why. A no-op when the size hasn't changed. */
   ensureGrid(gridWidth: number, gridHeight: number): void;
   /** One transport step for all three buffers (vapor and condensate via MacCormack:
    *  forward/correct/react, see `advect-shader.ts`; tracks via a single backtrace plus decay),
@@ -94,6 +97,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   const compositeProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_COMPOSITE_SHADER));
   const seedProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_SEED_SHADER));
   const emitProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_EMIT_SHADER));
+  const resampleProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_RESAMPLE_SHADER));
 
   const vaporForwardLoc = locationCache(gl, vaporForwardProgram);
   const vaporCorrectLoc = locationCache(gl, vaporCorrectProgram);
@@ -105,6 +109,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   const compositeLoc = locationCache(gl, compositeProgram);
   const seedLoc = locationCache(gl, seedProgram);
   const emitLoc = locationCache(gl, emitProgram);
+  const resampleLoc = locationCache(gl, resampleProgram);
 
   let gridW = 0;
   let gridH = 0;
@@ -197,31 +202,93 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     clearTarget(track[1], w, h);
   }
 
-  function ensureGrid(gridWidth: number, gridHeight: number): void {
-    const w = Math.max(2, Math.round(gridWidth));
-    const h = Math.max(2, Math.round(gridHeight));
-    if (vapor && condensate && track && w === gridW && h === gridH) return;
+  /** Bilinear-resamples one buffer into a differently-sized target — see MEDIUM_RESAMPLE_SHADER. */
+  function resample(src: DyeTarget, srcW: number, srcH: number, dst: DyeTarget, dstW: number, dstH: number): void {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+    gl.viewport(0, 0, dstW, dstH);
+    gl.disable(gl.BLEND);
+    gl.useProgram(resampleProgram);
+    bindTextureAt(gl, 0, src.texture, resampleProgram, 'u_src');
+    setUniform(gl, resampleLoc('u_srcSize'), [srcW, srcH]);
+    setUniform(gl, resampleLoc('u_resolution'), [dstW, dstH]);
+    drawFullscreenTriangle(gl);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  // A resize used to destroy every target and reseed from scratch — a phone rotation or a window
+  // resize wiped the vapor back to its three initial spots and blinked condensate/tracks out, the
+  // flicker the design forbids. Instead: bilinear-resample the OLD front buffers (the only ones
+  // that carry real state — see the comment on the MacCormack scratch buffers above) into NEW,
+  // differently-sized targets, then delete the old ones. Seeding stays a first-call-only thing.
+  function resizeGrid(w: number, h: number): void {
+    if (!vapor || !condensate || !track) return; // narrows for TS; callers already checked
+    const oldVapor = vapor;
+    const oldCondensate = condensate;
+    const oldTrack = track;
+    const oldW = gridW;
+    const oldH = gridH;
+
+    const newVaporFront = makeTarget(w, h);
+    const newCondensateFront = makeTarget(w, h);
+    const newTrackFront = makeTarget(w, h);
+    resample(oldVapor[front], oldW, oldH, newVaporFront, w, h);
+    resample(oldCondensate[front], oldW, oldH, newCondensateFront, w, h);
+    resample(oldTrack[front], oldW, oldH, newTrackFront, w, h);
+
     destroyTargets();
     gridW = w;
     gridH = h;
-    vapor = [makeTarget(w, h), makeTarget(w, h)];
-    condensate = [makeTarget(w, h), makeTarget(w, h)];
-    track = [makeTarget(w, h), makeTarget(w, h)];
+    vapor = [newVaporFront, makeTarget(w, h)];
+    condensate = [newCondensateFront, makeTarget(w, h)];
+    track = [newTrackFront, makeTarget(w, h)];
     vaporForward = makeTarget(w, h);
     vaporCorrected = makeTarget(w, h);
     condensateForward = makeTarget(w, h);
     condensateCorrected = makeTarget(w, h);
     front = 0;
-    seed(w, h);
-    // The target water total — right after seeding, before the first step: this is "the entire
-    // supply" (see the comment on `seed`), and every later renormalization checks against it.
-    // Right after seeding condensate is empty, so the target equals the vapor sum — but it's
-    // re-verified every time as vapor+condensate, not just vapor, in case the initial state ever
-    // changes.
-    waterTargetTotal = readTarget(vapor[front]) + readTarget(condensate[front]);
-    waterScale = 1;
-    timeSinceRenorm = 0;
-    framesSinceRenorm = 0;
+
+    // Total water scales with cell count, not just density: a bilinear resample roughly preserves
+    // the AVERAGE value per cell, so the SUM over every cell scales with how many cells there now
+    // are. Rescaling the EXISTING target (rather than re-measuring the just-resampled buffers)
+    // keeps the invariant exact even if the resample itself is slightly lossy at the edges — the
+    // periodic renormalization below already self-corrects any residual, and it needs a real
+    // target to correct TOWARD rather than one that already baked in this resize's own error.
+    // `timeSinceRenorm`/`framesSinceRenorm` are left running: the interval they measure doesn't
+    // care about grid size, only about how much correction accumulated frame to frame.
+    const areaRatio = (w * h) / (oldW * oldH);
+    waterTargetTotal *= areaRatio;
+  }
+
+  function ensureGrid(gridWidth: number, gridHeight: number): void {
+    const w = Math.max(2, Math.round(gridWidth));
+    const h = Math.max(2, Math.round(gridHeight));
+    if (vapor && condensate && track && w === gridW && h === gridH) return;
+
+    if (!vapor || !condensate || !track) {
+      gridW = w;
+      gridH = h;
+      vapor = [makeTarget(w, h), makeTarget(w, h)];
+      condensate = [makeTarget(w, h), makeTarget(w, h)];
+      track = [makeTarget(w, h), makeTarget(w, h)];
+      vaporForward = makeTarget(w, h);
+      vaporCorrected = makeTarget(w, h);
+      condensateForward = makeTarget(w, h);
+      condensateCorrected = makeTarget(w, h);
+      front = 0;
+      seed(w, h);
+      // The target water total — right after seeding, before the first step: this is "the entire
+      // supply" (see the comment on `seed`), and every later renormalization checks against it.
+      // Right after seeding condensate is empty, so the target equals the vapor sum — but it's
+      // re-verified every time as vapor+condensate, not just vapor, in case the initial state ever
+      // changes.
+      waterTargetTotal = readTarget(vapor[front]) + readTarget(condensate[front]);
+      waterScale = 1;
+      timeSinceRenorm = 0;
+      framesSinceRenorm = 0;
+      return;
+    }
+
+    resizeGrid(w, h);
   }
 
   /** Shared velocity-field uniforms — one set for both phases' forward/correct passes and for
@@ -553,6 +620,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.deleteProgram(compositeProgram);
     gl.deleteProgram(seedProgram);
     gl.deleteProgram(emitProgram);
+    gl.deleteProgram(resampleProgram);
   }
 
   return { ensureGrid, step, emit, composite, readTotals, readVaporGrid, readCondensateGrid, destroy };

@@ -3,6 +3,7 @@ export * from './oklab';
 export * from './species';
 export * from './noise';
 export * from './seed-shader';
+export * from './resample-shader';
 export * from './advect-shader';
 export * from './composite-shader';
 export * from './emit-shader';
