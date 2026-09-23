@@ -1,6 +1,6 @@
 {
   "name": "vireuikit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A UI kit built on the VireGlass material: atom states, capsule-to-target morphs, and a live vapor-and-condensate backdrop.",
   "license": "Apache-2.0",
   "author": "Danil Kotlaev",
