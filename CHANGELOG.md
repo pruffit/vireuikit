@@ -17,7 +17,14 @@ Initial standalone release, extracted from the VireMusic monorepo
   BPM, amplitude and a deterministic playback position, with a WCAG 2.3.1 floor between emissions.
 - Species colors derived from a single platform tone rather than picked as a fixed palette
   (`speciesFamily`, `neutralSpecies`), mixed in Oklab so saturated hues don't collapse into gray.
+- The medium runs for hours: the field phase accumulates on the CPU and wraps on a noise lattice
+  that is periodic in time, so there is no seam and no float32 drift. A resize resamples the
+  medium instead of reseeding it.
+- `check:medium` drives the real VireGlass renderer headless and holds the behaviour, not the
+  source: condensate settles toward the bottom of the screen, water is conserved, the frame does
+  not flicker, a resize keeps the medium, the phase wrap is seamless — each with a canary that
+  must fail.
 
-Requires `vireglass` ^2.3.1 (2.3.0 read shader comments as code) for its `VireGlassBackdropPass` contract and the public WebGL2 helpers
-(`createProgram`, `createTexture`, `createFramebuffer`, `bindTextureAt`, `drawFullscreenTriangle`,
-`locationCache`, `setUniform`) it builds on.
+Requires `vireglass` ^2.3.1 (2.3.0 read shader comments as code) for its `VireGlassBackdropPass`
+contract and the public WebGL2 helpers (`createProgram`, `createTexture`, `createFramebuffer`,
+`bindTextureAt`, `drawFullscreenTriangle`, `locationCache`, `setUniform`) it builds on.
