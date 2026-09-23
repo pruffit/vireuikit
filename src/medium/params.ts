@@ -65,6 +65,53 @@ export type VireUIKitMediumParams = {
   baseColor: VireUIKitMediumChannel;
   /** Background weight in the Oklab mix: keeps the platform tone visible even where the smoke is dense. */
   baseWeight: number;
+  /** Field-sample scale for the far depth plane, k ≥ 1 (see `MEDIUM_COMPOSITE_SHADER`): the far
+   *  plane reads the SAME vapor/condensate field as the near plane, at `src * k + offset` instead
+   *  of `src`. A larger k folds more of the field into the same screen area, so the identical
+   *  evolving field reads as both finer-grained structure (features occupy fewer screen-px) and,
+   *  because the field's own motion maps to screen motion as v/k, slower apparent motion — parallax
+   *  and scale-of-structure from one number, with no second simulation. Measured against
+   *  `check-medium.mjs`'s parallax gate: 1.6 puts the far/near screen-speed ratio at 0.77 (the
+   *  naive 1/1.6 = 0.625 undershoots it — a finite blob's own centroid shifts under the resample
+   *  too, see the gate's own comment), comfortably inside a band that reads as depth without the
+   *  far plane looking frozen. */
+  depthFarScale: number;
+  /** Fixed offset (grid-px) into the shared field for the far plane. Without it, the far plane
+   *  would be the near plane's exact image at a different zoom, perfectly co-located — a magnifying
+   *  glass, not a second plane. The field's texture wraps (`gl.REPEAT`), so an offset simply reads
+   *  a different part of the same periodic field. Chosen larger than a curl-noise wavelength
+   *  (`1/curlFreq ≈ 22` grid-px at the shipped `curlFreq`) so the two planes' structure doesn't echo. */
+  depthFarOffset: readonly [number, number];
+  /** Grid-px tap radius for the far plane's 4-tap box blur. A spatial average cannot raise local
+   *  variance, so the same blur that softens the far plane's edges also, by construction, lowers
+   *  its measured contrast — one mechanism for both aerial-perspective cues (no separate contrast
+   *  knob exists). 0 disables it (the near plane stays sharp). Measured: reading the far plane's
+   *  own scale/offset with no blur already drops contrast ~6% (a fixed offset can land on a
+   *  locally denser or sparser patch of a field that isn't spatially uniform); this radius takes
+   *  the total to 24% — see the aerial-perspective gate, whose two thresholds isolate blur's own
+   *  share from that baseline. */
+  depthFarBlurRadius: number;
+  /** The far plane's share of the mix, relative to the near plane's implicit 1 — aerial
+   *  perspective's other half: even at equal density the far plane must not compete with the near
+   *  one for attention. */
+  depthFarWeight: number;
+  /** grid-px/s — a small downward drift added to VAPOR's own velocity, on top of the shared
+   *  curl-noise field (condensate already settles faster via `condensateSettleSpeed`). An order of
+   *  magnitude below it so the gas reads as "barely noticeable" drift rather than visibly falling. */
+  gravityVaporDrift: number;
+  /** Density boost at the very bottom of the frame, added on top of 1 — a COMPOSITING-only effect:
+   *  it scales how the already-conserved vapor/condensate density is displayed, never the
+   *  simulated buffers themselves, so it cannot threaten the water-conservation invariant by
+   *  construction (the cheaper of the two options the design allows for this). Large in absolute
+   *  terms because `baseWeight` (0.9) dominates the Oklab mix wherever gas density is thin — a
+   *  small boost gets diluted into an invisible change in the final color; measured this large to
+   *  clear the medium's own residual seed-position bias and register as a real, visible band (see
+   *  the gravity-visible gate). */
+  gravityBottomBoost: number;
+  /** Fraction of frame height (0 top, 1 bottom) where the bottom boost starts ramping in via
+   *  `smoothstep`. The brief asks for a denser LAYER at the floor of the chamber, not a boost that
+   *  reaches halfway up the frame — kept in the bottom quarter. */
+  gravityBottomBoostStart: number;
 };
 
 const BASE_COLOR: VireUIKitMediumChannel = [0.07, 0.08, 0.1];
@@ -86,6 +133,13 @@ export const MEDIUM_DEFAULTS: VireUIKitMediumParams = {
   channelColors: neutralSpecies(BASE_COLOR),
   baseColor: BASE_COLOR,
   baseWeight: 0.9,
+  depthFarScale: 1.6,
+  depthFarOffset: [41, 67],
+  depthFarBlurRadius: 5,
+  depthFarWeight: 0.5,
+  gravityVaporDrift: 0.6,
+  gravityBottomBoost: 2,
+  gravityBottomBoostStart: 0.75,
 };
 
 /** The material probe can't see texture finer than this: there is no gain in a denser simulation
@@ -188,3 +242,17 @@ export const MEDIUM_NATURAL_JITTER = 35;
  *  supersaturation for a track to appear at all, so background emission is only ever visible here. */
 export const MEDIUM_SENSITIVE_TOP = 0.55;
 export const MEDIUM_SENSITIVE_BOTTOM = 0.95;
+
+/** Per-emission depth range applied to a track's width (`headWidthFrac`/`tailWidthFrac`), far…near.
+ *  The same knob reads as both "thin" and "soft": a Gaussian stamp's edge steepness scales with its
+ *  own width (`emit-shader.ts`'s only extent parameter), so shrinking it for a far track thins and
+ *  softens it in the same stroke — there is no second knob to hang an independent softness number
+ *  on. Floored at 0.55: below that a far `alpha` track's head narrows past what MacCormack's own
+ *  numerical smoothing already blurs it to, and the depth cue disappears into that noise floor. */
+export const MEDIUM_TRACK_DEPTH_WIDTH_RANGE: readonly [number, number] = [0.55, 1];
+
+/** Per-emission depth range applied to a track's intensity, far…near — "dim". Floored at 0.4, not
+ *  lower: a far track still has to clear `MEDIUM_DEFAULTS.condensationFloor`'s excess threshold
+ *  often enough to read as a track, or depth would look like tracks randomly failing to spawn
+ *  rather than fading into the distance. */
+export const MEDIUM_TRACK_DEPTH_INTENSITY_RANGE: readonly [number, number] = [0.4, 1];

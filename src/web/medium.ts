@@ -308,6 +308,9 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     setUniform(gl, loc('u_curlFreq'), p.curlFreq);
     setUniform(gl, loc('u_advectSpeed'), p.advectSpeed);
     setUniform(gl, loc('u_turbulence'), p.turbulence);
+    // Only the vapor forward/correct programs declare u_vaporDrift; elsewhere loc() returns null
+    // and setUniform silently skips it, same as the curl uniforms already do for the react passes.
+    setUniform(gl, loc('u_vaporDrift'), p.gravityVaporDrift);
   }
 
   // The field's phase — curl-noise's time axis, accumulated here in float64 rather than derived
@@ -531,6 +534,12 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     setUniform(gl, compositeLoc('u_baseWeight'), p.baseWeight);
     setUniform(gl, compositeLoc('u_condensateTint'), p.condensateTint);
     setUniform(gl, compositeLoc('u_condensateGain'), p.condensateGain);
+    setUniform(gl, compositeLoc('u_farScale'), p.depthFarScale);
+    setUniform(gl, compositeLoc('u_farOffset'), p.depthFarOffset);
+    setUniform(gl, compositeLoc('u_farBlurRadius'), p.depthFarBlurRadius);
+    setUniform(gl, compositeLoc('u_farWeight'), p.depthFarWeight);
+    setUniform(gl, compositeLoc('u_gravityBoost'), p.gravityBottomBoost);
+    setUniform(gl, compositeLoc('u_gravityBoostStart'), p.gravityBottomBoostStart);
     drawFullscreenTriangle(gl);
   }
 

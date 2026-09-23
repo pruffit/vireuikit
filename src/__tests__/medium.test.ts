@@ -107,3 +107,35 @@ describe('medium parameters', () => {
     }
   });
 });
+
+describe('medium depth: parallax, aerial perspective, gravity', () => {
+  it('the far plane samples MORE of the field per screen-px, never less — that is the whole mechanism', () => {
+    expect(MEDIUM_DEFAULTS.depthFarScale).toBeGreaterThan(1);
+  });
+
+  it('the far offset is bigger than one curl-noise wavelength, or the two planes would echo', () => {
+    const wavelength = 1 / MEDIUM_DEFAULTS.curlFreq;
+    for (const v of MEDIUM_DEFAULTS.depthFarOffset) {
+      expect(Math.abs(v)).toBeGreaterThan(wavelength);
+    }
+  });
+
+  it('the far plane blurs and is weighted down, never sharper or louder than the near plane', () => {
+    expect(MEDIUM_DEFAULTS.depthFarBlurRadius).toBeGreaterThan(0);
+    expect(MEDIUM_DEFAULTS.depthFarWeight).toBeGreaterThan(0);
+    expect(MEDIUM_DEFAULTS.depthFarWeight).toBeLessThan(1);
+  });
+
+  // Gravity has to touch the gas too, but "barely noticeable" is the requirement — an order of
+  // magnitude below condensate's own settle speed keeps it that way.
+  it('vapor drift is positive but far below condensate settling', () => {
+    expect(MEDIUM_DEFAULTS.gravityVaporDrift).toBeGreaterThan(0);
+    expect(MEDIUM_DEFAULTS.gravityVaporDrift).toBeLessThan(MEDIUM_DEFAULTS.condensateSettleSpeed / 5);
+  });
+
+  it('the bottom boost only ADDS density, and only near the floor of the frame', () => {
+    expect(MEDIUM_DEFAULTS.gravityBottomBoost).toBeGreaterThan(0);
+    expect(MEDIUM_DEFAULTS.gravityBottomBoostStart).toBeGreaterThan(0.5);
+    expect(MEDIUM_DEFAULTS.gravityBottomBoostStart).toBeLessThan(1);
+  });
+});
