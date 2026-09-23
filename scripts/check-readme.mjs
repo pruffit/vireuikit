@@ -60,7 +60,9 @@ function importsIn(text) {
     at = open + 8;
     if (close < 0 || from < 0 || end < 0 || from - close > 12) continue;
     const module = text.slice(from + 6, end);
-    if (module !== 'vireuikit' && !module.startsWith('vireuikit/')) continue;
+    const ours = module === 'vireuikit' || module.startsWith('vireuikit/');
+    const core = module === 'vireglass' || module.startsWith('vireglass/');
+    if (!ours && !core) continue;
     const names = text
       .slice(open + 8, close)
       .split(',')
@@ -74,6 +76,13 @@ function importsIn(text) {
 const loaded = new Map();
 function exportsOf(module) {
   if (loaded.has(module)) return loaded.get(module);
+  // The core is a peer: its names are checked against the version installed next to us, so a
+  // rename upstream turns this red instead of leaving the README promising an import.
+  if (module === 'vireglass' || module.startsWith('vireglass/')) {
+    const names = new Set(Object.keys(require(module)));
+    loaded.set(module, names);
+    return names;
+  }
   // Resolved through the package's own exports map, not by guessing at a filename — so a subpath
   // that is documented but not published fails here rather than in someone's install.
   const key = module === 'vireuikit' ? '.' : `.${module.slice('vireuikit'.length)}`;
