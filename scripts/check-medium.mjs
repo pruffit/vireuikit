@@ -109,6 +109,74 @@ const FLICKER_SAMPLE_FRAMES = 60;
  *  monorepo before this package was extracted from it. */
 const MAX_FLICKER_RATIO = 0.5;
 
+// --- Resize: a grid resize RESAMPLES state, it doesn't reseed --------------------------------
+
+/** Two grid sizes, same aspect ratio, ~2.27x the cell count — big enough that a reseed's drop in
+ *  water (condensate goes to exactly 0, see below) is unmistakable against normal frame-to-frame
+ *  noise. */
+const RESIZE_GRID_W1 = 80;
+const RESIZE_GRID_H1 = 45;
+const RESIZE_GRID_W2 = 120;
+const RESIZE_GRID_H2 = 68;
+const RESIZE_DT = 1 / 30;
+/** Same rationale as WATER_WARMUP_S: past the condensate ramp, so "before" is a real developed
+ *  state (both phases present, structure built up by turbulence) rather than the seeded moment. */
+const RESIZE_WARMUP_S = 20;
+/** "two seconds (of simulated steps) after the resize" — the brief's own number for how long to
+ *  let the resized grid run before the second measurement. */
+const RESIZE_POST_S = 2;
+/**
+ * Relative change (|after - before| / before) allowed in water DENSITY (total / cell count, not
+ * the raw sum — the raw sum is SUPPOSED to grow with the new grid's cell count, see the
+ * area-ratio rescale in web/medium.ts) across a resize, for the CORRECT (resample) path. A
+ * resample isn't lossless — bilinear filtering and the area-ratio rescale of the renormalization
+ * target both carry some error. Measured on this rig: 1.26%. Kept at ~4x that so ordinary
+ * run-to-run turbulence variance doesn't make this flaky.
+ */
+const MAX_RESIZE_WATER_RELATIVE_CHANGE = 0.05;
+/**
+ * Same idea, specifically for condensate density — the more sensitive of the two, since a reseed
+ * zeroes condensate outright while vapor's fresh three spots are the same order of magnitude as
+ * the evolved state (diluting the signal in the water-density figure above). Measured: resample
+ * moves it by 4.10%.
+ */
+const MAX_RESIZE_CONDENSATE_RELATIVE_CHANGE = 0.1;
+/** Same idea for inter-species contrast (coefficient of variation of the three vapor channels'
+ *  grid-wide totals — see `contrastOf` in the ENTRY script). Measured: resample moves it by 0.48%. */
+const MAX_RESIZE_CONTRAST_RELATIVE_CHANGE = 0.05;
+/**
+ * The canary (a full destroy-and-reseed on resize, the behavior this fix replaces) must FAIL the
+ * condensate-density check above. Measured drop: 39.8% — condensate resets to exactly 0 at the
+ * reseed instant (`seed()` in web/medium.ts) and only partially recovers in the 2s window that
+ * follows. Set well below that (half) so the canary passing this floor is not a coin flip, while
+ * staying well above the CORRECT path's own 4.10% so the two can never be confused.
+ */
+const MIN_CANARY_CONDENSATE_RELATIVE_CHANGE = 0.2;
+
+// --- Long run: a phase wrap is seamless, not a jump ------------------------------------------
+
+const SEAM_GRID_W = 48;
+const SEAM_GRID_H = 48;
+/** A representative frame time; only its product with curlSpeed (the phase step size) matters. */
+const SEAM_DT = 1 / 30;
+/** Samples on each side of the wrap — enough to establish a "typical step" baseline without it
+ *  costing more than a handful of extra draw calls. */
+const SEAM_STEPS_EACH_SIDE = 30;
+/**
+ * How much bigger the delta AT the seam is allowed to be than the typical (median) delta measured
+ * away from it, for the CORRECT (periodic) probe. Measured on this rig: the seam delta is smaller
+ * than a typical step (ratio 0.03) — the periodic hash's wrap doesn't just avoid a jump, it lands
+ * on an exact lattice node for every octave at once (see MEDIUM_TIME_OCTAVES), and this scheme's
+ * smoothstep blending has a zero derivative exactly at a lattice node, so the seam is flatter than
+ * an ordinary step, not just as smooth. Set well above 1 (100x the measurement) anyway so this
+ * isn't sensitive to exactly how flat that node happens to be, only to whether there's a jump.
+ */
+const MAX_SEAM_JUMP_RATIO = 3;
+/** The canary (a naive wrap: the phase value wraps but the hash doesn't) must clear this — the
+ *  seam delta there is the difference between two essentially uncorrelated hash lattice nodes.
+ *  Measured: ratio 727x — kept at a small fraction (1/70th) of that so the floor is comfortable. */
+const MIN_CANARY_SEAM_JUMP_RATIO = 10;
+
 const ENTRY = `
 import { createVireGlassRenderer } from 'vireglass/web';
 import { toGLSL } from 'vireglass';
@@ -128,6 +196,8 @@ import {
   MEDIUM_CONDENSATE_FORWARD_SHADER,
   MEDIUM_DEFAULTS,
   MEDIUM_SEED_SHADER,
+  MEDIUM_TIME_PERIOD,
+  VG_CURL_NOISE,
 } from '${MEDIUM}';
 
 function makeCanvas(w, h) {
@@ -385,6 +455,158 @@ globalThis.vgFlickerSeries = async () => {
   medium.destroy();
   return lumas;
 };
+
+// --- Resize: RESAMPLE across a grid-size change, not a reseed --------------------------------
+//
+// Species channel totals (r/g/b of the vapor grid), not a per-pixel decode: a coefficient of
+// variation of the three GRID-WIDE totals — 0 means the three species carry equal mass, larger
+// means one or two dominate. This is the "inter-species contrast" the resize check compares
+// before/after: a resample carries whatever balance existed across to the new resolution (up to
+// resampling error), while a reseed replaces it with the fresh three-spot balance.
+function contrastOf(vaporGrid) {
+  let sumR = 0;
+  let sumG = 0;
+  let sumB = 0;
+  for (let i = 0; i < vaporGrid.data.length; i += 3) {
+    sumR += vaporGrid.data[i];
+    sumG += vaporGrid.data[i + 1];
+    sumB += vaporGrid.data[i + 2];
+  }
+  const mean = (sumR + sumG + sumB) / 3;
+  if (mean < 1e-9) return 0;
+  const variance = ((sumR - mean) ** 2 + (sumG - mean) ** 2 + (sumB - mean) ** 2) / 3;
+  return Math.sqrt(variance) / mean;
+}
+
+globalThis.vgResizeSeries = async ({ canary }) => {
+  const w1 = ${RESIZE_GRID_W1};
+  const h1 = ${RESIZE_GRID_H1};
+  const w2 = ${RESIZE_GRID_W2};
+  const h2 = ${RESIZE_GRID_H2};
+  const canvas = makeCanvas(Math.max(w1, w2), Math.max(h1, h2));
+  const renderer = createVireGlassRenderer(canvas);
+  renderer.resize(canvas.width, canvas.height);
+  let medium = createMediumBackdrop();
+
+  const dt = ${RESIZE_DT};
+  const warmupSteps = Math.round(${RESIZE_WARMUP_S} / dt);
+  const postSteps = Math.round(${RESIZE_POST_S} / dt);
+
+  function frameAt(w, h) {
+    renderer.render({
+      density: 1,
+      debug: 'normal',
+      pieces: [],
+      backdrop: medium.pass({ gridWidth: w, gridHeight: h, dt }),
+    });
+  }
+
+  // Density (total / cell count), not the raw total: the raw sum is SUPPOSED to change across a
+  // resize (see the area-ratio rescale of the renormalization target in web/medium.ts — more cells
+  // sampling the same average density sum to more) — that's the correct behavior, not drift. The
+  // density is what "resample, don't reseed" actually promises to hold steady.
+  function measure() {
+    const totals = medium.readTotals();
+    const vaporGrid = medium.readVaporGrid();
+    const cells = vaporGrid.cols * vaporGrid.rows;
+    const water = totals.vapor + totals.condensate;
+    return {
+      water,
+      waterDensity: water / cells,
+      condensate: totals.condensate,
+      condensateDensity: totals.condensate / cells,
+      contrast: contrastOf(vaporGrid),
+    };
+  }
+
+  for (let i = 0; i < warmupSteps; i += 1) frameAt(w1, h1);
+  const before = measure();
+
+  if (canary) {
+    // The behavior this fix replaces: a resize used to destroy every target and reseed from
+    // scratch. Recreating the runtime and calling pass() at the new size reproduces exactly that
+    // — createMediumBackdrop's own runtime always seeds on its first ensureGrid call, the same
+    // "first call" path a real resize used to take on EVERY call.
+    medium.destroy();
+    medium = createMediumBackdrop();
+  }
+  for (let i = 0; i < postSteps; i += 1) frameAt(w2, h2);
+  const after = measure();
+
+  medium.destroy();
+  return { before, after };
+};
+
+// --- Long run: the field's phase wraps without a jump ----------------------------------------
+
+const NOISE_PROBE_PERIODIC = \`
+uniform float u_phase;
+uniform float u_curlFreq;
+\${VG_CURL_NOISE}
+half4 main(float2 xy) {
+  float v = vgPotential(xy * u_curlFreq, u_phase) * 0.5 + 0.5;
+  return half4(half3(v), half(1.0));
+}
+\`;
+
+// The mistake the design forbids, made concrete: wrap the PHASE VALUE but leave the noise itself
+// non-periodic (this is vgPotential's body from before the fix, calling the non-periodic
+// vgValueNoise3 that VG_CURL_NOISE still exports). z for octave 0 lands near 600 just before the
+// wrap and near 0 just after — two uncorrelated lattice nodes, not neighbors.
+const NOISE_PROBE_NAIVE = \`
+uniform float u_phase;
+uniform float u_curlFreq;
+\${VG_CURL_NOISE}
+float vgPotentialNaive(float2 p, float phase) {
+  float v = vgValueNoise3(float3(p, phase * 0.6)) * 0.5;
+  v += vgValueNoise3(float3(p * 2.03, phase * 1.7 + 11.0)) * 0.25;
+  v += vgValueNoise3(float3(p * 4.11, phase * 0.9 + 37.0)) * 0.125;
+  float macro = vgValueNoise3(float3(p * 0.35, phase * 0.15 + 5.0));
+  return v * (0.7 + 0.3 * macro);
+}
+half4 main(float2 xy) {
+  float v = vgPotentialNaive(xy * u_curlFreq, u_phase) * 0.5 + 0.5;
+  return half4(half3(v), half(1.0));
+}
+\`;
+
+globalThis.vgSeamSeries = async ({ periodic }) => {
+  const w = ${SEAM_GRID_W};
+  const h = ${SEAM_GRID_H};
+  const canvas = makeCanvas(w, h);
+  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+  const program = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(periodic ? NOISE_PROBE_PERIODIC : NOISE_PROBE_NAIVE));
+  const loc = locationCache(gl, program);
+
+  const T = MEDIUM_TIME_PERIOD;
+  const stepPhase = ${SEAM_DT} * MEDIUM_DEFAULTS.curlSpeed;
+  const N = ${SEAM_STEPS_EACH_SIDE};
+  // Straddles the wrap exactly the way the real CPU accumulator would: N steps approaching T from
+  // below, then N steps that would overshoot it, wrapped into [0, T) — a real fixed-step
+  // accumulator crossing the boundary produces precisely this sequence of values.
+  const phases = [];
+  for (let i = -N; i < N; i += 1) {
+    const raw = T + i * stepPhase;
+    phases.push(((raw % T) + T) % T);
+  }
+
+  const lumas = [];
+  for (const phase of phases) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.BLEND);
+    gl.useProgram(program);
+    setUniform(gl, loc('u_resolution'), [w, h]);
+    setUniform(gl, loc('u_phase'), phase);
+    setUniform(gl, loc('u_curlFreq'), MEDIUM_DEFAULTS.curlFreq);
+    drawFullscreenTriangle(gl);
+    const buf = readCanvas(gl, w, h);
+    let sum = 0;
+    for (let p = 0; p < w * h; p += 1) sum += buf[p * 4];
+    lumas.push(sum / (w * h));
+  }
+  return { phases, lumas };
+};
 `;
 
 function centroidTrend(samples) {
@@ -483,6 +705,88 @@ async function main() {
     failed.push(`flicker: ${flips}/${comparable} (${(flickerRatio * 100).toFixed(0)}%) frame-to-frame sign flips exceeds ${(MAX_FLICKER_RATIO * 100).toFixed(0)}%`);
   }
 
+  // --- 4. A grid resize resamples state; it doesn't reset to a fresh seed. ----------------------
+  console.log('--- resize: water and inter-species contrast survive a grid resize ---');
+  const resize = await page.evaluate((a) => globalThis.vgResizeSeries(a), { canary: false });
+  const resizeWaterChange = Math.abs(resize.after.waterDensity - resize.before.waterDensity) / resize.before.waterDensity;
+  const resizeCondensateChange =
+    Math.abs(resize.after.condensateDensity - resize.before.condensateDensity) / resize.before.condensateDensity;
+  const resizeContrastChange = Math.abs(resize.after.contrast - resize.before.contrast) / resize.before.contrast;
+  console.log(
+    `  before: water ${resize.before.water.toFixed(1)} density ${resize.before.waterDensity.toFixed(4)} (condensate density ${resize.before.condensateDensity.toFixed(4)}), contrast ${resize.before.contrast.toFixed(4)}`,
+  );
+  console.log(
+    `  after (${RESIZE_POST_S}s later, at the new grid size): water ${resize.after.water.toFixed(1)} density ${resize.after.waterDensity.toFixed(4)} (condensate density ${resize.after.condensateDensity.toFixed(4)}), contrast ${resize.after.contrast.toFixed(4)}`,
+  );
+  console.log(
+    `  relative change: water density ${(resizeWaterChange * 100).toFixed(2)}%, condensate density ${(resizeCondensateChange * 100).toFixed(2)}%, contrast ${(resizeContrastChange * 100).toFixed(2)}%`,
+  );
+  if (!(resizeWaterChange <= MAX_RESIZE_WATER_RELATIVE_CHANGE)) {
+    failed.push(
+      `resize: water density changed ${(resizeWaterChange * 100).toFixed(2)}% across the resize, exceeding ${(MAX_RESIZE_WATER_RELATIVE_CHANGE * 100).toFixed(0)}% — a resize is dropping or fabricating water instead of resampling it`,
+    );
+  }
+  if (!(resizeCondensateChange <= MAX_RESIZE_CONDENSATE_RELATIVE_CHANGE)) {
+    failed.push(
+      `resize: condensate density changed ${(resizeCondensateChange * 100).toFixed(2)}% across the resize, exceeding ${(MAX_RESIZE_CONDENSATE_RELATIVE_CHANGE * 100).toFixed(0)}% — condensate is not surviving the resize`,
+    );
+  }
+  if (!(resizeContrastChange <= MAX_RESIZE_CONTRAST_RELATIVE_CHANGE)) {
+    failed.push(
+      `resize: inter-species contrast changed ${(resizeContrastChange * 100).toFixed(2)}% across the resize, exceeding ${(MAX_RESIZE_CONTRAST_RELATIVE_CHANGE * 100).toFixed(0)}% — the species balance did not survive the resize`,
+    );
+  }
+
+  console.log('--- canary: the old destroy-and-reseed-on-resize behavior must fail the condensate check above ---');
+  const canaryResize = await page.evaluate((a) => globalThis.vgResizeSeries(a), { canary: true });
+  const canaryCondensateChange =
+    Math.abs(canaryResize.after.condensateDensity - canaryResize.before.condensateDensity) /
+    canaryResize.before.condensateDensity;
+  console.log(
+    `  before: water density ${canaryResize.before.waterDensity.toFixed(4)} (condensate density ${canaryResize.before.condensateDensity.toFixed(4)}), contrast ${canaryResize.before.contrast.toFixed(4)}`,
+  );
+  console.log(
+    `  after (reseeded at the new size, then ${RESIZE_POST_S}s later): water density ${canaryResize.after.waterDensity.toFixed(4)} (condensate density ${canaryResize.after.condensateDensity.toFixed(4)}), contrast ${canaryResize.after.contrast.toFixed(4)}`,
+  );
+  console.log(`  relative change: condensate density ${(canaryCondensateChange * 100).toFixed(2)}%`);
+  if (!(canaryCondensateChange >= MIN_CANARY_CONDENSATE_RELATIVE_CHANGE)) {
+    failed.push(
+      `resize canary did not fail (condensate density changed only ${(canaryCondensateChange * 100).toFixed(2)}%, same order as a correct resample) — this gate is not actually sensitive to a reseed-on-resize regression`,
+    );
+  }
+
+  // --- 5. The field's phase wraps without a jump. -------------------------------------------------
+  console.log('--- long run: frame-to-frame change at the phase-wrap seam is no bigger than a typical step ---');
+  function seamRatio({ lumas }) {
+    const deltas = [];
+    for (let i = 1; i < lumas.length; i += 1) deltas.push(Math.abs(lumas[i] - lumas[i - 1]));
+    const seamIdx = SEAM_STEPS_EACH_SIDE - 1; // deltas[seamIdx] is the pair straddling the wrap
+    const seamDelta = deltas[seamIdx];
+    const others = deltas.filter((_, i) => i !== seamIdx).sort((a, b) => a - b);
+    const typical = others[Math.floor(others.length / 2)];
+    return { seamDelta, typical, ratio: typical > 1e-9 ? seamDelta / typical : Infinity };
+  }
+  const seamPeriodic = seamRatio(await page.evaluate(() => globalThis.vgSeamSeries({ periodic: true })));
+  console.log(
+    `  periodic (production) probe: seam delta ${seamPeriodic.seamDelta.toFixed(3)}, typical step ${seamPeriodic.typical.toFixed(3)}, ratio ${seamPeriodic.ratio.toFixed(2)}`,
+  );
+  if (!(seamPeriodic.ratio <= MAX_SEAM_JUMP_RATIO)) {
+    failed.push(
+      `long run: the seam delta is ${seamPeriodic.ratio.toFixed(2)}x the typical step, exceeding ${MAX_SEAM_JUMP_RATIO}x — the phase wrap is visible as a jump`,
+    );
+  }
+
+  console.log('--- canary: a naive wrap (phase wraps, the hash does not) must fail the same check ---');
+  const seamNaive = seamRatio(await page.evaluate(() => globalThis.vgSeamSeries({ periodic: false })));
+  console.log(
+    `  naive probe: seam delta ${seamNaive.seamDelta.toFixed(3)}, typical step ${seamNaive.typical.toFixed(3)}, ratio ${seamNaive.ratio.toFixed(2)}`,
+  );
+  if (!(seamNaive.ratio >= MIN_CANARY_SEAM_JUMP_RATIO)) {
+    failed.push(
+      `long run canary did not fail (seam ratio only ${seamNaive.ratio.toFixed(2)}x, same order as the periodic probe) — this gate is not actually sensitive to a non-periodic wrap`,
+    );
+  }
+
   await browser.close();
 
   if (failed.length) {
@@ -491,7 +795,7 @@ async function main() {
     return;
   }
   console.log(
-    'check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker',
+    'check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), and the phase wrap is seamless (canary caught)',
   );
 }
 
