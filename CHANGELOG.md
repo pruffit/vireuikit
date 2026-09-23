@@ -3,15 +3,20 @@
 ## Unreleased
 
 - The backdrop reads as a chamber seen from the side: the composite samples the same
-  vapor/condensate grid a second time at a larger scale and a fixed offset (`depthFarScale`/
-  `depthFarOffset`), which is both parallax and finer far-plane structure from one number, plus a
-  cheap 4-tap blur (`depthFarBlurRadius`) that supplies aerial perspective's softness and lower
-  contrast at once. Gravity gets a small downward vapor drift (`gravityVaporDrift`) and a
-  compositing-only bottom density boost (`gravityBottomBoost`/`gravityBottomBoostStart`) that
-  cannot affect the conserved water total. Each track's emission also carries a `depth` that
-  scales its width and intensity, so far tracks read thinner, dimmer and softer.
-- `check:medium` also proves that the far depth plane reads slower and lower-contrast than the
-  near one, and that the composite reads denser at the bottom after warm-up — each with a canary.
+  vapor/condensate grid a second time at a larger scale and a fractional offset (`depthFarScale`/
+  `depthFarOffsetFrac` — a fraction of the grid, not a fixed grid-px value, so it stays clear of
+  the periodic wrap at any grid size), which is both parallax and finer far-plane structure from
+  one number, plus a cheap 4-tap blur (`depthFarBlurRadius`) that supplies aerial perspective's
+  softness and lower contrast at once. Gravity is two separate properties: a small downward vapor
+  drift (`gravityVaporDrift`, a motion cue — it adds no density on this periodic grid) and a
+  compositing-only bottom density boost (`gravityBottomBoost`/`gravityBottomBoostStart`, the
+  steady-state property that actually reads as denser) that cannot affect the conserved water
+  total. Each track's emission also carries a `depth` that scales its width and intensity, so far
+  tracks read thinner, dimmer and softer.
+- `check:medium` also proves the far depth plane reads slower and lower-contrast than the near one,
+  that it decorrelates from the near one rather than echoing it at the README's own 128x72, that
+  the bottom boost is a steady-state property (no warmup needed) and that vapor drift is a valid,
+  consistently-directed motion cue over a short window — each with a canary.
 
 ## 0.1.0
 

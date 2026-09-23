@@ -78,13 +78,16 @@ pass the `emissions` it returns on as `MediumFrame.emissions`.
 
 The backdrop reads as a chamber seen from the side, not a flat field, without a second simulation:
 the composite samples the same vapor/condensate grid twice, once at identity and once at a larger
-scale and a fixed offset (`MEDIUM_DEFAULTS.depthFarScale`/`depthFarOffset`) — the far read is both
-slower on screen and finer-grained, since the field's own motion maps to screen motion as
-`v / scale`. A cheap 4-tap blur on that far read (`depthFarBlurRadius`) supplies aerial perspective's
-softness and lower contrast in the same pass, weighted down (`depthFarWeight`) so it never competes
-with the near plane. Gravity gets a small downward drift on vapor itself (`gravityVaporDrift`, far
-below condensate's own settle speed) and a compositing-only density boost near the bottom of the
-frame (`gravityBottomBoost`/`gravityBottomBoostStart`) that cannot affect the conserved water total.
+scale and a fixed offset (`MEDIUM_DEFAULTS.depthFarScale`/`depthFarOffsetFrac`, the offset as a
+fraction of the grid so it stays clear of the wrap at any grid size) — the far read is both slower
+on screen and finer-grained, since the field's own motion maps to screen motion as `v / scale`. A
+cheap 4-tap blur on that far read (`depthFarBlurRadius`) supplies aerial perspective's softness and
+lower contrast in the same pass, weighted down (`depthFarWeight`) so it never competes with the near
+plane. Gravity is two separate properties: a small downward drift on vapor's own velocity
+(`gravityVaporDrift`, a motion cue only — a uniform drift on this periodic grid cannot itself
+accumulate density) and a compositing-only density boost near the bottom of the frame
+(`gravityBottomBoost`/`gravityBottomBoostStart`, a steady-state property that cannot affect the
+conserved water total) that actually produces the "denser at the bottom" reading.
 Each emitted track also carries a `depth` (0 far … 1 near) that scales its own width and intensity,
 so a track reads thinner, dimmer and softer the farther back it lives.
 
