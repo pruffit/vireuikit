@@ -34,8 +34,12 @@ const run = (cmd, args, cwd) => {
 let failed = false;
 const fail = (m) => { console.error(`check-package: ${m}`); failed = true; };
 
+// --ignore-scripts: packing an already-installed dependency must not re-run its `prepare`
+// build step. A peer's node_modules copy only ships what its own `files` field lists (for
+// `vireglass`: dist, docs, pruned src, android — not its tsup config), so re-running `prepare`
+// there fails outright; even where it would succeed, packing has no business rebuilding anything.
 const packOne = (cwd) => {
-  const lines = run(npm, ['pack', '--silent'], cwd).trim().split(/\r?\n/);
+  const lines = run(npm, ['pack', '--silent', '--ignore-scripts'], cwd).trim().split(/\r?\n/);
   const name = lines.pop();
   if (!name) throw new Error(`npm pack produced no output in ${cwd}`);
   return join(cwd, name);
