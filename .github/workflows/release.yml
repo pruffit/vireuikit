@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - name: Install Chromium for shader gates
+        run: npx playwright install --with-deps chromium chromium-headless-shell
+
+      - name: Gates
+        run: |
+          npm run check:english
+          npm run typecheck
+          npm test
+          npm run check:glsl
+
+      - run: npm run build
+
+      - name: The package loads from an install
+        run: npm run check:package
+
+      - name: Every name the docs tell you to import exists
+        run: npm run check:readme
+
+      # Skipped rather than failed when no token is configured: the gates above are the point of
+      # this workflow, and a tag should not go red because publishing is not set up. A tag is a
+      # request to release — if it cannot, that is a failure, not a condition to tolerate.
+      - name: Publish to npm
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN is not set, so $GITHUB_REF_NAME cannot be published."
+            echo "A tag is a request to release. Add the NPM_TOKEN secret under Settings," >> "$GITHUB_STEP_SUMMARY"
+            echo "Secrets and variables, Actions - then re-run this workflow." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # The notes are the CHANGELOG section for this version. If it has none, that is a release
+      # nobody wrote down, which is worth failing over.
+      - name: Release notes from the changelog
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          node -e "
+            const fs = require('fs');
+            const md = fs.readFileSync('CHANGELOG.md', 'utf8');
+            const head = '## ' + process.argv[1];
+            const start = md.indexOf(head);
+            if (start < 0) { console.error('no CHANGELOG section for ' + head); process.exit(1); }
+            const next = md.indexOf(String.fromCharCode(10) + '## ', start + head.length);
+            const body = md.slice(start + head.length, next < 0 ? undefined : next).trim();
+            if (!body) { console.error('the CHANGELOG section for ' + head + ' is empty'); process.exit(1); }
+            fs.writeFileSync('RELEASE_NOTES.md', body);
+          " "$VERSION"
+
+      - name: Publish the release on GitHub
+        run: gh release create "$GITHUB_REF_NAME" --title "VireUIKit $(node -p "require('./package.json').version")" --notes-file RELEASE_NOTES.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Say what went out
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          echo "Published $NAME@$VERSION" >> "$GITHUB_STEP_SUMMARY"
