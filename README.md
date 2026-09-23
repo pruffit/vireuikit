@@ -70,8 +70,8 @@ function frame(time: number, dt: number) {
 ```
 
 Turbulence and light-track emission in response to playback come from `createMediumDynamics()`,
-which is platform-neutral: feed it a playback state, BPM and a deterministic position, and it
-schedules `MediumFrame.emissions` for you.
+which is platform-neutral: feed `step()` a playback state, BPM and a deterministic position, and
+pass the `emissions` it returns on as `MediumFrame.emissions`.
 
 ## License
 

@@ -2,8 +2,8 @@
 
 ## 0.1.0
 
-Initial standalone release, extracted from the vireSpace platform monorepo into its own
-open-source package.
+Initial standalone release, extracted from the VireMusic monorepo
+([pruffit/vire](https://github.com/pruffit/vire)) into its own open-source package.
 
 - Atom state model (`ATOM_AT_REST`, `atomMaterial`, `atomLift`, `atomAtRest`) shared across every
   client: press and selection change the glass's own medium, not a highlight over it.
