@@ -41,11 +41,17 @@ jobs:
       - name: Every name the docs tell you to import exists
         run: npm run check:readme
 
-      # Skipped rather than failed when no token is configured: the gates above are the point of
-      # this workflow, and a tag should not go red because publishing is not set up. A tag is a
-      # request to release — if it cannot, that is a failure, not a condition to tolerate.
+      # A tag is a request to release: without a token that is a failure, not a skip. A version
+      # already on the registry is not published twice — the first release went out by hand, and
+      # a rerun after a later step failed must not turn the tag red.
       - name: Publish to npm
         run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION is already on npm; not publishing it again." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ -z "$NODE_AUTH_TOKEN" ]; then
             echo "::error::NPM_TOKEN is not set, so $GITHUB_REF_NAME cannot be published."
             echo "A tag is a request to release. Add the NPM_TOKEN secret under Settings," >> "$GITHUB_STEP_SUMMARY"
