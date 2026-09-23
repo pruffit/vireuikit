@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- The backdrop reads as a chamber seen from the side: the composite samples the same
+  vapor/condensate grid a second time at a larger scale and a fixed offset (`depthFarScale`/
+  `depthFarOffset`), which is both parallax and finer far-plane structure from one number, plus a
+  cheap 4-tap blur (`depthFarBlurRadius`) that supplies aerial perspective's softness and lower
+  contrast at once. Gravity gets a small downward vapor drift (`gravityVaporDrift`) and a
+  compositing-only bottom density boost (`gravityBottomBoost`/`gravityBottomBoostStart`) that
+  cannot affect the conserved water total. Each track's emission also carries a `depth` that
+  scales its width and intensity, so far tracks read thinner, dimmer and softer.
+- `check:medium` also proves that the far depth plane reads slower and lower-contrast than the
+  near one, and that the composite reads denser at the bottom after warm-up — each with a canary.
+
 ## 0.1.0
 
 Initial standalone release, extracted from the VireMusic monorepo
@@ -20,19 +33,10 @@ Initial standalone release, extracted from the VireMusic monorepo
 - The medium runs for hours: the field phase accumulates on the CPU and wraps on a noise lattice
   that is periodic in time, so there is no seam and no float32 drift. A resize resamples the
   medium instead of reseeding it.
-- The backdrop reads as a chamber seen from the side: the composite samples the same
-  vapor/condensate grid a second time at a larger scale and a fixed offset (`depthFarScale`/
-  `depthFarOffset`), which is both parallax and finer far-plane structure from one number, plus a
-  cheap 4-tap blur (`depthFarBlurRadius`) that supplies aerial perspective's softness and lower
-  contrast at once. Gravity gets a small downward vapor drift (`gravityVaporDrift`) and a
-  compositing-only bottom density boost (`gravityBottomBoost`/`gravityBottomBoostStart`) that
-  cannot affect the conserved water total. Each track's emission also carries a `depth` that scales
-  its width and intensity, so far tracks read thinner, dimmer and softer.
 - `check:medium` drives the real VireGlass renderer headless and holds the behaviour, not the
   source: condensate settles toward the bottom of the screen, water is conserved, the frame does
-  not flicker, a resize keeps the medium, the phase wrap is seamless, the far depth plane reads
-  slower and lower-contrast than the near one, and the composite reads denser at the bottom after
-  warmup — each with a canary that must fail.
+  not flicker, a resize keeps the medium, the phase wrap is seamless — each with a canary that
+  must fail.
 
 Requires `vireglass` ^2.3.1 (2.3.0 read shader comments as code) for its `VireGlassBackdropPass`
 contract and the public WebGL2 helpers (`createProgram`, `createTexture`, `createFramebuffer`,
