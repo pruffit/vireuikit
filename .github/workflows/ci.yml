@@ -33,6 +33,9 @@ jobs:
       - name: The medium's shaders compile on the web target
         run: npm run check:glsl
 
+      - name: The medium behaves (gravity, water conservation, no flicker)
+        run: npm run check:medium
+
       - name: Build
         run: npm run build
 

@@ -55,6 +55,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:glsl": "tsx scripts/check-glsl.mjs",
+    "check:medium": "node scripts/check-medium.mjs",
     "check:english": "node scripts/check-english.mjs",
     "check:package": "node scripts/check-package.mjs",
     "check:readme": "node scripts/check-readme.mjs"
@@ -64,6 +65,7 @@
   },
   "devDependencies": {
     "@types/node": "^22",
+    "esbuild": "^0.27.0",
     "playwright": "^1.62.1",
     "tsup": "^8.5.0",
     "tsx": "^4.23.13",

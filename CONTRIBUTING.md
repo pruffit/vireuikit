@@ -28,11 +28,17 @@ All must be green before a PR is considered:
 npm run typecheck
 npm test
 npm run check:glsl
+npm run check:medium
 npm run check:english
 ```
 
 `check:glsl` compiles every medium shader (AGSL, transpiled through VireGlass's `toGLSL`) in a
 real WebGL2 context — a syntax error in a shader string is otherwise invisible until it runs.
+`check:medium` goes further: it runs the real VireGlass renderer in headless Chromium and checks
+the medium's actual BEHAVIOR — gravity pulls condensate toward the bottom of the frame (with a
+canary proving the check would catch a regression), the vapor+condensate sum is conserved, and the
+frame doesn't flicker. A real bug (a Y-flip that pulled condensate toward the top of the screen)
+passed both `check:glsl` and the unit tests; only a headless render caught it.
 
 ## Depending on VireGlass
 
