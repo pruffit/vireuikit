@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - The backdrop reads as a chamber seen from the side: the composite samples the same
   vapor/condensate grid a second time at a larger scale and a fractional offset (`depthFarScale`/
