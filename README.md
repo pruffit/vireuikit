@@ -76,6 +76,18 @@ Turbulence and light-track emission in response to playback come from `createMed
 which is platform-neutral: feed `step()` a playback state, BPM and a deterministic position, and
 pass the `emissions` it returns on as `MediumFrame.emissions`.
 
+The backdrop reads as a chamber seen from the side, not a flat field, without a second simulation:
+the composite samples the same vapor/condensate grid twice, once at identity and once at a larger
+scale and a fixed offset (`MEDIUM_DEFAULTS.depthFarScale`/`depthFarOffset`) — the far read is both
+slower on screen and finer-grained, since the field's own motion maps to screen motion as
+`v / scale`. A cheap 4-tap blur on that far read (`depthFarBlurRadius`) supplies aerial perspective's
+softness and lower contrast in the same pass, weighted down (`depthFarWeight`) so it never competes
+with the near plane. Gravity gets a small downward drift on vapor itself (`gravityVaporDrift`, far
+below condensate's own settle speed) and a compositing-only density boost near the bottom of the
+frame (`gravityBottomBoost`/`gravityBottomBoostStart`) that cannot affect the conserved water total.
+Each emitted track also carries a `depth` (0 far … 1 near) that scales its own width and intensity,
+so a track reads thinner, dimmer and softer the farther back it lives.
+
 ## License
 
 Apache-2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
