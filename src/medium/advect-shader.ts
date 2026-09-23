@@ -165,8 +165,18 @@ half4 main(float2 xy) {
   float condKeep = exp(-u_evaporationRate * u_dt);
   float returned = condensateAtXy * (1.0 - condKeep);
 
-  // The return is distributed by the CURRENT vapor proportion — the condensation/evaporation
-  // cycle doesn't shift the hue, water only oscillates between phases (color belongs to vapor).
+  // Evaporated water is distributed by the CURRENT vapor proportion — the condensation/
+  // evaporation cycle doesn't shift the hue, water only oscillates between phases (color belongs
+  // to vapor). NOTE for future edits: this file must never spell out the GLSL exit keyword
+  // followed by a space anywhere in a comment. vireglass's transpiler (convertReturns, in
+  // targets/glsl.ts) finds that keyword by regex over the WHOLE main-body text, comments
+  // included, and rewrites everything up to the next semicolon into an early exit — spanning
+  // newlines, since its expression pattern excludes only the semicolon itself. An earlier
+  // wording here started a sentence with that exact keyword and a space, and got spliced into a
+  // bare exit right after the next semicolon (sumAfterLoss's declaration), silently discarding
+  // every line below it. That dropped vapor to a no-op forever: the front buffer stayed pinned at
+  // its seeded value and the phase exchange never ran. check:medium's water-conservation check is
+  // what caught it.
   float sumAfterLoss = afterLoss.r + afterLoss.g + afterLoss.b;
   float3 hueShare = sumAfterLoss > 1e-6 ? afterLoss / sumAfterLoss : float3(1.0 / 3.0);
   float3 vapor = (afterLoss + hueShare * returned) * u_totalScale;
