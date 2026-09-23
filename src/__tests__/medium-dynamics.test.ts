@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyTrackDepth,
   createMediumDynamics,
   MEDIUM_DRIFT_TURBULENCE,
   MEDIUM_MIN_EMISSION_INTERVAL,
@@ -148,5 +149,45 @@ describe('track presets', () => {
     const { alpha, beta, natural } = MEDIUM_TRACK_PRESETS;
     expect(natural.intensity).toBeLessThan(alpha.intensity);
     expect(natural.intensity).toBeLessThan(beta.intensity);
+  });
+});
+
+describe('track depth: which plane a track lives on', () => {
+  it('every emission carries a depth in 0..1, deterministic from its seed', () => {
+    const a = run(600);
+    const b = run(600);
+    for (const e of a.emissions) {
+      expect(e.depth).toBeGreaterThanOrEqual(0);
+      expect(e.depth).toBeLessThanOrEqual(1);
+    }
+    expect(a.emissions.map((e) => e.depth)).toEqual(b.emissions.map((e) => e.depth));
+  });
+
+  it('depth is decorrelated from channel and angle: not every far track shares a channel', () => {
+    // Regression guard for a shared-multiplier mistake: if depth's hash reused the channel or angle
+    // multiplier, every emission with the same depth bucket would also share a channel or angle.
+    const { emissions } = run(2400);
+    const farRed = emissions.filter((e) => e.depth < 0.5 && e.channel[0] === 1);
+    const farOther = emissions.filter((e) => e.depth < 0.5 && e.channel[0] !== 1);
+    expect(farOther.length).toBeGreaterThan(0);
+    expect(farRed.length).toBeGreaterThan(0);
+  });
+
+  it('applyTrackDepth: a far track (depth 0) is thinner and dimmer than a near one (depth 1), same preset', () => {
+    const preset = MEDIUM_TRACK_PRESETS.alpha;
+    const far = applyTrackDepth(preset, 0);
+    const near = applyTrackDepth(preset, 1);
+    expect(far.headWidthFrac).toBeLessThan(near.headWidthFrac);
+    expect(far.tailWidthFrac).toBeLessThan(near.tailWidthFrac);
+    expect(far.intensity).toBeLessThan(near.intensity);
+    // Everything else about the preset (length, ragged path, tail dimming, settle) is untouched —
+    // depth scales geometry and brightness only.
+    expect(far.lengthFrac).toBe(preset.lengthFrac);
+    expect(far.raggedFrac).toBe(preset.raggedFrac);
+  });
+
+  it('applyTrackDepth: depth 1 reproduces the preset exactly (both ranges top out at 1)', () => {
+    const preset = MEDIUM_TRACK_PRESETS.beta;
+    expect(applyTrackDepth(preset, 1)).toEqual(preset);
   });
 });

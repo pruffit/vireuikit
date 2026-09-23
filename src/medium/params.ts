@@ -65,6 +65,66 @@ export type VireUIKitMediumParams = {
   baseColor: VireUIKitMediumChannel;
   /** Background weight in the Oklab mix: keeps the platform tone visible even where the smoke is dense. */
   baseWeight: number;
+  /** Field-sample scale for the far depth plane, k ≥ 1 (see `MEDIUM_COMPOSITE_SHADER`): the far
+   *  plane reads the SAME vapor/condensate field as the near plane, at `src * k + offset` instead
+   *  of `src`. A larger k folds more of the field into the same screen area, so the identical
+   *  evolving field reads as both finer-grained structure (features occupy fewer screen-px) and,
+   *  because the field's own motion maps to screen motion as v/k, slower apparent motion — parallax
+   *  and scale-of-structure from one number, with no second simulation. Measured against
+   *  `check-medium.mjs`'s parallax gate (a cross-correlation best-shift, not a centroid — see the
+   *  gate's own comment on why): 1.6 puts the far/near screen-speed ratio at 0.630, matching the
+   *  naive prediction 1/1.6 = 0.625 almost exactly, comfortably inside a band that reads as depth
+   *  without the far plane looking frozen. */
+  depthFarScale: number;
+  /** Offset into the shared field for the far plane, as a FRACTION of the grid's own width/height
+   *  (per axis) rather than a fixed grid-px value — the field wraps (`gl.REPEAT`), so a fixed
+   *  grid-px offset's EFFECTIVE (wrapped) distance from zero depends on whatever grid size it
+   *  happens to run at, and can land close to zero by accident at a size nobody tested against.
+   *  (This shipped once as `[41, 67]` grid-px: harmless at the 96px grid the depth gates tested
+   *  against, but 67 wraps to just 5px at the 72px grid height this package's own README uses as
+   *  its example — the far plane nearly re-read the near one, exactly the echo depth exists to
+   *  avoid.) A fraction keeps the wrapped distance proportional to the grid at any size — see
+   *  `depthFarOffsetPx` below and `check-medium.mjs`'s decorrelation gate, which measures this
+   *  directly at the README's own 128x72. */
+  depthFarOffsetFrac: readonly [number, number];
+  /** Grid-px tap radius for the far plane's 4-tap box blur. A spatial average cannot raise local
+   *  variance, so the same blur that softens the far plane's edges also, by construction, lowers
+   *  its measured contrast — one mechanism for both aerial-perspective cues (no separate contrast
+   *  knob exists). 0 disables it (the near plane stays sharp). Measured: reading the far plane's
+   *  own scale/offset with no blur already drops contrast ~6% (a fixed offset can land on a
+   *  locally denser or sparser patch of a field that isn't spatially uniform); this radius takes
+   *  the total to 24% — see the aerial-perspective gate, whose two thresholds isolate blur's own
+   *  share from that baseline. */
+  depthFarBlurRadius: number;
+  /** The far plane's share of the mix, relative to the near plane's implicit 1 — aerial
+   *  perspective's other half: even at equal density the far plane must not compete with the near
+   *  one for attention. */
+  depthFarWeight: number;
+  /** grid-px/s — a small downward drift added to VAPOR's own velocity, on top of the shared
+   *  curl-noise field (condensate already settles faster via `condensateSettleSpeed`). An order of
+   *  magnitude below it so the gas reads as "barely noticeable" drift rather than visibly falling.
+   *  ADDS NO DENSITY: on this periodic (`gl.REPEAT`) grid a uniform drift only ever translates the
+   *  field and wraps it back in at the top — it cannot accumulate mass anywhere, the way a real
+   *  floor would. It is a motion cue (which way is down), not a source of "denser at the bottom" —
+   *  that reading comes entirely from `gravityBottomBoost` below. See
+   *  `check-medium.mjs`'s vapor-drift gate, which checks DIRECTION over a short window rather than
+   *  a density ratio, for exactly this reason. */
+  gravityVaporDrift: number;
+  /** Density boost at the very bottom of the frame, added on top of 1 — a COMPOSITING-only effect:
+   *  it scales how the already-conserved vapor/condensate density is DISPLAYED, never the
+   *  simulated buffers themselves, so it cannot threaten the water-conservation invariant by
+   *  construction, and — unlike `gravityVaporDrift` above — this is the mechanism that actually
+   *  produces "denser at the bottom": it is a steady-state property of the compositing math, true
+   *  from the very first frame, independent of any warmup or mixing time (see
+   *  `check-medium.mjs`'s boost gate, which measures it with zero simulated steps for exactly that
+   *  reason). Large in absolute terms because `baseWeight` (0.9) dominates the Oklab mix wherever
+   *  gas density is thin — a small boost gets diluted into an invisible change in the final color;
+   *  measured this large to register as a real, visible band against that dilution. */
+  gravityBottomBoost: number;
+  /** Fraction of frame height (0 top, 1 bottom) where the bottom boost starts ramping in via
+   *  `smoothstep`. The brief asks for a denser LAYER at the floor of the chamber, not a boost that
+   *  reaches halfway up the frame — kept in the bottom quarter. */
+  gravityBottomBoostStart: number;
 };
 
 const BASE_COLOR: VireUIKitMediumChannel = [0.07, 0.08, 0.1];
@@ -86,7 +146,40 @@ export const MEDIUM_DEFAULTS: VireUIKitMediumParams = {
   channelColors: neutralSpecies(BASE_COLOR),
   baseColor: BASE_COLOR,
   baseWeight: 0.9,
+  depthFarScale: 1.6,
+  depthFarOffsetFrac: [0.47, 0.53],
+  depthFarBlurRadius: 5,
+  depthFarWeight: 0.5,
+  gravityVaporDrift: 0.6,
+  gravityBottomBoost: 2,
+  gravityBottomBoostStart: 0.75,
 };
+
+/**
+ * Resolves the far plane's fractional offset (`depthFarOffsetFrac`) into grid-px for a GIVEN grid
+ * size — pure and exported so the wrap-safety it exists for is directly testable (see
+ * `medium-depth-offset.test.ts`) without spinning up a WebGL2 context. Per-axis: `gridWidth` and
+ * `gridHeight` are independent, and a non-square grid (the README's own 128x72 example) shouldn't
+ * distort one axis relative to the other.
+ */
+export function depthFarOffsetPx(
+  offsetFrac: readonly [number, number],
+  gridWidth: number,
+  gridHeight: number,
+): readonly [number, number] {
+  return [offsetFrac[0] * gridWidth, offsetFrac[1] * gridHeight];
+}
+
+/**
+ * How far a value lands from the nearest wrap boundary (0 or `period`) on a periodic axis of the
+ * given `period` — the quantity that actually matters for decorrelation, not the raw offset value
+ * itself (a raw offset near the period is effectively a tiny one once the field wraps). Exported
+ * for the same reason as `depthFarOffsetPx`: a plain number, testable without a GPU.
+ */
+export function wrappedDistanceFromZero(value: number, period: number): number {
+  const wrapped = ((value % period) + period) % period;
+  return Math.min(wrapped, period - wrapped);
+}
 
 /** The material probe can't see texture finer than this: there is no gain in a denser simulation
  *  grid than the probe's own floor. */
@@ -188,3 +281,17 @@ export const MEDIUM_NATURAL_JITTER = 35;
  *  supersaturation for a track to appear at all, so background emission is only ever visible here. */
 export const MEDIUM_SENSITIVE_TOP = 0.55;
 export const MEDIUM_SENSITIVE_BOTTOM = 0.95;
+
+/** Per-emission depth range applied to a track's width (`headWidthFrac`/`tailWidthFrac`), far…near.
+ *  The same knob reads as both "thin" and "soft": a Gaussian stamp's edge steepness scales with its
+ *  own width (`emit-shader.ts`'s only extent parameter), so shrinking it for a far track thins and
+ *  softens it in the same stroke — there is no second knob to hang an independent softness number
+ *  on. Floored at 0.55: below that a far `alpha` track's head narrows past what MacCormack's own
+ *  numerical smoothing already blurs it to, and the depth cue disappears into that noise floor. */
+export const MEDIUM_TRACK_DEPTH_WIDTH_RANGE: readonly [number, number] = [0.55, 1];
+
+/** Per-emission depth range applied to a track's intensity, far…near — "dim". Floored at 0.4, not
+ *  lower: a far track still has to clear `MEDIUM_DEFAULTS.condensationFloor`'s excess threshold
+ *  often enough to read as a track, or depth would look like tracks randomly failing to spawn
+ *  rather than fading into the distance. */
+export const MEDIUM_TRACK_DEPTH_INTENSITY_RANGE: readonly [number, number] = [0.4, 1];

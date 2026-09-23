@@ -52,14 +52,24 @@ ${MEDIUM_ADVECT_VELOCITY}
   vel.y += u_settleSpeed;
 `;
 
+// The gas itself leans down too, just far less than condensate: "from the side" only reads if
+// gravity touches the medium as a whole, not only its droplets. `u_vaporDrift` is an order of
+// magnitude below `u_settleSpeed` (see MEDIUM_DEFAULTS.gravityVaporDrift) — barely noticeable
+// frame to frame, cumulative over the run.
+const MEDIUM_ADVECT_VELOCITY_VAPOR = `
+${MEDIUM_ADVECT_VELOCITY}
+  vel.y += u_vaporDrift;
+`;
+
 // The forward MacCormack half-step — ONE backtrace sample, bit-for-bit what the whole scheme used
 // to do on its own. The result goes to a temporary buffer rather than out; the `correct` pass will
 // read it again to estimate, via a reverse step, how much this single sample smeared.
 export const MEDIUM_VAPOR_FORWARD_SHADER = `
 ${MEDIUM_ADVECT_UNIFORMS}
+uniform float u_vaporDrift;
 
 half4 main(float2 xy) {
-${MEDIUM_ADVECT_VELOCITY}
+${MEDIUM_ADVECT_VELOCITY_VAPOR}
   float2 src = xy - vel * u_dt;
   return u_dye.eval(float2(src.x, u_dyeSize.y - src.y));
 }
@@ -112,9 +122,10 @@ const MEDIUM_MACCORMACK_CORRECT = `
 export const MEDIUM_VAPOR_CORRECT_SHADER = `
 ${MEDIUM_ADVECT_UNIFORMS}
 uniform shader u_forward;
+uniform float u_vaporDrift;
 
 half4 main(float2 xy) {
-${MEDIUM_ADVECT_VELOCITY}
+${MEDIUM_ADVECT_VELOCITY_VAPOR}
 ${MEDIUM_MACCORMACK_CORRECT}
   return limited;
 }
