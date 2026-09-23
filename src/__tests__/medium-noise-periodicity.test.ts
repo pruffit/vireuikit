@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+// Direct module path, not the package barrel: vgPotentialJS/vgValueNoise3PeriodicJS/
+// mediumOctavePeriod/MEDIUM_TIME_OCTAVES are internal to this package (see medium/index.ts) —
+// tests reach them here instead of through the public API.
 import {
   MEDIUM_TIME_OCTAVES,
   MEDIUM_TIME_PERIOD,
@@ -6,7 +9,7 @@ import {
   mediumOctavePeriod,
   vgPotentialJS,
   vgValueNoise3PeriodicJS,
-} from '../medium';
+} from '../medium/noise';
 
 // Why this file exists: the field's phase (curl-noise's time axis, `u_phase` in advect-shader.ts)
 // is accumulated on the CPU and wrapped at MEDIUM_TIME_PERIOD instead of growing without bound —
