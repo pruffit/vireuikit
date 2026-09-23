@@ -76,6 +76,26 @@ function lerp(range: readonly [number, number], t: number): number {
   return range[0] + (range[1] - range[0]) * t;
 }
 
+/**
+ * Scales a track preset's width and intensity by depth (0 far … 1 near) — separated from
+ * `buildEmission` below and exported so depth's effect on a preset is directly testable with two
+ * plain numbers, independent of how a specific emission's depth got hashed from its seed. At
+ * depth=1 this returns the preset's own numbers unchanged (both ranges' upper bound is 1).
+ */
+export function applyTrackDepth(
+  preset: VireUIKitMediumTrackPreset,
+  depth: number,
+): VireUIKitMediumTrackPreset {
+  const widthScale = lerp(MEDIUM_TRACK_DEPTH_WIDTH_RANGE, depth);
+  const intensityScale = lerp(MEDIUM_TRACK_DEPTH_INTENSITY_RANGE, depth);
+  return {
+    ...preset,
+    headWidthFrac: preset.headWidthFrac * widthScale,
+    tailWidthFrac: preset.tailWidthFrac * widthScale,
+    intensity: preset.intensity * intensityScale,
+  };
+}
+
 function buildEmission(
   presetName: VireUIKitMediumTrackPresetName,
   source: readonly [number, number],
@@ -86,13 +106,10 @@ function buildEmission(
   // Decorrelated from the channel (seed*1.37) and angle (seed*7.31) hashes below, so a track's
   // depth doesn't covary with its color or direction.
   const depth = hash01(seed * 4.63);
-  const widthScale = lerp(MEDIUM_TRACK_DEPTH_WIDTH_RANGE, depth);
-  const depthIntensityScale = lerp(MEDIUM_TRACK_DEPTH_INTENSITY_RANGE, depth);
+  const depthApplied = applyTrackDepth(preset, depth);
   return {
-    ...preset,
-    headWidthFrac: preset.headWidthFrac * widthScale,
-    tailWidthFrac: preset.tailWidthFrac * widthScale,
-    intensity: preset.intensity * intensityScale * depthIntensityScale,
+    ...depthApplied,
+    intensity: depthApplied.intensity * intensityScale,
     source,
     angle: hash01(seed * 7.31) * Math.PI * 2,
     seed,

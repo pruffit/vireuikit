@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyTrackDepth,
   createMediumDynamics,
   MEDIUM_DRIFT_TURBULENCE,
   MEDIUM_MIN_EMISSION_INTERVAL,
   MEDIUM_PLAYING_TURBULENCE_RANGE,
-  MEDIUM_TRACK_DEPTH_INTENSITY_RANGE,
-  MEDIUM_TRACK_DEPTH_WIDTH_RANGE,
   MEDIUM_TRACK_PRESETS,
   type VireUIKitMediumDynamicsInput,
   type VireUIKitMediumEmission,
@@ -174,16 +173,21 @@ describe('track depth: which plane a track lives on', () => {
     expect(farRed.length).toBeGreaterThan(0);
   });
 
-  it('a far track (depth near 0) is thinner and dimmer than the same preset at depth near 1', () => {
+  it('applyTrackDepth: a far track (depth 0) is thinner and dimmer than a near one (depth 1), same preset', () => {
     const preset = MEDIUM_TRACK_PRESETS.alpha;
-    const far = MEDIUM_TRACK_DEPTH_WIDTH_RANGE[0];
-    const near = MEDIUM_TRACK_DEPTH_WIDTH_RANGE[1];
-    expect(far).toBeLessThan(near);
-    const farIntensity = MEDIUM_TRACK_DEPTH_INTENSITY_RANGE[0];
-    const nearIntensity = MEDIUM_TRACK_DEPTH_INTENSITY_RANGE[1];
-    expect(farIntensity).toBeLessThan(nearIntensity);
-    // The ranges apply multiplicatively to a preset's own geometry — confirm they stay within it
-    // rather than ever widening a track past its preset's own near-depth (scale 1) size.
-    expect(preset.headWidthFrac * near).toBeCloseTo(preset.headWidthFrac, 6);
+    const far = applyTrackDepth(preset, 0);
+    const near = applyTrackDepth(preset, 1);
+    expect(far.headWidthFrac).toBeLessThan(near.headWidthFrac);
+    expect(far.tailWidthFrac).toBeLessThan(near.tailWidthFrac);
+    expect(far.intensity).toBeLessThan(near.intensity);
+    // Everything else about the preset (length, ragged path, tail dimming, settle) is untouched —
+    // depth scales geometry and brightness only.
+    expect(far.lengthFrac).toBe(preset.lengthFrac);
+    expect(far.raggedFrac).toBe(preset.raggedFrac);
+  });
+
+  it('applyTrackDepth: depth 1 reproduces the preset exactly (both ranges top out at 1)', () => {
+    const preset = MEDIUM_TRACK_PRESETS.beta;
+    expect(applyTrackDepth(preset, 1)).toEqual(preset);
   });
 });
