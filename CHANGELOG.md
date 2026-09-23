@@ -18,6 +18,6 @@ Initial standalone release, extracted from the VireMusic monorepo
 - Species colors derived from a single platform tone rather than picked as a fixed palette
   (`speciesFamily`, `neutralSpecies`), mixed in Oklab so saturated hues don't collapse into gray.
 
-Requires `vireglass` ^2.3.0 for its `VireGlassBackdropPass` contract and the public WebGL2 helpers
+Requires `vireglass` ^2.3.1 (2.3.0 read shader comments as code) for its `VireGlassBackdropPass` contract and the public WebGL2 helpers
 (`createProgram`, `createTexture`, `createFramebuffer`, `bindTextureAt`, `drawFullscreenTriangle`,
 `locationCache`, `setUniform`) it builds on.
