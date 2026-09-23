@@ -1,0 +1,74 @@
+{
+  "name": "vireuikit",
+  "version": "0.1.0",
+  "description": "A UI kit built on the VireGlass material: atom states, capsule-to-target morphs, and a live vapor-and-condensate backdrop.",
+  "license": "Apache-2.0",
+  "author": "Danil Kotlaev",
+  "homepage": "https://github.com/pruffit/vireuikit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pruffit/vireuikit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pruffit/vireuikit/issues"
+  },
+  "keywords": [
+    "glassmorphism",
+    "liquid-glass",
+    "vireglass",
+    "webgl2",
+    "shader",
+    "ui-kit",
+    "design-system",
+    "material"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./web": {
+      "types": "./dist/web/index.d.ts",
+      "import": "./dist/web/index.js",
+      "require": "./dist/web/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:glsl": "tsx scripts/check-glsl.mjs",
+    "check:english": "node scripts/check-english.mjs",
+    "check:package": "node scripts/check-package.mjs",
+    "check:readme": "node scripts/check-readme.mjs"
+  },
+  "peerDependencies": {
+    "vireglass": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "playwright": "^1.62.1",
+    "tsup": "^8.5.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.8.3",
+    "vireglass": "^2.3.0",
+    "vitest": "^4.1.11"
+  }
+}

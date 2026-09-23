@@ -1,0 +1,11 @@
+VireUIKit
+Copyright 2026 Danil Kotlaev
+
+This product includes software developed as part of the vireSpace platform
+(https://github.com/pruffit/vire).
+
+Built on VireGlass (https://github.com/pruffit/vireglass). The Oklab color-mixing math
+implements the model published by Björn Ottosson (https://bottosson.github.io/posts/oklab/).
+The MacCormack advection scheme implements the method described in Selle, Fedkiw, Kim, Liu and
+Rossignac, "An Unconditionally Stable MacCormack Method" (2007). No third-party code or assets
+are included in or distributed with this software; these are citations, not redistribution.
