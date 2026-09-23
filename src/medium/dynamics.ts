@@ -8,6 +8,8 @@ import {
   MEDIUM_SENSITIVE_BOTTOM,
   MEDIUM_SENSITIVE_TOP,
   MEDIUM_PLAYING_TURBULENCE_RANGE,
+  MEDIUM_TRACK_DEPTH_INTENSITY_RANGE,
+  MEDIUM_TRACK_DEPTH_WIDTH_RANGE,
   MEDIUM_TRACK_PRESETS,
   MEDIUM_TURBULENCE_TAU,
   type VireUIKitMediumTrackPreset,
@@ -30,6 +32,11 @@ export type VireUIKitMediumEmission = VireUIKitMediumTrackPreset & {
   angle: number;
   seed: number;
   channel: readonly [number, number, number];
+  /** 0 (farthest) … 1 (nearest), random within the full range and deterministic from `seed` — which
+   *  plane the track reads as living on. Already folded into this emission's own `headWidthFrac`/
+   *  `tailWidthFrac`/`intensity` below (see `buildEmission`); carried here too so a caller inspecting
+   *  an emission can see why. */
+  depth: number;
 };
 
 export type VireUIKitMediumDynamicsInput = {
@@ -65,6 +72,10 @@ function channelFromSeed(seed: number): readonly [number, number, number] {
   return idx === 0 ? [1, 0, 0] : idx === 1 ? [0, 1, 0] : [0, 0, 1];
 }
 
+function lerp(range: readonly [number, number], t: number): number {
+  return range[0] + (range[1] - range[0]) * t;
+}
+
 function buildEmission(
   presetName: VireUIKitMediumTrackPresetName,
   source: readonly [number, number],
@@ -72,13 +83,21 @@ function buildEmission(
   intensityScale: number,
 ): VireUIKitMediumEmission {
   const preset = MEDIUM_TRACK_PRESETS[presetName];
+  // Decorrelated from the channel (seed*1.37) and angle (seed*7.31) hashes below, so a track's
+  // depth doesn't covary with its color or direction.
+  const depth = hash01(seed * 4.63);
+  const widthScale = lerp(MEDIUM_TRACK_DEPTH_WIDTH_RANGE, depth);
+  const depthIntensityScale = lerp(MEDIUM_TRACK_DEPTH_INTENSITY_RANGE, depth);
   return {
     ...preset,
-    intensity: preset.intensity * intensityScale,
+    headWidthFrac: preset.headWidthFrac * widthScale,
+    tailWidthFrac: preset.tailWidthFrac * widthScale,
+    intensity: preset.intensity * intensityScale * depthIntensityScale,
     source,
     angle: hash01(seed * 7.31) * Math.PI * 2,
     seed,
     channel: channelFromSeed(seed),
+    depth,
   };
 }
 

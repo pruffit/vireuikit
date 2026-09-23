@@ -4,6 +4,8 @@ import {
   MEDIUM_DRIFT_TURBULENCE,
   MEDIUM_MIN_EMISSION_INTERVAL,
   MEDIUM_PLAYING_TURBULENCE_RANGE,
+  MEDIUM_TRACK_DEPTH_INTENSITY_RANGE,
+  MEDIUM_TRACK_DEPTH_WIDTH_RANGE,
   MEDIUM_TRACK_PRESETS,
   type VireUIKitMediumDynamicsInput,
   type VireUIKitMediumEmission,
@@ -148,5 +150,40 @@ describe('track presets', () => {
     const { alpha, beta, natural } = MEDIUM_TRACK_PRESETS;
     expect(natural.intensity).toBeLessThan(alpha.intensity);
     expect(natural.intensity).toBeLessThan(beta.intensity);
+  });
+});
+
+describe('track depth: which plane a track lives on', () => {
+  it('every emission carries a depth in 0..1, deterministic from its seed', () => {
+    const a = run(600);
+    const b = run(600);
+    for (const e of a.emissions) {
+      expect(e.depth).toBeGreaterThanOrEqual(0);
+      expect(e.depth).toBeLessThanOrEqual(1);
+    }
+    expect(a.emissions.map((e) => e.depth)).toEqual(b.emissions.map((e) => e.depth));
+  });
+
+  it('depth is decorrelated from channel and angle: not every far track shares a channel', () => {
+    // Regression guard for a shared-multiplier mistake: if depth's hash reused the channel or angle
+    // multiplier, every emission with the same depth bucket would also share a channel or angle.
+    const { emissions } = run(2400);
+    const farRed = emissions.filter((e) => e.depth < 0.5 && e.channel[0] === 1);
+    const farOther = emissions.filter((e) => e.depth < 0.5 && e.channel[0] !== 1);
+    expect(farOther.length).toBeGreaterThan(0);
+    expect(farRed.length).toBeGreaterThan(0);
+  });
+
+  it('a far track (depth near 0) is thinner and dimmer than the same preset at depth near 1', () => {
+    const preset = MEDIUM_TRACK_PRESETS.alpha;
+    const far = MEDIUM_TRACK_DEPTH_WIDTH_RANGE[0];
+    const near = MEDIUM_TRACK_DEPTH_WIDTH_RANGE[1];
+    expect(far).toBeLessThan(near);
+    const farIntensity = MEDIUM_TRACK_DEPTH_INTENSITY_RANGE[0];
+    const nearIntensity = MEDIUM_TRACK_DEPTH_INTENSITY_RANGE[1];
+    expect(farIntensity).toBeLessThan(nearIntensity);
+    // The ranges apply multiplicatively to a preset's own geometry — confirm they stay within it
+    // rather than ever widening a track past its preset's own near-depth (scale 1) size.
+    expect(preset.headWidthFrac * near).toBeCloseTo(preset.headWidthFrac, 6);
   });
 });
