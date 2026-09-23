@@ -177,6 +177,105 @@ const MAX_SEAM_JUMP_RATIO = 3;
  *  Measured: ratio 727x — kept at a small fraction (1/70th) of that so the floor is comfortable. */
 const MIN_CANARY_SEAM_JUMP_RATIO = 10;
 
+// --- Depth: parallax ---------------------------------------------------------------------------
+//
+// A single seeded blob, advected by the real curl-noise field at production defaults, read back
+// through TWO fixed transforms — near (identity) and far (MEDIUM_DEFAULTS.depthFarScale/
+// depthFarOffset) — via the same row/col-weighted centroid the gravity rig above already uses for
+// a single blob. Both probes read the IDENTICAL evolving buffer, so any difference in apparent
+// displacement is attributable purely to the transform (see the comment on depthFarScale in
+// params.ts): screenPos = (fieldPos - offset) / scale, so the offset cancels in a displacement and
+// the ratio of far/near displacement should land almost exactly at 1/depthFarScale, up to
+// discretization noise from reading a finite-mass blob through two different-density samplings.
+const PARALLAX_GRID_W = 96;
+const PARALLAX_GRID_H = 96;
+const PARALLAX_DT = 1 / 30;
+const PARALLAX_CHECKPOINTS = [1, 40, 80, 120, 160];
+/** Band for (far displacement / near displacement). The naive prediction is 1/depthFarScale
+ *  (1/1.6 = 0.625); measured on this rig: 0.77 — a finite-mass blob's OWN centroid shifts under a
+ *  scaled resample too (its footprint spans fewer effective texels at the far transform), so the
+ *  two don't match exactly. Fully deterministic (same value on every run) — the band is headroom
+ *  for a future change to the blob/grid, not run-to-run noise. */
+const MIN_PARALLAX_RATIO = 0.45;
+const MAX_PARALLAX_RATIO = 0.85;
+/** The canary — both planes at the same scale — must land close to 1 (no differential motion at
+ *  all): two reads of the same transform of the same buffer are identical up to floating point. */
+const MIN_CANARY_PARALLAX_RATIO = 0.9;
+
+// --- Depth: aerial perspective (contrast) -------------------------------------------------------
+//
+// A spatial low-pass cannot raise local variance, so the SAME 4-tap blur that softens the far
+// plane's edges also, by construction, lowers its measured contrast — one mechanism for both
+// cues (see MEDIUM_COMPOSITE_SHADER). Real 3-spot vapor turbulence (not a single blob): contrast
+// needs actual structure to reduce.
+const CONTRAST_GRID_W = 96;
+const CONTRAST_GRID_H = 96;
+const CONTRAST_DT = 1 / 30;
+/** Steps of pure advection (no reaction) before measuring — plenty for curl-noise turbulence to
+ *  fold the three seeded spots into real multi-blob structure; this rig has no condensation ramp
+ *  to wait out, unlike the water gate. */
+const CONTRAST_STEPS = 1200;
+/** Minimum fractional drop in the far plane's std-dev relative to the near plane's. Measured on
+ *  this rig at the shipped depthFarBlurRadius: 24.2%. Kept well below that (15%) — the canary
+ *  below already shows scale/offset alone account for a real ~6% of it on this non-stationary
+ *  field (a fixed offset can land on a locally denser/sparser patch by chance), and the margin
+ *  between the two thresholds is what actually isolates blur's own contribution. */
+const MIN_CONTRAST_REDUCTION = 0.15;
+/** The canary — the far plane's own scale/offset with blurRadius=0 — must fall under this.
+ *  Measured: 6.2%, from reading a fixed offset into a field that isn't spatially stationary (see
+ *  MIN_CONTRAST_REDUCTION) — not zero, but well under the blurred reading's 24.2%. */
+const MAX_CANARY_CONTRAST_REDUCTION = 0.09;
+
+// --- Gravity, visible in the actual composite (not just the isolated condensate probe above) ----
+
+const GRAVITY_VISIBLE_GRID_W = 72;
+const GRAVITY_VISIBLE_GRID_H = 128;
+/** A tall content canvas — "from the side" is a portrait framing, and the boost is a fraction of
+ *  frame HEIGHT (see gravityBottomBoostStart), so the aspect ratio the gate measures at matters. */
+const GRAVITY_VISIBLE_CANVAS_W = 144;
+const GRAVITY_VISIBLE_CANVAS_H = 256;
+const GRAVITY_VISIBLE_DT = 1 / 30;
+/** Long enough that turbulent mixing meaningfully erodes the production seed layout's own initial
+ *  asymmetry (measured directly: with every gravity mechanism off, a fresh medium reads distinctly
+ *  brighter in its upper bins for the first tens of seconds — web/medium.ts's seed() places two of
+ *  its three spots in the upper half of the frame), short enough that gravityVaporDrift's own
+ *  cumulative displacement (grid-px/s * this) stays a small fraction of the grid's height — past
+ *  about half the height it WRAPS on this periodic (REPEAT) grid and the drift's visible
+ *  contribution can reverse sign at an unlucky snapshot (measured at 120s: it did). At this
+ *  warmup, drift's own displacement is ~19% of grid height. */
+const GRAVITY_VISIBLE_WARMUP_S = 40;
+/** Fraction of frame height sampled at each edge for the top/bottom band means. */
+const GRAVITY_VISIBLE_BAND = 0.2;
+/** Minimum (bottom-band / top-band) mean-luma ratio after warmup. Measured on this rig at the
+ *  shipped gravityBottomBoost/gravityVaporDrift: 1.340. Water conservation is not re-derived here
+ *  — it's the SAME production runtime the water gate above already exercises; this gate only adds
+ *  a display-time reading, and the composite boost cannot touch the conserved buffers by
+ *  construction (see MEDIUM_DEFAULTS.gravityBottomBoost). */
+const MIN_GRAVITY_VISIBLE_RATIO = 1.15;
+/** The canary (gravityVaporDrift=0, gravityBottomBoost=0) must fall under this. Measured: 0.963 —
+ *  BELOW 1, i.e. with neither mechanism active the seed layout's own residual asymmetry still
+ *  reads slightly TOP-heavy at this warmup, which is exactly why MIN_GRAVITY_VISIBLE_RATIO above
+ *  needs the boost to be real and not just this leftover bias landing the other way by chance. */
+const MAX_CANARY_GRAVITY_VISIBLE_RATIO = 1.03;
+
+// --- Cost: what the depth composite adds over the pre-depth (single-plane) one ------------------
+
+const COST_GRID_W = 128;
+const COST_GRID_H = 72;
+/** A representative phone-class portrait resolution — the composite runs once per frame at CONTENT
+ *  (not grid) resolution, and that's where the brief's "~8ms of GPU at an 8.33ms budget" applies. */
+const COST_CANVAS_W = 1080;
+const COST_CANVAS_H = 2400;
+/** 30 frames measured 0.000ms/frame on this rig — under `performance.now()`'s own clamp
+ *  resolution, not a real zero. 3000 clears that floor (~1ms total, verified) without the tight
+ *  synchronous draw loop running long enough to risk the headless GPU process itself (measured:
+ *  a further order of magnitude did). The number this yields is unreliable in absolute terms in
+ *  this specific sandbox either way — see the report for why the gate stays informational. */
+const COST_FRAMES = 3000;
+/** Hard ceiling ONLY when a real GPU timer is available (headless Chromium here has none — see the
+ *  report). The depth composite must not cost more than this multiple of the pre-depth one. */
+const MAX_COST_RATIO_WITH_TIMER = 2;
+
 const ENTRY = `
 import { createVireGlassRenderer } from 'vireglass/web';
 import { toGLSL } from 'vireglass';
@@ -192,12 +291,16 @@ import {
 } from 'vireglass/web';
 import { createMediumBackdrop } from '${WEB}';
 import {
+  MEDIUM_COMPOSITE_SHADER,
   MEDIUM_CONDENSATE_CORRECT_SHADER,
   MEDIUM_CONDENSATE_FORWARD_SHADER,
   MEDIUM_DEFAULTS,
   MEDIUM_SEED_SHADER,
   MEDIUM_TIME_PERIOD,
+  MEDIUM_VAPOR_CORRECT_SHADER,
+  MEDIUM_VAPOR_FORWARD_SHADER,
   VG_CURL_NOISE,
+  VG_OKLAB_TO_SRGB,
 } from '${MEDIUM}';
 
 function makeCanvas(w, h) {
@@ -607,6 +710,399 @@ globalThis.vgSeamSeries = async ({ periodic }) => {
   }
   return { phases, lumas };
 };
+
+// --- Depth: parallax + aerial perspective share one rig -----------------------------------------
+//
+// A bare vapor-only advection rig (seed + forward + correct, no reaction, no condensate/track) —
+// exactly the machinery both gates need: real curl-noise motion and real turbulent structure, with
+// nothing else mixed in to confound a centroid or a contrast reading.
+function makeVaporOnlyRig(gl, w, h, seedSpots) {
+  const seedProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(MEDIUM_SEED_SHADER));
+  const forwardProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(MEDIUM_VAPOR_FORWARD_SHADER));
+  const correctProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(MEDIUM_VAPOR_CORRECT_SHADER));
+  const seedLoc = locationCache(gl, seedProgram);
+  const forwardLoc = locationCache(gl, forwardProgram);
+  const correctLoc = locationCache(gl, correctProgram);
+
+  const mk = () => {
+    const texture = createTexture(gl, { width: w, height: h, wrap: gl.REPEAT });
+    const fbo = createFramebuffer(gl, texture);
+    return { texture, fbo };
+  };
+  const vapor = [mk(), mk()];
+  const forward = mk();
+  let front = 0;
+  let phase = 0;
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, vapor[front].fbo);
+  gl.viewport(0, 0, w, h);
+  gl.disable(gl.BLEND);
+  gl.useProgram(seedProgram);
+  setUniform(gl, seedLoc('u_resolution'), [w, h]);
+  setUniform(gl, seedLoc('u_spot0'), seedSpots[0]);
+  setUniform(gl, seedLoc('u_spot1'), seedSpots[1]);
+  setUniform(gl, seedLoc('u_spot2'), seedSpots[2]);
+  setUniform(gl, seedLoc('u_spotRadius'), seedSpots.radius);
+  drawFullscreenTriangle(gl);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  function bindVelocity(loc, dt) {
+    setUniform(gl, loc('u_dyeSize'), [w, h]);
+    setUniform(gl, loc('u_resolution'), [w, h]);
+    setUniform(gl, loc('u_dt'), dt);
+    setUniform(gl, loc('u_phase'), phase);
+    setUniform(gl, loc('u_curlFreq'), MEDIUM_DEFAULTS.curlFreq);
+    setUniform(gl, loc('u_advectSpeed'), MEDIUM_DEFAULTS.advectSpeed);
+    setUniform(gl, loc('u_turbulence'), 1);
+    setUniform(gl, loc('u_vaporDrift'), MEDIUM_DEFAULTS.gravityVaporDrift);
+  }
+
+  function step(dt) {
+    phase += dt * MEDIUM_DEFAULTS.curlSpeed;
+    const back = front === 0 ? 1 : 0;
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.BLEND);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, forward.fbo);
+    gl.useProgram(forwardProgram);
+    bindTextureAt(gl, 0, vapor[front].texture, forwardProgram, 'u_dye');
+    bindVelocity(forwardLoc, dt);
+    drawFullscreenTriangle(gl);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, vapor[back].fbo);
+    gl.useProgram(correctProgram);
+    bindTextureAt(gl, 0, vapor[front].texture, correctProgram, 'u_dye');
+    bindTextureAt(gl, 1, forward.texture, correctProgram, 'u_forward');
+    setUniform(gl, correctLoc('u_forwardSize'), [w, h]);
+    bindVelocity(correctLoc, dt);
+    drawFullscreenTriangle(gl);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    front = back;
+  }
+
+  return { step, texture: () => vapor[front].texture };
+}
+
+// Mirrors composite-shader.ts's near/far read exactly (scale + offset), minus the color mix — a
+// grayscale density sum, read back for a row/col-weighted centroid.
+const DEPTH_PARALLAX_PROBE_SHADER = \`
+uniform shader u_vapor;
+uniform float  u_scale;
+uniform float2 u_offset;
+half4 main(float2 xy) {
+  float2 src = xy * u_scale + u_offset;
+  half4 v = u_vapor.eval(src);
+  float w = float(v.r) + float(v.g) + float(v.b);
+  return half4(half3(w), half(1.0));
+}
+\`;
+
+globalThis.vgParallaxSeries = async ({ canary }) => {
+  const farScale = canary ? 1 : MEDIUM_DEFAULTS.depthFarScale;
+  // The canary isolates SCALE alone: offset stays [0, 0] for both planes, or a non-zero offset
+  // combined with scale=1 would read a DIFFERENT, uncorrelated point of a single seeded blob (an
+  // offset only cancels out of a displacement for the SAME scale it was measured at) — that would
+  // make the canary noisy for a reason that has nothing to do with the mechanism under test.
+  const farOffset = canary ? [0, 0] : MEDIUM_DEFAULTS.depthFarOffset;
+  const w = ${PARALLAX_GRID_W};
+  const h = ${PARALLAX_GRID_H};
+  const canvas = makeCanvas(w, h);
+  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+  const spot = [w / 2, h / 2];
+  const rig = makeVaporOnlyRig(gl, w, h, Object.assign([spot, spot, spot], { radius: Math.min(w, h) * 0.1 }));
+
+  const probeProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(DEPTH_PARALLAX_PROBE_SHADER));
+  const probeLoc = locationCache(gl, probeProgram);
+  function centroidOf(scale, offset) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.BLEND);
+    gl.useProgram(probeProgram);
+    bindTextureAt(gl, 0, rig.texture(), probeProgram, 'u_vapor');
+    setUniform(gl, probeLoc('u_vaporSize'), [w, h]);
+    setUniform(gl, probeLoc('u_scale'), scale);
+    setUniform(gl, probeLoc('u_offset'), offset);
+    setUniform(gl, probeLoc('u_resolution'), [w, h]);
+    drawFullscreenTriangle(gl);
+    const buf = readCanvas(gl, w, h);
+    let mass = 0;
+    let wx = 0;
+    let wy = 0;
+    for (let r = 0; r < h; r += 1) {
+      for (let c = 0; c < w; c += 1) {
+        const v = buf[(r * w + c) * 4];
+        mass += v;
+        wx += v * c;
+        wy += v * r;
+      }
+    }
+    return mass > 0 ? { x: wx / mass, y: wy / mass } : null;
+  }
+
+  const near = [];
+  const far = [];
+  const checkpoints = ${JSON.stringify(PARALLAX_CHECKPOINTS)};
+  let done = 0;
+  for (const target of checkpoints) {
+    while (done < target) {
+      rig.step(${PARALLAX_DT});
+      done += 1;
+    }
+    near.push(centroidOf(1, [0, 0]));
+    far.push(centroidOf(farScale, farOffset));
+  }
+  return { near, far };
+};
+
+// Same near/far transform, plus the composite's own 4-tap box blur — blurRadius=0 collapses to
+// four reads of the same point, i.e. a plain single-tap read, so this shader also serves as the
+// contrast gate's canary (no separate shader needed).
+const DEPTH_CONTRAST_PROBE_SHADER = \`
+uniform shader u_vapor;
+uniform float  u_scale;
+uniform float2 u_offset;
+uniform float  u_blurRadius;
+half4 main(float2 xy) {
+  float2 src = xy * u_scale + u_offset;
+  float2 bx = float2(u_blurRadius, 0.0);
+  float2 by = float2(0.0, u_blurRadius);
+  half4 v = (u_vapor.eval(src + bx) + u_vapor.eval(src - bx) +
+             u_vapor.eval(src + by) + u_vapor.eval(src - by)) * half4(0.25);
+  float w = float(v.r) + float(v.g) + float(v.b);
+  return half4(half3(w), half(1.0));
+}
+\`;
+
+globalThis.vgContrastSeries = async ({ canary }) => {
+  const farBlurRadius = canary ? 0 : MEDIUM_DEFAULTS.depthFarBlurRadius;
+  const w = ${CONTRAST_GRID_W};
+  const h = ${CONTRAST_GRID_H};
+  const canvas = makeCanvas(w, h);
+  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+  // The production three-spot layout (see web/medium.ts's own seed()), not a single blob — real
+  // multi-species turbulence is what has contrast to reduce.
+  const seedSpots = Object.assign(
+    [[w * 0.28, h * 0.64], [w * 0.7, h * 0.32], [w * 0.48, h * 0.84]],
+    { radius: Math.max(w, h) * 0.18 },
+  );
+  const rig = makeVaporOnlyRig(gl, w, h, seedSpots);
+  for (let i = 0; i < ${CONTRAST_STEPS}; i += 1) rig.step(${CONTRAST_DT});
+
+  const probeProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(DEPTH_CONTRAST_PROBE_SHADER));
+  const probeLoc = locationCache(gl, probeProgram);
+  function render(scale, offset, blurRadius) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.BLEND);
+    gl.useProgram(probeProgram);
+    bindTextureAt(gl, 0, rig.texture(), probeProgram, 'u_vapor');
+    setUniform(gl, probeLoc('u_vaporSize'), [w, h]);
+    setUniform(gl, probeLoc('u_scale'), scale);
+    setUniform(gl, probeLoc('u_offset'), offset);
+    setUniform(gl, probeLoc('u_blurRadius'), blurRadius);
+    setUniform(gl, probeLoc('u_resolution'), [w, h]);
+    drawFullscreenTriangle(gl);
+    const buf = readCanvas(gl, w, h);
+    const values = [];
+    for (let i = 0; i < w * h; i += 1) values.push(buf[i * 4]);
+    return values;
+  }
+
+  const near = render(1, [0, 0], 0);
+  const far = render(MEDIUM_DEFAULTS.depthFarScale, MEDIUM_DEFAULTS.depthFarOffset, farBlurRadius);
+  return { near, far };
+};
+
+// --- Gravity, visible in the actual composite ----------------------------------------------------
+//
+// The real production pipeline (the same one vgWaterSeries/vgFlickerSeries already exercise), just
+// reading the composited canvas's own top/bottom bands instead of its total or its frame-to-frame
+// delta — MediumFrame's own \`params\` override lets the canary zero out both mechanisms without a
+// second rig.
+globalThis.vgGravityVisibleSeries = async ({ params } = {}) => {
+  const w = ${GRAVITY_VISIBLE_GRID_W};
+  const h = ${GRAVITY_VISIBLE_GRID_H};
+  const cw = ${GRAVITY_VISIBLE_CANVAS_W};
+  const ch = ${GRAVITY_VISIBLE_CANVAS_H};
+  const canvas = makeCanvas(cw, ch);
+  const renderer = createVireGlassRenderer(canvas);
+  renderer.resize(cw, ch);
+  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+  const medium = createMediumBackdrop();
+
+  const dt = ${GRAVITY_VISIBLE_DT};
+  const warmupSteps = Math.round(${GRAVITY_VISIBLE_WARMUP_S} / dt);
+  function frame() {
+    renderer.render({
+      density: 1,
+      debug: 'normal',
+      pieces: [],
+      backdrop: medium.pass({ gridWidth: w, gridHeight: h, dt, params }),
+    });
+  }
+  for (let i = 0; i < warmupSteps; i += 1) frame();
+  frame();
+  const buf = readCanvas(gl, cw, ch);
+  medium.destroy();
+
+  const bandRows = Math.round(ch * ${GRAVITY_VISIBLE_BAND});
+  function bandMeanLuma(rowStart, rowEnd) {
+    let sum = 0;
+    let count = 0;
+    for (let r = rowStart; r < rowEnd; r += 1) {
+      for (let c = 0; c < cw; c += 1) {
+        const i = (r * cw + c) * 4;
+        sum += 0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2];
+        count += 1;
+      }
+    }
+    return sum / count;
+  }
+  // Row 0 is the canvas's own visual BOTTOM (see readCanvas's comment above).
+  const bottomLuma = bandMeanLuma(0, bandRows);
+  const topLuma = bandMeanLuma(ch - bandRows, ch);
+  return { bottomLuma, topLuma };
+};
+
+// --- Cost: what the depth composite adds over the pre-depth (single-plane) one -------------------
+//
+// The pre-depth composite, frozen here ONLY as this gate's baseline — not exported, not used
+// anywhere else. Byte-for-byte the shader this file's own git history shows before the depth work
+// (see composite-shader.ts's CHANGELOG entry).
+const LEGACY_COMPOSITE_SHADER = \`
+uniform shader u_vapor;
+uniform shader u_condensate;
+uniform shader u_track;
+uniform float2 u_dyeScale;
+uniform float3 u_lab0;
+uniform float3 u_lab1;
+uniform float3 u_lab2;
+uniform float3 u_labBg;
+uniform float3 u_labCondensate;
+uniform float  u_baseWeight;
+uniform float  u_condensateTint;
+uniform float  u_condensateGain;
+
+\${VG_OKLAB_TO_SRGB}
+
+half4 main(float2 xy) {
+  float2 src = xy * u_dyeScale;
+  half4 vapor = u_vapor.eval(src);
+  half4 condensate = u_condensate.eval(src);
+  half4 track = u_track.eval(src);
+  float w0 = float(vapor.r) + float(track.r);
+  float w1 = float(vapor.g) + float(track.g);
+  float w2 = float(vapor.b) + float(track.b);
+  float wBg = u_baseWeight;
+
+  float vaporLocal = max(w0 + w1 + w2, 1e-4);
+  float3 vaporHue = (u_lab0 * w0 + u_lab1 * w1 + u_lab2 * w2) / vaporLocal;
+  float3 condensateLab = mix(u_labCondensate, vaporHue, u_condensateTint);
+  float wCondensate = float(condensate.r) * u_condensateGain;
+
+  float total = max(w0 + w1 + w2 + wBg + wCondensate, 1e-4);
+  float3 mixLab =
+    (u_labBg * wBg + u_lab0 * w0 + u_lab1 * w1 + u_lab2 * w2 + condensateLab * wCondensate) / total;
+  float3 rgbLinear = clamp(vgOklabToLinear(mixLab), float3(0.0), float3(1.0));
+  float3 srgb = vgLinearToSrgb(rgbLinear);
+  return half4(half3(srgb), half(1.0));
+}
+\`;
+
+globalThis.vgCompositeCost = async () => {
+  const gridW = ${COST_GRID_W};
+  const gridH = ${COST_GRID_H};
+  const cw = ${COST_CANVAS_W};
+  const ch = ${COST_CANVAS_H};
+
+  // A real GPU timer reading, via the real pipeline — null in headless Chromium without
+  // EXT_disjoint_timer_query_webgl2 (see the report for which method actually measured this run).
+  const timerCanvas = makeCanvas(cw, ch);
+  const renderer = createVireGlassRenderer(timerCanvas);
+  renderer.resize(cw, ch);
+  const timedMedium = createMediumBackdrop();
+  for (let i = 0; i < 10; i += 1) {
+    renderer.render({
+      density: 1,
+      debug: 'normal',
+      pieces: [],
+      backdrop: timedMedium.pass({ gridWidth: gridW, gridHeight: gridH, dt: 1 / 60 }),
+    });
+  }
+  const gpuMs = renderer.getLastGpuMs();
+  timedMedium.destroy();
+
+  // CPU wall-time fallback: the ONE shader this work changed, isolated from the rest of the step,
+  // against static content at CONTENT resolution — the same single draw call the real pipeline
+  // issues once per frame (see composite() in web/medium.ts).
+  const canvas = makeCanvas(cw, ch);
+  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+  const seedProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(MEDIUM_SEED_SHADER));
+  const seedLoc = locationCache(gl, seedProgram);
+  const mk = () => {
+    const texture = createTexture(gl, { width: gridW, height: gridH, wrap: gl.REPEAT });
+    const fbo = createFramebuffer(gl, texture);
+    return { texture, fbo };
+  };
+  const vaporTex = mk();
+  const condensateTex = mk();
+  const trackTex = mk();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, vaporTex.fbo);
+  gl.viewport(0, 0, gridW, gridH);
+  gl.disable(gl.BLEND);
+  gl.useProgram(seedProgram);
+  setUniform(gl, seedLoc('u_resolution'), [gridW, gridH]);
+  setUniform(gl, seedLoc('u_spot0'), [gridW * 0.28, gridH * 0.64]);
+  setUniform(gl, seedLoc('u_spot1'), [gridW * 0.7, gridH * 0.32]);
+  setUniform(gl, seedLoc('u_spot2'), [gridW * 0.48, gridH * 0.84]);
+  setUniform(gl, seedLoc('u_spotRadius'), Math.max(gridW, gridH) * 0.18);
+  drawFullscreenTriangle(gl);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  function timeComposite(fragmentSource) {
+    const program = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(fragmentSource));
+    const loc = locationCache(gl, program);
+    gl.viewport(0, 0, cw, ch);
+    gl.disable(gl.BLEND);
+    gl.useProgram(program);
+    bindTextureAt(gl, 0, vaporTex.texture, program, 'u_vapor');
+    bindTextureAt(gl, 1, condensateTex.texture, program, 'u_condensate');
+    bindTextureAt(gl, 2, trackTex.texture, program, 'u_track');
+    setUniform(gl, loc('u_vaporSize'), [gridW, gridH]);
+    setUniform(gl, loc('u_condensateSize'), [gridW, gridH]);
+    setUniform(gl, loc('u_trackSize'), [gridW, gridH]);
+    setUniform(gl, loc('u_resolution'), [cw, ch]);
+    setUniform(gl, loc('u_dyeScale'), [gridW / cw, gridH / ch]);
+    setUniform(gl, loc('u_lab0'), [0.5, 0.05, 0.05]);
+    setUniform(gl, loc('u_lab1'), [0.5, -0.05, 0.05]);
+    setUniform(gl, loc('u_lab2'), [0.5, 0.05, -0.05]);
+    setUniform(gl, loc('u_labBg'), [0.1, 0, 0]);
+    setUniform(gl, loc('u_labCondensate'), [0.9, 0, 0]);
+    setUniform(gl, loc('u_baseWeight'), MEDIUM_DEFAULTS.baseWeight);
+    setUniform(gl, loc('u_condensateTint'), MEDIUM_DEFAULTS.condensateTint);
+    setUniform(gl, loc('u_condensateGain'), MEDIUM_DEFAULTS.condensateGain);
+    setUniform(gl, loc('u_farScale'), MEDIUM_DEFAULTS.depthFarScale);
+    setUniform(gl, loc('u_farOffset'), MEDIUM_DEFAULTS.depthFarOffset);
+    setUniform(gl, loc('u_farBlurRadius'), MEDIUM_DEFAULTS.depthFarBlurRadius);
+    setUniform(gl, loc('u_farWeight'), MEDIUM_DEFAULTS.depthFarWeight);
+    setUniform(gl, loc('u_gravityBoost'), MEDIUM_DEFAULTS.gravityBottomBoost);
+    setUniform(gl, loc('u_gravityBoostStart'), MEDIUM_DEFAULTS.gravityBottomBoostStart);
+
+    drawFullscreenTriangle(gl);
+    gl.finish();
+    const start = performance.now();
+    for (let i = 0; i < ${COST_FRAMES}; i += 1) drawFullscreenTriangle(gl);
+    gl.finish();
+    const elapsed = performance.now() - start;
+    gl.deleteProgram(program);
+    return elapsed / ${COST_FRAMES};
+  }
+
+  const wallMsBaseline = timeComposite(LEGACY_COMPOSITE_SHADER);
+  const wallMsDepth = timeComposite(MEDIUM_COMPOSITE_SHADER);
+  return { gpuMs, wallMsBaseline, wallMsDepth };
+};
 `;
 
 function centroidTrend(samples) {
@@ -787,6 +1283,116 @@ async function main() {
     );
   }
 
+  // --- 6. Depth: parallax — the far plane moves slower on screen than the near plane. -----------
+  console.log('--- parallax: the far plane reads the same field slower than the near plane ---');
+  function displacement(samples) {
+    const first = samples[0];
+    const last = samples[samples.length - 1];
+    return Math.hypot(last.x - first.x, last.y - first.y);
+  }
+  const parallax = await page.evaluate((a) => globalThis.vgParallaxSeries(a), { canary: false });
+  const nearDisp = displacement(parallax.near);
+  const farDisp = displacement(parallax.far);
+  const parallaxRatio = nearDisp > 1e-6 ? farDisp / nearDisp : Infinity;
+  console.log(`  near displacement ${nearDisp.toFixed(2)}px, far displacement ${farDisp.toFixed(2)}px, ratio ${parallaxRatio.toFixed(2)}`);
+  if (!(parallaxRatio >= MIN_PARALLAX_RATIO && parallaxRatio <= MAX_PARALLAX_RATIO)) {
+    failed.push(
+      `parallax: far/near displacement ratio ${parallaxRatio.toFixed(2)} outside [${MIN_PARALLAX_RATIO}, ${MAX_PARALLAX_RATIO}] — the far plane is not reading as slower than the near one`,
+    );
+  }
+
+  console.log('--- canary: both planes at the same scale must show no differential motion ---');
+  const parallaxCanary = await page.evaluate((a) => globalThis.vgParallaxSeries(a), { canary: true });
+  const canaryNearDisp = displacement(parallaxCanary.near);
+  const canaryFarDisp = displacement(parallaxCanary.far);
+  const canaryParallaxRatio = canaryNearDisp > 1e-6 ? canaryFarDisp / canaryNearDisp : Infinity;
+  console.log(`  near displacement ${canaryNearDisp.toFixed(2)}px, far displacement ${canaryFarDisp.toFixed(2)}px, ratio ${canaryParallaxRatio.toFixed(2)}`);
+  if (!(canaryParallaxRatio >= MIN_CANARY_PARALLAX_RATIO)) {
+    failed.push(
+      `parallax canary did not fail (ratio ${canaryParallaxRatio.toFixed(2)}, same order as a real depth difference) — this gate is not actually sensitive to the scale mechanism`,
+    );
+  }
+
+  // --- 7. Depth: aerial perspective — the far plane's contrast is lower. -------------------------
+  console.log('--- aerial perspective: the far plane reads lower-contrast than the near plane ---');
+  function stdDev(values) {
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((a, v) => a + (v - mean) ** 2, 0) / values.length;
+    return Math.sqrt(variance);
+  }
+  const contrast = await page.evaluate((a) => globalThis.vgContrastSeries(a), { canary: false });
+  const nearStd = stdDev(contrast.near);
+  const farStd = stdDev(contrast.far);
+  const contrastReduction = nearStd > 1e-6 ? (nearStd - farStd) / nearStd : 0;
+  console.log(`  near std-dev ${nearStd.toFixed(2)}, far std-dev ${farStd.toFixed(2)}, reduction ${(contrastReduction * 100).toFixed(1)}%`);
+  if (!(contrastReduction >= MIN_CONTRAST_REDUCTION)) {
+    failed.push(
+      `aerial perspective: contrast reduction ${(contrastReduction * 100).toFixed(1)}% is below the required ${(MIN_CONTRAST_REDUCTION * 100).toFixed(0)}% — the far plane does not read as lower-contrast`,
+    );
+  }
+
+  console.log('--- canary: the far plane at blurRadius=0 must not clear the same margin ---');
+  const contrastCanary = await page.evaluate((a) => globalThis.vgContrastSeries(a), { canary: true });
+  const canaryNearStd = stdDev(contrastCanary.near);
+  const canaryFarStd = stdDev(contrastCanary.far);
+  const canaryContrastReduction = canaryNearStd > 1e-6 ? (canaryNearStd - canaryFarStd) / canaryNearStd : 0;
+  console.log(`  near std-dev ${canaryNearStd.toFixed(2)}, far std-dev ${canaryFarStd.toFixed(2)}, reduction ${(canaryContrastReduction * 100).toFixed(1)}%`);
+  if (!(canaryContrastReduction <= MAX_CANARY_CONTRAST_REDUCTION)) {
+    failed.push(
+      `aerial perspective canary did not fail (reduction ${(canaryContrastReduction * 100).toFixed(1)}%, clears the same margin as the blurred read) — this gate is not actually sensitive to blur`,
+    );
+  }
+
+  // --- 8. Gravity, visible in the actual composite. -----------------------------------------------
+  //
+  // condensateSettleSpeed is forced to 0 in BOTH runs below: condensate already settles toward the
+  // bottom on its own (that's gate #1's job, an existing and unrelated mechanism), and left active
+  // here it would dominate the bottom/top reading regardless of whether THIS gate's own two
+  // mechanisms (vaporDrift, bottomBoost) are on or off — the canary would never clear, for a reason
+  // that has nothing to do with what this gate is checking.
+  console.log('--- gravity (composite): the bottom band reads denser than the top band ---');
+  const gravityVisible = await page.evaluate(
+    (a) => globalThis.vgGravityVisibleSeries(a),
+    { params: { condensateSettleSpeed: 0 } },
+  );
+  const gravityVisibleRatio = gravityVisible.topLuma > 1e-6 ? gravityVisible.bottomLuma / gravityVisible.topLuma : Infinity;
+  console.log(`  bottom-band luma ${gravityVisible.bottomLuma.toFixed(3)}, top-band luma ${gravityVisible.topLuma.toFixed(3)}, ratio ${gravityVisibleRatio.toFixed(3)}`);
+  if (!(gravityVisibleRatio >= MIN_GRAVITY_VISIBLE_RATIO)) {
+    failed.push(
+      `gravity (composite): bottom/top luma ratio ${gravityVisibleRatio.toFixed(3)} is below the required ${MIN_GRAVITY_VISIBLE_RATIO} — the chamber does not read as denser at the bottom`,
+    );
+  }
+
+  console.log('--- canary: no vapor drift and no bottom boost must not clear the same margin ---');
+  const gravityVisibleCanary = await page.evaluate(
+    (a) => globalThis.vgGravityVisibleSeries(a),
+    { params: { condensateSettleSpeed: 0, gravityVaporDrift: 0, gravityBottomBoost: 0 } },
+  );
+  const canaryGravityVisibleRatio =
+    gravityVisibleCanary.topLuma > 1e-6 ? gravityVisibleCanary.bottomLuma / gravityVisibleCanary.topLuma : Infinity;
+  console.log(`  bottom-band luma ${gravityVisibleCanary.bottomLuma.toFixed(3)}, top-band luma ${gravityVisibleCanary.topLuma.toFixed(3)}, ratio ${canaryGravityVisibleRatio.toFixed(3)}`);
+  if (!(canaryGravityVisibleRatio <= MAX_CANARY_GRAVITY_VISIBLE_RATIO)) {
+    failed.push(
+      `gravity (composite) canary did not fail (ratio ${canaryGravityVisibleRatio.toFixed(3)}, clears the same margin with neither mechanism active) — this gate is not actually sensitive to drift/boost`,
+    );
+  }
+
+  // --- 9. Cost: what the depth composite adds over the pre-depth (single-plane) one. --------------
+  console.log('--- cost: the depth composite vs the pre-depth (single-plane) one, at content resolution ---');
+  const cost = await page.evaluate(() => globalThis.vgCompositeCost());
+  const costRatio = cost.wallMsBaseline > 1e-6 ? cost.wallMsDepth / cost.wallMsBaseline : Infinity;
+  if (cost.gpuMs === null) {
+    console.log('  renderer.getLastGpuMs(): null (no EXT_disjoint_timer_query_webgl2 in this headless Chromium) — falling back to CPU wall time');
+  } else {
+    console.log(`  renderer.getLastGpuMs(): ${cost.gpuMs.toFixed(3)}ms (a single real frame, informational alongside the wall-time comparison below)`);
+  }
+  console.log(
+    `  CPU wall time (${COST_FRAMES} frames, gl.finish() each, ${COST_CANVAS_W}x${COST_CANVAS_H}): single-plane ${cost.wallMsBaseline.toFixed(3)}ms/frame, depth ${cost.wallMsDepth.toFixed(3)}ms/frame, ratio ${costRatio.toFixed(2)}x`,
+  );
+  if (cost.gpuMs !== null && !(costRatio <= MAX_COST_RATIO_WITH_TIMER)) {
+    failed.push(`cost: depth composite is ${costRatio.toFixed(2)}x the single-plane one, exceeding ${MAX_COST_RATIO_WITH_TIMER}x`);
+  }
+
   await browser.close();
 
   if (failed.length) {
@@ -795,7 +1401,7 @@ async function main() {
     return;
   }
   console.log(
-    'check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), and the phase wrap is seamless (canary caught)',
+    "check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), the phase wrap is seamless (canary caught), the far depth plane reads slower and lower-contrast than the near one (both canaries caught), the composite reads denser at the bottom after warmup (canary caught), and the depth composite's cost over the pre-depth one is reported",
   );
 }
 
