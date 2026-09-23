@@ -6,11 +6,9 @@
 // `npm install`, because the resolution paths are not the same. An entry point is only real once
 // it has loaded from a node_modules it was actually installed into.
 //
-// `vireglass` is a mandatory peer, not an optional one — the package doesn't load without it. If
-// it's already present in this repo's own node_modules (as it has to be, for typecheck and test),
-// its tarball is packed and installed into the sandbox alongside vireuikit's own, so the check
-// stays deterministic and offline instead of depending on whatever npm's registry currently has
-// published for it.
+// `vireglass` is a mandatory peer — the package doesn't load without it. The sandbox gets exactly
+// the version installed in this repo's node_modules, from the registry: the published artifact a
+// stranger would get, pinned so the check does not drift with whatever is newest.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -34,10 +32,6 @@ const run = (cmd, args, cwd) => {
 let failed = false;
 const fail = (m) => { console.error(`check-package: ${m}`); failed = true; };
 
-// --ignore-scripts: packing an already-installed dependency must not re-run its `prepare`
-// build step. A peer's node_modules copy only ships what its own `files` field lists (for
-// `vireglass`: dist, docs, pruned src, android — not its tsup config), so re-running `prepare`
-// there fails outright; even where it would succeed, packing has no business rebuilding anything.
 const packOne = (cwd) => {
   const lines = run(npm, ['pack', '--silent', '--ignore-scripts'], cwd).trim().split(/\r?\n/);
   const name = lines.pop();
@@ -51,17 +45,17 @@ for (const f of readdirSync(ROOT)) {
 
 const tarballs = [packOne(ROOT)];
 for (const name of Object.keys(PACKAGE.peerDependencies ?? {})) {
-  let peerDir;
+  let version;
   try {
-    peerDir = dirname(require.resolve(join(name, 'package.json')));
+    version = require(join(name, 'package.json')).version;
   } catch {
-    peerDir = null;
+    version = null;
   }
-  if (!peerDir) {
-    fail(`peer dependency "${name}" is not installed locally, so it cannot be packed for the sandbox`);
+  if (!version) {
+    fail(`peer dependency "${name}" is not installed locally, so its version is unknown`);
     continue;
   }
-  tarballs.push(packOne(peerDir));
+  tarballs.push(`${name}@${version}`);
 }
 
 const sandbox = mkdtempSync(join(tmpdir(), 'vireuikit-consume-'));
