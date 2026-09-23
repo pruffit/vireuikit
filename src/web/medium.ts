@@ -12,7 +12,9 @@ import {
   MEDIUM_CONDENSATE_REACT_SHADER,
   MEDIUM_DEFAULTS,
   MEDIUM_EMIT_SHADER,
+  MEDIUM_RESAMPLE_SHADER,
   MEDIUM_SEED_SHADER,
+  MEDIUM_TIME_PERIOD,
   MEDIUM_TRACK_ADVECT_SHADER,
   MEDIUM_VAPOR_CORRECT_SHADER,
   MEDIUM_VAPOR_FORWARD_SHADER,
@@ -33,12 +35,15 @@ import {
 } from 'vireglass/web';
 
 export type MediumRuntime = {
-  /** Recreates the grid and reseeds it if the size changed (or this is the first call). */
+  /** Recreates the grid on the first call (seeding it); on a later call with a different size,
+   *  RESAMPLES the old vapor/condensate/track state into the new size instead of reseeding — see
+   *  `resizeGrid` below for why. A no-op when the size hasn't changed. */
   ensureGrid(gridWidth: number, gridHeight: number): void;
   /** One transport step for all three buffers (vapor and condensate via MacCormack:
    *  forward/correct/react, see `advect-shader.ts`; tracks via a single backtrace plus decay),
-   *  ping-ponging their own FBOs. */
-  step(dt: number, time: number, params?: Partial<VireUIKitMediumParams>): void;
+   *  ping-ponging their own FBOs. The field's phase (curl-noise's time axis) is this runtime's own
+   *  state, accumulated from `dt` — see `u_phase` below — not derived from a caller-supplied clock. */
+  step(dt: number, params?: Partial<VireUIKitMediumParams>): void;
   /**
    * Stamps tracks into the TRACK buffer just refreshed by advection — via additive blending,
    * rather than a separate pass or its own position list. From there the same field carries them
@@ -92,6 +97,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   const compositeProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_COMPOSITE_SHADER));
   const seedProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_SEED_SHADER));
   const emitProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_EMIT_SHADER));
+  const resampleProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_RESAMPLE_SHADER));
 
   const vaporForwardLoc = locationCache(gl, vaporForwardProgram);
   const vaporCorrectLoc = locationCache(gl, vaporCorrectProgram);
@@ -103,6 +109,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   const compositeLoc = locationCache(gl, compositeProgram);
   const seedLoc = locationCache(gl, seedProgram);
   const emitLoc = locationCache(gl, emitProgram);
+  const resampleLoc = locationCache(gl, resampleProgram);
 
   let gridW = 0;
   let gridH = 0;
@@ -195,31 +202,93 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     clearTarget(track[1], w, h);
   }
 
-  function ensureGrid(gridWidth: number, gridHeight: number): void {
-    const w = Math.max(2, Math.round(gridWidth));
-    const h = Math.max(2, Math.round(gridHeight));
-    if (vapor && condensate && track && w === gridW && h === gridH) return;
+  /** Bilinear-resamples one buffer into a differently-sized target — see MEDIUM_RESAMPLE_SHADER. */
+  function resample(src: DyeTarget, srcW: number, srcH: number, dst: DyeTarget, dstW: number, dstH: number): void {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+    gl.viewport(0, 0, dstW, dstH);
+    gl.disable(gl.BLEND);
+    gl.useProgram(resampleProgram);
+    bindTextureAt(gl, 0, src.texture, resampleProgram, 'u_src');
+    setUniform(gl, resampleLoc('u_srcSize'), [srcW, srcH]);
+    setUniform(gl, resampleLoc('u_resolution'), [dstW, dstH]);
+    drawFullscreenTriangle(gl);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  // A resize used to destroy every target and reseed from scratch — a phone rotation or a window
+  // resize wiped the vapor back to its three initial spots and blinked condensate/tracks out, the
+  // flicker the design forbids. Instead: bilinear-resample the OLD front buffers (the only ones
+  // that carry real state — see the comment on the MacCormack scratch buffers above) into NEW,
+  // differently-sized targets, then delete the old ones. Seeding stays a first-call-only thing.
+  function resizeGrid(w: number, h: number): void {
+    if (!vapor || !condensate || !track) return; // narrows for TS; callers already checked
+    const oldVapor = vapor;
+    const oldCondensate = condensate;
+    const oldTrack = track;
+    const oldW = gridW;
+    const oldH = gridH;
+
+    const newVaporFront = makeTarget(w, h);
+    const newCondensateFront = makeTarget(w, h);
+    const newTrackFront = makeTarget(w, h);
+    resample(oldVapor[front], oldW, oldH, newVaporFront, w, h);
+    resample(oldCondensate[front], oldW, oldH, newCondensateFront, w, h);
+    resample(oldTrack[front], oldW, oldH, newTrackFront, w, h);
+
     destroyTargets();
     gridW = w;
     gridH = h;
-    vapor = [makeTarget(w, h), makeTarget(w, h)];
-    condensate = [makeTarget(w, h), makeTarget(w, h)];
-    track = [makeTarget(w, h), makeTarget(w, h)];
+    vapor = [newVaporFront, makeTarget(w, h)];
+    condensate = [newCondensateFront, makeTarget(w, h)];
+    track = [newTrackFront, makeTarget(w, h)];
     vaporForward = makeTarget(w, h);
     vaporCorrected = makeTarget(w, h);
     condensateForward = makeTarget(w, h);
     condensateCorrected = makeTarget(w, h);
     front = 0;
-    seed(w, h);
-    // The target water total — right after seeding, before the first step: this is "the entire
-    // supply" (see the comment on `seed`), and every later renormalization checks against it.
-    // Right after seeding condensate is empty, so the target equals the vapor sum — but it's
-    // re-verified every time as vapor+condensate, not just vapor, in case the initial state ever
-    // changes.
-    waterTargetTotal = readTarget(vapor[front]) + readTarget(condensate[front]);
-    waterScale = 1;
-    timeSinceRenorm = 0;
-    framesSinceRenorm = 0;
+
+    // Total water scales with cell count, not just density: a bilinear resample roughly preserves
+    // the AVERAGE value per cell, so the SUM over every cell scales with how many cells there now
+    // are. Rescaling the EXISTING target (rather than re-measuring the just-resampled buffers)
+    // keeps the invariant exact even if the resample itself is slightly lossy at the edges — the
+    // periodic renormalization below already self-corrects any residual, and it needs a real
+    // target to correct TOWARD rather than one that already baked in this resize's own error.
+    // `timeSinceRenorm`/`framesSinceRenorm` are left running: the interval they measure doesn't
+    // care about grid size, only about how much correction accumulated frame to frame.
+    const areaRatio = (w * h) / (oldW * oldH);
+    waterTargetTotal *= areaRatio;
+  }
+
+  function ensureGrid(gridWidth: number, gridHeight: number): void {
+    const w = Math.max(2, Math.round(gridWidth));
+    const h = Math.max(2, Math.round(gridHeight));
+    if (vapor && condensate && track && w === gridW && h === gridH) return;
+
+    if (!vapor || !condensate || !track) {
+      gridW = w;
+      gridH = h;
+      vapor = [makeTarget(w, h), makeTarget(w, h)];
+      condensate = [makeTarget(w, h), makeTarget(w, h)];
+      track = [makeTarget(w, h), makeTarget(w, h)];
+      vaporForward = makeTarget(w, h);
+      vaporCorrected = makeTarget(w, h);
+      condensateForward = makeTarget(w, h);
+      condensateCorrected = makeTarget(w, h);
+      front = 0;
+      seed(w, h);
+      // The target water total — right after seeding, before the first step: this is "the entire
+      // supply" (see the comment on `seed`), and every later renormalization checks against it.
+      // Right after seeding condensate is empty, so the target equals the vapor sum — but it's
+      // re-verified every time as vapor+condensate, not just vapor, in case the initial state ever
+      // changes.
+      waterTargetTotal = readTarget(vapor[front]) + readTarget(condensate[front]);
+      waterScale = 1;
+      timeSinceRenorm = 0;
+      framesSinceRenorm = 0;
+      return;
+    }
+
+    resizeGrid(w, h);
   }
 
   /** Shared velocity-field uniforms — one set for both phases' forward/correct passes and for
@@ -229,17 +298,32 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   function bindVelocityUniforms(
     loc: (name: string) => WebGLUniformLocation | null,
     dt: number,
-    time: number,
+    phase: number,
     p: VireUIKitMediumParams,
   ): void {
     setUniform(gl, loc('u_dyeSize'), [gridW, gridH]);
     setUniform(gl, loc('u_resolution'), [gridW, gridH]);
     setUniform(gl, loc('u_dt'), dt);
-    setUniform(gl, loc('u_time'), time);
+    setUniform(gl, loc('u_phase'), phase);
     setUniform(gl, loc('u_curlFreq'), p.curlFreq);
-    setUniform(gl, loc('u_curlSpeed'), p.curlSpeed);
     setUniform(gl, loc('u_advectSpeed'), p.advectSpeed);
     setUniform(gl, loc('u_turbulence'), p.turbulence);
+  }
+
+  // The field's phase — curl-noise's time axis, accumulated here in float64 rather than derived
+  // from an ever-growing caller-supplied clock, and wrapped at MEDIUM_TIME_PERIOD (noise.ts's
+  // MEDIUM_TIME_OCTAVES makes that wrap exact, not approximate). Sending a raw, ever-growing
+  // `time * curlSpeed` product to the GPU as a float32 uniform eventually loses the bits that
+  // place a point within its own lattice cell — after hours of playback the field would visibly
+  // jitter in place. Wrapping the ACCUMULATOR keeps its magnitude bounded, and because the rate is
+  // baked in incrementally rather than multiplied in fresh every frame, changing `curlSpeed` at
+  // runtime changes the slope going forward instead of rescaling everything already accumulated —
+  // no jump.
+  let phase = 0;
+
+  function wrapPhase(value: number): number {
+    const wrapped = value % MEDIUM_TIME_PERIOD;
+    return wrapped < 0 ? wrapped + MEDIUM_TIME_PERIOD : wrapped;
   }
 
   // A semi-Lagrangian gather over a non-uniform velocity has no obligation to conserve the sum by
@@ -255,7 +339,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   let timeSinceRenorm = 0;
   let framesSinceRenorm = 0;
 
-  function step(dt: number, time: number, params: Partial<VireUIKitMediumParams> = {}): void {
+  function step(dt: number, params: Partial<VireUIKitMediumParams> = {}): void {
     if (
       !vapor ||
       !condensate ||
@@ -271,6 +355,8 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     // dt is clamped: a tab returning from the background would otherwise carry advection past the
     // grid's bounds in one jump, sweeping all the smoke to an edge in a single frame.
     const clampedDt = Math.min(Math.max(dt, 0), 1 / 15);
+    // Advance and wrap the phase BEFORE using it this frame — see the comment on `phase` above.
+    phase = wrapPhase(phase + clampedDt * p.curlSpeed);
     const back = front === 0 ? 1 : 0;
     const gridSize: readonly [number, number] = [gridW, gridH];
 
@@ -283,13 +369,13 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.bindFramebuffer(gl.FRAMEBUFFER, vaporForward.fbo);
     gl.useProgram(vaporForwardProgram);
     bindTextureAt(gl, 0, vapor[front].texture, vaporForwardProgram, 'u_dye');
-    bindVelocityUniforms(vaporForwardLoc, clampedDt, time, p);
+    bindVelocityUniforms(vaporForwardLoc, clampedDt, phase, p);
     drawFullscreenTriangle(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, condensateForward.fbo);
     gl.useProgram(condensateForwardProgram);
     bindTextureAt(gl, 0, condensate[front].texture, condensateForwardProgram, 'u_dye');
-    bindVelocityUniforms(condensateForwardLoc, clampedDt, time, p);
+    bindVelocityUniforms(condensateForwardLoc, clampedDt, phase, p);
     setUniform(gl, condensateForwardLoc('u_settleSpeed'), p.condensateSettleSpeed);
     drawFullscreenTriangle(gl);
 
@@ -301,7 +387,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     // <name>Size for every `uniform shader`) — the second (cross-) sampler needs its own size set
     // separately, or it silently stays (0,0) and `.eval()` divides the coordinate by zero.
     setUniform(gl, vaporCorrectLoc('u_forwardSize'), gridSize);
-    bindVelocityUniforms(vaporCorrectLoc, clampedDt, time, p);
+    bindVelocityUniforms(vaporCorrectLoc, clampedDt, phase, p);
     drawFullscreenTriangle(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, condensateCorrected.fbo);
@@ -309,7 +395,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     bindTextureAt(gl, 0, condensate[front].texture, condensateCorrectProgram, 'u_dye');
     bindTextureAt(gl, 1, condensateForward.texture, condensateCorrectProgram, 'u_forward');
     setUniform(gl, condensateCorrectLoc('u_forwardSize'), gridSize);
-    bindVelocityUniforms(condensateCorrectLoc, clampedDt, time, p);
+    bindVelocityUniforms(condensateCorrectLoc, clampedDt, phase, p);
     setUniform(gl, condensateCorrectLoc('u_settleSpeed'), p.condensateSettleSpeed);
     drawFullscreenTriangle(gl);
 
@@ -354,7 +440,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.bindFramebuffer(gl.FRAMEBUFFER, track[back].fbo);
     gl.useProgram(trackAdvectProgram);
     bindTextureAt(gl, 0, track[front].texture, trackAdvectProgram, 'u_dye');
-    bindVelocityUniforms(trackAdvectLoc, clampedDt, time, p);
+    bindVelocityUniforms(trackAdvectLoc, clampedDt, phase, p);
     setUniform(gl, trackAdvectLoc('u_decay'), p.decay);
     drawFullscreenTriangle(gl);
 
@@ -534,6 +620,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.deleteProgram(compositeProgram);
     gl.deleteProgram(seedProgram);
     gl.deleteProgram(emitProgram);
+    gl.deleteProgram(resampleProgram);
   }
 
   return { ensureGrid, step, emit, composite, readTotals, readVaporGrid, readCondensateGrid, destroy };

@@ -16,12 +16,19 @@ import { VG_CURL_NOISE } from './noise';
 // cross-reads, and the exchange happens AFTER, on values already transported and grid-aligned at
 // the same point xy — so "how much vapor was lost" and "how much condensate was gained" agree by
 // construction.
+// u_phase replaces the old u_time/u_curlSpeed pair: the CPU accumulates phase += dt * curlSpeed
+// in float64 and wraps it at MEDIUM_TIME_PERIOD (see web/medium.ts and noise.ts's
+// MEDIUM_TIME_OCTAVES) before it ever becomes a float32 uniform. Over hours of playback, a raw
+// u_time kept growing without bound and eventually lost the bits that place a point within its
+// own lattice cell — the visible symptom was the field jittering in place. A side benefit: since
+// the rate is baked into the accumulation rather than multiplied in on every frame, changing
+// curlSpeed at runtime changes the SLOPE going forward instead of rescaling everything already
+// accumulated — no jump.
 const MEDIUM_ADVECT_UNIFORMS = `
 uniform shader u_dye;
 uniform float  u_dt;
-uniform float  u_time;
+uniform float  u_phase;
 uniform float  u_curlFreq;
-uniform float  u_curlSpeed;
 uniform float  u_advectSpeed;
 uniform float  u_turbulence;
 
@@ -35,7 +42,7 @@ ${VG_CURL_NOISE}
 // `.eval()` in this file: composite-shader.ts reads these same buffers for display and has to flip
 // the same way.
 const MEDIUM_ADVECT_VELOCITY = `
-  float2 vel = vgCurlVelocity(xy * u_curlFreq, u_time * u_curlSpeed) * u_advectSpeed * u_turbulence;
+  float2 vel = vgCurlVelocity(xy * u_curlFreq, u_phase) * u_advectSpeed * u_turbulence;
 `;
 
 // Gravity touches only the condensate — an addition on top of the shared field rather than a

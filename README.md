@@ -58,14 +58,17 @@ const medium = createMediumBackdrop();
 const renderer = createVireGlassRenderer(canvas);
 renderer.resize(canvas.width, canvas.height);
 
-function frame(time: number, dt: number) {
+let last = performance.now();
+function frame(now: number) {
+  const dt = (now - last) / 1000;
+  last = now;
   renderer.render({
     density: window.devicePixelRatio,
     debug: 'normal',
     pieces,
-    backdrop: medium.pass({ gridWidth: 128, gridHeight: 72, time, dt }),
+    backdrop: medium.pass({ gridWidth: 128, gridHeight: 72, dt }),
   });
-  requestAnimationFrame((t) => frame(t / 1000, dt));
+  requestAnimationFrame(frame);
 }
 ```
 

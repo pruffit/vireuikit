@@ -110,6 +110,12 @@ export function createMediumDynamics(): VireUIKitMediumDynamics {
 
     const emissions: VireUIKitMediumEmission[] = [];
 
+    // `bar`/`idx` below become `u_seed`, a float32 uniform in emit-shader.ts — but unlike the
+    // curl-noise phase (see MEDIUM_TIME_PERIOD in noise.ts), they don't need periodic treatment:
+    // `bar` resets with `positionSeconds` on every new track (it counts beats within the CURRENT
+    // track, not the session), and `idx` advances only once per natural-emission interval (tens of
+    // seconds), reaching at most a few thousand over a multi-hour session — nowhere near where a
+    // float32 hash input's precision would matter.
     if (state === 'playing' && bpm > 0) {
       const beats = (positionSeconds * bpm) / 60;
       const bar = Math.floor(beats / MEDIUM_EMISSION_BEATS);

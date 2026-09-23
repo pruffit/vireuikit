@@ -5,12 +5,13 @@ import {
 import type { VireUIKitMediumEmission, VireUIKitMediumParams } from '../medium';
 import { createMediumRuntime, type MediumRuntime } from './medium';
 
-/** The simulation grid — its own resolution, coarser than the frame. `time`/`dt` are the caller's
- *  clock: pausing on `prefers-reduced-motion` and testability both stay on its side. */
+/** The simulation grid — its own resolution, coarser than the frame. `dt` is the caller's clock:
+ *  pausing on `prefers-reduced-motion` and testability both stay on its side. There is no `time`
+ *  field — the field's phase is the runtime's own accumulated state (see `u_phase` in
+ *  `web/medium.ts`), not something the caller has to track across an arbitrarily long session. */
 export type MediumFrame = {
   gridWidth: number;
   gridHeight: number;
-  time: number;
   dt: number;
   params?: Partial<VireUIKitMediumParams>;
   /** Tracks stamped this frame; `createMediumDynamics` schedules them. */
@@ -38,7 +39,7 @@ export function createMediumBackdrop(): MediumBackdrop {
       owner = gl;
       runtime ??= createMediumRuntime(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE);
       runtime.ensureGrid(frame.gridWidth, frame.gridHeight);
-      runtime.step(frame.dt, frame.time, frame.params);
+      runtime.step(frame.dt, frame.params);
       runtime.emit(frame.emissions ?? []);
       gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
       runtime.composite(target.width, target.height, frame.params);
