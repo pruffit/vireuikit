@@ -233,9 +233,10 @@ function makeGravityPass(gl, { gridW, gridH, canary }) {
     setUniform(gl, loc('u_dyeSize'), [gridW, gridH]);
     setUniform(gl, loc('u_resolution'), [gridW, gridH]);
     setUniform(gl, loc('u_dt'), dt);
-    setUniform(gl, loc('u_time'), 0);
+    // Phase doesn't matter here: u_turbulence is 0 (GRAVITY_TURBULENCE), which zeroes the curl
+    // term entirely (see MEDIUM_ADVECT_VELOCITY_SETTLE) — settle is the only velocity left.
+    setUniform(gl, loc('u_phase'), 0);
     setUniform(gl, loc('u_curlFreq'), MEDIUM_DEFAULTS.curlFreq);
-    setUniform(gl, loc('u_curlSpeed'), MEDIUM_DEFAULTS.curlSpeed);
     setUniform(gl, loc('u_advectSpeed'), MEDIUM_DEFAULTS.advectSpeed);
     setUniform(gl, loc('u_turbulence'), ${GRAVITY_TURBULENCE});
     setUniform(gl, loc('u_settleSpeed'), MEDIUM_DEFAULTS.condensateSettleSpeed);
@@ -330,17 +331,13 @@ globalThis.vgWaterSeries = async () => {
   const dt = ${WATER_DT};
   const warmupSteps = Math.round(${WATER_WARMUP_S} / dt);
   const sampleEvery = Math.round(${WATER_SAMPLE_INTERVAL_S} / dt);
-  let time = 0;
-  let step = 0;
   function frame() {
     renderer.render({
       density: 1,
       debug: 'normal',
       pieces: [],
-      backdrop: medium.pass({ gridWidth: w, gridHeight: h, time, dt }),
+      backdrop: medium.pass({ gridWidth: w, gridHeight: h, dt }),
     });
-    time += dt;
-    step += 1;
   }
   for (let i = 0; i < warmupSteps; i += 1) frame();
 
@@ -365,15 +362,13 @@ globalThis.vgFlickerSeries = async () => {
   const medium = createMediumBackdrop();
 
   const dt = ${FLICKER_DT};
-  let time = 0;
   function frame() {
     renderer.render({
       density: 1,
       debug: 'normal',
       pieces: [],
-      backdrop: medium.pass({ gridWidth: w, gridHeight: h, time, dt }),
+      backdrop: medium.pass({ gridWidth: w, gridHeight: h, dt }),
     });
-    time += dt;
   }
   for (let i = 0; i < ${FLICKER_WARMUP_STEPS}; i += 1) frame();
 

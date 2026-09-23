@@ -13,6 +13,7 @@ import {
   MEDIUM_DEFAULTS,
   MEDIUM_EMIT_SHADER,
   MEDIUM_SEED_SHADER,
+  MEDIUM_TIME_PERIOD,
   MEDIUM_TRACK_ADVECT_SHADER,
   MEDIUM_VAPOR_CORRECT_SHADER,
   MEDIUM_VAPOR_FORWARD_SHADER,
@@ -37,8 +38,9 @@ export type MediumRuntime = {
   ensureGrid(gridWidth: number, gridHeight: number): void;
   /** One transport step for all three buffers (vapor and condensate via MacCormack:
    *  forward/correct/react, see `advect-shader.ts`; tracks via a single backtrace plus decay),
-   *  ping-ponging their own FBOs. */
-  step(dt: number, time: number, params?: Partial<VireUIKitMediumParams>): void;
+   *  ping-ponging their own FBOs. The field's phase (curl-noise's time axis) is this runtime's own
+   *  state, accumulated from `dt` — see `u_phase` below — not derived from a caller-supplied clock. */
+  step(dt: number, params?: Partial<VireUIKitMediumParams>): void;
   /**
    * Stamps tracks into the TRACK buffer just refreshed by advection — via additive blending,
    * rather than a separate pass or its own position list. From there the same field carries them
@@ -229,17 +231,32 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   function bindVelocityUniforms(
     loc: (name: string) => WebGLUniformLocation | null,
     dt: number,
-    time: number,
+    phase: number,
     p: VireUIKitMediumParams,
   ): void {
     setUniform(gl, loc('u_dyeSize'), [gridW, gridH]);
     setUniform(gl, loc('u_resolution'), [gridW, gridH]);
     setUniform(gl, loc('u_dt'), dt);
-    setUniform(gl, loc('u_time'), time);
+    setUniform(gl, loc('u_phase'), phase);
     setUniform(gl, loc('u_curlFreq'), p.curlFreq);
-    setUniform(gl, loc('u_curlSpeed'), p.curlSpeed);
     setUniform(gl, loc('u_advectSpeed'), p.advectSpeed);
     setUniform(gl, loc('u_turbulence'), p.turbulence);
+  }
+
+  // The field's phase — curl-noise's time axis, accumulated here in float64 rather than derived
+  // from an ever-growing caller-supplied clock, and wrapped at MEDIUM_TIME_PERIOD (noise.ts's
+  // MEDIUM_TIME_OCTAVES makes that wrap exact, not approximate). Sending a raw, ever-growing
+  // `time * curlSpeed` product to the GPU as a float32 uniform eventually loses the bits that
+  // place a point within its own lattice cell — after hours of playback the field would visibly
+  // jitter in place. Wrapping the ACCUMULATOR keeps its magnitude bounded, and because the rate is
+  // baked in incrementally rather than multiplied in fresh every frame, changing `curlSpeed` at
+  // runtime changes the slope going forward instead of rescaling everything already accumulated —
+  // no jump.
+  let phase = 0;
+
+  function wrapPhase(value: number): number {
+    const wrapped = value % MEDIUM_TIME_PERIOD;
+    return wrapped < 0 ? wrapped + MEDIUM_TIME_PERIOD : wrapped;
   }
 
   // A semi-Lagrangian gather over a non-uniform velocity has no obligation to conserve the sum by
@@ -255,7 +272,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   let timeSinceRenorm = 0;
   let framesSinceRenorm = 0;
 
-  function step(dt: number, time: number, params: Partial<VireUIKitMediumParams> = {}): void {
+  function step(dt: number, params: Partial<VireUIKitMediumParams> = {}): void {
     if (
       !vapor ||
       !condensate ||
@@ -271,6 +288,8 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     // dt is clamped: a tab returning from the background would otherwise carry advection past the
     // grid's bounds in one jump, sweeping all the smoke to an edge in a single frame.
     const clampedDt = Math.min(Math.max(dt, 0), 1 / 15);
+    // Advance and wrap the phase BEFORE using it this frame — see the comment on `phase` above.
+    phase = wrapPhase(phase + clampedDt * p.curlSpeed);
     const back = front === 0 ? 1 : 0;
     const gridSize: readonly [number, number] = [gridW, gridH];
 
@@ -283,13 +302,13 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.bindFramebuffer(gl.FRAMEBUFFER, vaporForward.fbo);
     gl.useProgram(vaporForwardProgram);
     bindTextureAt(gl, 0, vapor[front].texture, vaporForwardProgram, 'u_dye');
-    bindVelocityUniforms(vaporForwardLoc, clampedDt, time, p);
+    bindVelocityUniforms(vaporForwardLoc, clampedDt, phase, p);
     drawFullscreenTriangle(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, condensateForward.fbo);
     gl.useProgram(condensateForwardProgram);
     bindTextureAt(gl, 0, condensate[front].texture, condensateForwardProgram, 'u_dye');
-    bindVelocityUniforms(condensateForwardLoc, clampedDt, time, p);
+    bindVelocityUniforms(condensateForwardLoc, clampedDt, phase, p);
     setUniform(gl, condensateForwardLoc('u_settleSpeed'), p.condensateSettleSpeed);
     drawFullscreenTriangle(gl);
 
@@ -301,7 +320,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     // <name>Size for every `uniform shader`) — the second (cross-) sampler needs its own size set
     // separately, or it silently stays (0,0) and `.eval()` divides the coordinate by zero.
     setUniform(gl, vaporCorrectLoc('u_forwardSize'), gridSize);
-    bindVelocityUniforms(vaporCorrectLoc, clampedDt, time, p);
+    bindVelocityUniforms(vaporCorrectLoc, clampedDt, phase, p);
     drawFullscreenTriangle(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, condensateCorrected.fbo);
@@ -309,7 +328,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     bindTextureAt(gl, 0, condensate[front].texture, condensateCorrectProgram, 'u_dye');
     bindTextureAt(gl, 1, condensateForward.texture, condensateCorrectProgram, 'u_forward');
     setUniform(gl, condensateCorrectLoc('u_forwardSize'), gridSize);
-    bindVelocityUniforms(condensateCorrectLoc, clampedDt, time, p);
+    bindVelocityUniforms(condensateCorrectLoc, clampedDt, phase, p);
     setUniform(gl, condensateCorrectLoc('u_settleSpeed'), p.condensateSettleSpeed);
     drawFullscreenTriangle(gl);
 
@@ -354,7 +373,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.bindFramebuffer(gl.FRAMEBUFFER, track[back].fbo);
     gl.useProgram(trackAdvectProgram);
     bindTextureAt(gl, 0, track[front].texture, trackAdvectProgram, 'u_dye');
-    bindVelocityUniforms(trackAdvectLoc, clampedDt, time, p);
+    bindVelocityUniforms(trackAdvectLoc, clampedDt, phase, p);
     setUniform(gl, trackAdvectLoc('u_decay'), p.decay);
     drawFullscreenTriangle(gl);
 
