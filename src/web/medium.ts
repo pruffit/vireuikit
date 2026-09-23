@@ -60,6 +60,10 @@ export type MediumRuntime = {
   /** The raw VAPOR grid, at simulation-grid resolution, `data` as r/g/b triples (three species)
    *  per cell, not a sum. Used by the structure gate (contrast BETWEEN species across the grid). */
   readVaporGrid(): { cols: number; rows: number; data: number[] } | null;
+  /** The raw CONDENSATE grid, at simulation-grid resolution, `data` as one density value per
+   *  cell (condensate has no color — see `readVaporGrid`'s r/g/b for the contrast). Used by the
+   *  gravity gate to find the density-weighted row where the mass sits. */
+  readCondensateGrid(): { cols: number; rows: number; data: number[] } | null;
   destroy(): void;
 };
 
@@ -497,6 +501,27 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     return { cols: gridW, rows: gridH, data };
   }
 
+  // One number per cell, not three: condensate has no color of its own (density lives in .r,
+  // g/b unused — see MEDIUM_CONDENSATE_REACT_SHADER). A gravity gate reads THIS, row-weighting the
+  // density to find where the mass sits, without decoding an RGB triple that's two-thirds padding.
+  function readCondensateGrid(): { cols: number; rows: number; data: number[] } | null {
+    if (!condensate) return null;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, condensate[front].fbo);
+    const cells = gridW * gridH;
+    const data = new Array(cells);
+    if (format.type === gl.HALF_FLOAT) {
+      const buf = new Float32Array(cells * 4);
+      gl.readPixels(0, 0, gridW, gridH, gl.RGBA, gl.FLOAT, buf);
+      for (let i = 0; i < cells; i += 1) data[i] = buf[i * 4];
+    } else {
+      const buf = new Uint8Array(cells * 4);
+      gl.readPixels(0, 0, gridW, gridH, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      for (let i = 0; i < cells; i += 1) data[i] = buf[i * 4] / 255;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { cols: gridW, rows: gridH, data };
+  }
+
   function destroy(): void {
     destroyTargets();
     gl.deleteProgram(vaporForwardProgram);
@@ -511,5 +536,5 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.deleteProgram(emitProgram);
   }
 
-  return { ensureGrid, step, emit, composite, readTotals, readVaporGrid, destroy };
+  return { ensureGrid, step, emit, composite, readTotals, readVaporGrid, readCondensateGrid, destroy };
 }
