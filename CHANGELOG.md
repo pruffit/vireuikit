@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+Fixes the backdrop reading as a lattice of straight lines at the product's own default size and
+grid (1920x952, 74x37): four causes, four independent fixes.
+
+- The curl-noise potential is now periodic over the simulation grid in space, not just in time:
+  each octave's spatial frequency is adjusted per grid size to the nearest value that makes a full
+  grid width/height an exact integer number of lattice cells (`computeMediumSpatialPeriods`,
+  `vgPotentialSeamless`/`vgCurlVelocitySeamless` in `noise.ts`), so velocity no longer jumps at the
+  domain's own wrap — the far plane's tile boundary reads as an ordinary point in the field. The
+  period floor for a very-low-frequency octave (`MIN_SPATIAL_PERIOD`) scales both axes together
+  rather than independently, or a non-square grid would land on different periods per axis and
+  trade the seam for a directional stretch.
+- The far plane's blur is an 8-tap ring rotated 22.5° off the axes, replacing the old ±x/±y 4-tap
+  box: axis-aligned taps read the same column/row on both sides of any residual axis-aligned
+  structure, which is how a single seam got doubled into four parallel lines.
+- Condensate settling adds a second, unconditional share of the ambient curl field's own sideways
+  push (`condensateSettleWiggle`) on top of the existing turbulence-gated one, so a droplet falling
+  at a constant speed doesn't trace a dead-straight vertical line when ambient turbulence is
+  otherwise low (rest/paused).
+- The near plane's vapor and condensate reads use cubic B-spline reconstruction (4 bilinear taps,
+  Sigg & Hadwiger 2005) instead of plain bilinear, so the grid's own cells stop reading as squares
+  with staircase edges at typical (coarse) grid sizes. Track and the (already blurred) far plane
+  stay plain bilinear.
+- `check:medium` adds an isotropy gate: Sobel gradient energy near the axes (0°/90°) vs. the
+  diagonals (45°/135°) on the composited frame at the product's own size/grid, plus a seam check
+  isolating the far plane's own contribution at its tile-wrap column. The seam check is gated (a
+  canary sharing the fix's own noise frequencies but not its periodicity must read as discontinuous
+  there; the fix must not). The whole-frame axis/diagonal ratio is reported every run but not
+  gated — measured on this rig it did not consistently separate the fix from that same canary, most
+  likely a coarse-grid reconstruction effect at extreme (26x) upsampling this pass did not fully
+  isolate from the seam itself; left as a known gap rather than a threshold picked to avoid it.
+
 ## 0.2.0
 
 - The backdrop reads as a chamber seen from the side: the composite samples the same
