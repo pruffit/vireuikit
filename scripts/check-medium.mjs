@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB = resolve(HERE, '../src/web/index.ts').replace(/\\/g, '/');
 const MEDIUM = resolve(HERE, '../src/medium/index.ts').replace(/\\/g, '/');
+const NOISE = resolve(HERE, '../src/medium/noise.ts').replace(/\\/g, '/');
 
 // --- Gravity (the bug this gate exists for) -------------------------------------------------
 
@@ -389,8 +390,8 @@ import {
   setUniform,
 } from 'vireglass/web';
 import { createMediumBackdrop } from '${WEB}';
+import { computeMediumSpatialPeriods } from '${NOISE}';
 import {
-  computeMediumSpatialPeriods,
   depthFarOffsetPx,
   MEDIUM_COMPOSITE_SHADER,
   MEDIUM_CONDENSATE_CORRECT_SHADER,
@@ -1439,7 +1440,9 @@ globalThis.vgCompositeCost = async () => {
 // exactly the four things the fix changed (a sanity run with tracks included, through the real
 // public API, is in the fix's own report).
 //
-// canary=true isolates PERIODICITY as the only variable: it shares the EXACT SAME per-octave
+// canary=true is the pre-fix medium, not a single-variable switch: a non-periodic lattice, no
+// settle wiggle and the old composite together, so a failure of the correct rig can come from any
+// of the three. Its lattice shares the EXACT SAME per-octave
 // frequencies computeMediumSpatialPeriods gives the correct rig (so both rigs carry the same
 // turbulence intensity — see bindVelocity's own comment for why matching current main's RAW
 // MEDIUM_TIME_OCTAVES scales instead, a first-draft of this canary, was a confound rather than a

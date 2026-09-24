@@ -143,3 +143,26 @@ describe('vgPotentialSeamlessJS: periodic over the GRID DOMAIN, in space, at eve
     expect(sawADifference).toBe(true);
   });
 });
+
+describe('computeMediumSpatialPeriods: the lattice stays isotropic on non-square grids', () => {
+  // Flooring each axis on its own once gave the macro octave a 2:1 lattice on a 74x37 grid, which
+  // drew the field along one axis; only the slow isotropy gate would have caught it.
+  it('keeps each octave within 0.8..1.25 of equal frequency on both axes', () => {
+    const sides = [12, 20, 31, 37, 48, 64, 72, 74, 96, 119, 128, 192, 240, 256];
+    for (const w of sides) {
+      for (const h of sides) {
+        for (const o of computeMediumSpatialPeriods(w, h, MEDIUM_DEFAULTS.curlFreq)) {
+          const ratio = o.freqX / o.freqY;
+          expect(ratio, `${w}x${h}`).toBeGreaterThanOrEqual(0.8);
+          expect(ratio, `${w}x${h}`).toBeLessThanOrEqual(1.25);
+        }
+      }
+    }
+  });
+
+  it('survives a zero curl frequency without handing the shader Infinity', () => {
+    for (const o of computeMediumSpatialPeriods(74, 37, 0)) {
+      expect(Number.isFinite(o.freqX) && Number.isFinite(o.freqY)).toBe(true);
+    }
+  });
+});

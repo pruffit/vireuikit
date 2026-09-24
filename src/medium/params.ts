@@ -98,7 +98,8 @@ export type VireUIKitMediumParams = {
    *  `depthFarOffsetPx` below and `check-medium.mjs`'s decorrelation gate, which measures this
    *  directly at the README's own 128x72. */
   depthFarOffsetFrac: readonly [number, number];
-  /** Grid-px tap radius for the far plane's 4-tap box blur. A spatial average cannot raise local
+  /** Grid-px radius of the far plane's 8-tap ring blur, rotated so no tap pair lies on a grid
+   *  axis. A spatial average cannot raise local
    *  variance, so the same blur that softens the far plane's edges also, by construction, lowers
    *  its measured contrast — one mechanism for both aerial-perspective cues (no separate contrast
    *  knob exists). 0 disables it (the near plane stays sharp). Measured: reading the far plane's

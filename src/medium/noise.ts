@@ -385,16 +385,18 @@ export function computeMediumSpatialPeriods(
   gridHeight: number,
   curlFreq: number,
 ): readonly MediumSpatialOctave[] {
+  // A zero frequency would divide by zero below and hand the shader Infinity.
+  const freq = Math.max(curlFreq, 1e-6);
   return MEDIUM_TIME_OCTAVES.map((o) => {
-    const rawX = gridWidth * curlFreq * o.scale;
-    const rawY = gridHeight * curlFreq * o.scale;
+    const rawX = gridWidth * freq * o.scale;
+    const rawY = gridHeight * freq * o.scale;
     const minRaw = Math.min(rawX, rawY);
     const scaleUp = minRaw > 0 && minRaw < MIN_SPATIAL_PERIOD ? MIN_SPATIAL_PERIOD / minRaw : 1;
     const periodX = Math.max(MIN_SPATIAL_PERIOD, Math.round(rawX * scaleUp));
     const periodY = Math.max(MIN_SPATIAL_PERIOD, Math.round(rawY * scaleUp));
     return {
-      freqX: periodX / (gridWidth * curlFreq),
-      freqY: periodY / (gridHeight * curlFreq),
+      freqX: periodX / (gridWidth * freq),
+      freqY: periodY / (gridHeight * freq),
       periodX,
       periodY,
     };

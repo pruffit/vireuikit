@@ -30,8 +30,8 @@ import { VG_OKLAB_TO_SRGB } from './oklab';
 // second time at a different scale and offset (see MEDIUM_DEFAULTS.depthFarScale/depthFarOffsetFrac
 // — u_farOffset itself arrives already resolved to grid-px, see depthFarOffsetPx in params.ts).
 // Reading the identical evolving field through two different "lenses" gives parallax and finer
-// far-plane structure from one number (`depthFarScale`) with no extra grid to step, and a cheap
-// 4-tap blur gives the far plane aerial perspective's blur AND lower contrast from one mechanism
+// far-plane structure from one number (`depthFarScale`) with no extra grid to step, and an 8-tap
+// ring blur gives the far plane aerial perspective's blur AND lower contrast from one mechanism
 // (a spatial average cannot raise local variance). Tracks are NOT re-sampled per plane — a track's
 // own depth is baked into its stamped width/intensity at emission time (`dynamics.ts`), not into a
 // second read here.
