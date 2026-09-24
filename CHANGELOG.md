@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 Fixes the backdrop reading as a lattice of straight lines at the product's own default size and
 grid (1920x952, 74x37): four causes, four independent fixes.
