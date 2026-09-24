@@ -6,6 +6,7 @@
 // Vapor and condensate form ONE conserved sum — water; tracks aren't part of it, and their decay
 // and stamping haven't been folded into that accounting.
 import {
+  computeMediumSpatialPeriods,
   depthFarOffsetPx,
   MEDIUM_COMPOSITE_SHADER,
   MEDIUM_CONDENSATE_CORRECT_SHADER,
@@ -312,6 +313,14 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     // Only the vapor forward/correct programs declare u_vaporDrift; elsewhere loc() returns null
     // and setUniform silently skips it, same as the curl uniforms already do for the react passes.
     setUniform(gl, loc('u_vaporDrift'), p.gravityVaporDrift);
+    // Recomputed every call rather than cached on resize: it's four octaves of cheap arithmetic
+    // (computeMediumSpatialPeriods), and p.curlFreq can change between calls (a caller-supplied
+    // param override), which would silently stale a cached value.
+    const spatial = computeMediumSpatialPeriods(gridW, gridH, p.curlFreq);
+    setUniform(gl, loc('u_spatial0'), [spatial[0].freqX, spatial[0].freqY, spatial[0].periodX, spatial[0].periodY]);
+    setUniform(gl, loc('u_spatial1'), [spatial[1].freqX, spatial[1].freqY, spatial[1].periodX, spatial[1].periodY]);
+    setUniform(gl, loc('u_spatial2'), [spatial[2].freqX, spatial[2].freqY, spatial[2].periodX, spatial[2].periodY]);
+    setUniform(gl, loc('u_spatial3'), [spatial[3].freqX, spatial[3].freqY, spatial[3].periodX, spatial[3].periodY]);
   }
 
   // The field's phase — curl-noise's time axis, accumulated here in float64 rather than derived
@@ -381,6 +390,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     bindTextureAt(gl, 0, condensate[front].texture, condensateForwardProgram, 'u_dye');
     bindVelocityUniforms(condensateForwardLoc, clampedDt, phase, p);
     setUniform(gl, condensateForwardLoc('u_settleSpeed'), p.condensateSettleSpeed);
+    setUniform(gl, condensateForwardLoc('u_settleWiggle'), p.condensateSettleWiggle);
     drawFullscreenTriangle(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, vaporCorrected.fbo);
@@ -401,6 +411,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     setUniform(gl, condensateCorrectLoc('u_forwardSize'), gridSize);
     bindVelocityUniforms(condensateCorrectLoc, clampedDt, phase, p);
     setUniform(gl, condensateCorrectLoc('u_settleSpeed'), p.condensateSettleSpeed);
+    setUniform(gl, condensateCorrectLoc('u_settleWiggle'), p.condensateSettleWiggle);
     drawFullscreenTriangle(gl);
 
     // --- Reaction: vapor<->condensate exchange and droplet growth, on the already transported

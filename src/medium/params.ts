@@ -39,6 +39,17 @@ export type VireUIKitMediumParams = {
   /** grid-px/s — condensate drift downward, on top of the shared velocity field: gravity touches
    *  droplets and leaves vapor alone. */
   condensateSettleSpeed: number;
+  /** Multiplier on the ambient curl field's OWN x-component, added to settling UNCONDITIONALLY
+   *  (not gated by `turbulence` the way the shared velocity field is) — see
+   *  MEDIUM_ADVECT_VELOCITY_SETTLE in advect-shader.ts. Without it, a droplet falling at a constant
+   *  `condensateSettleSpeed` with only a turbulence-gated sideways push traces a near-straight
+   *  vertical line whenever turbulence is low (rest/paused: 0.045, over 20x below the gated push
+   *  needed to bend the fall) — many droplets in nearby columns then read as parallel vertical
+   *  streaks, one of the axis-aligned artifacts `check-medium.mjs`'s isotropy gate measures. Reuses
+   *  the SAME seamless curl field `vel` already reads rather than a second noise system, so it adds
+   *  no new seam of its own. Calibrated against that gate at the product's default grid (1920x952,
+   *  74x37) — see the gate's own report for the measured ratio at this value. */
+  condensateSettleWiggle: number;
   /** 1/s — the rate at which a droplet blends with its grid neighbors. There is no separate age
    *  counter: the blend repeats every frame, and whatever has survived more frames ends up more
    *  blended with its neighbors on its own — that IS "growth". Keep it NOTICEABLY below
@@ -139,6 +150,7 @@ export const MEDIUM_DEFAULTS: VireUIKitMediumParams = {
   condensationFloor: 0.12,
   evaporationRate: 0.2,
   condensateSettleSpeed: 8,
+  condensateSettleWiggle: 0.4,
   condensateSpreadRate: 0.08,
   condensateTint: 0.2,
   condensateGain: 5,
