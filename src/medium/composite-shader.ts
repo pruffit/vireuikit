@@ -39,6 +39,56 @@ import { VG_OKLAB_TO_SRGB } from './oklab';
 // The far plane folds into the SAME weighted-average-in-Oklab this file already used for species:
 // its weights simply add to the near plane's before the one division, exactly the technique species
 // already use to combine three channels without the sum ever pulling toward gray.
+// Cubic B-spline reconstruction from 4 bilinear taps (Sigg & Hadwiger 2005) — the standard trick
+// that gets a smooth surface out of the grid's own bilinear filtering instead of 16 point samples.
+// Needed because check-medium.mjs's isotropy gate measures it directly: at the product's default
+// coarse grid (74x37 at 1920x952), plain bilinear plus this shader's own nonlinear Oklab mix shows
+// the grid's cells as squares with staircase edges (see the gate's report for the measured ratio).
+// `vgCubicWeights` computes the four B-spline basis weights at fractional position `v`; each of
+// the two `vgBicubicN` functions below is the SAME sampling formula against a DIFFERENT texture —
+// the transpiler's `.eval()` rewrite (vireglass's targets/glsl.ts) matches call sites by the
+// literal declared uniform name, not by a function parameter, so a texture can't be passed in as an
+// argument; the formula is instead generated once per texture name by `vgBicubicSampler` in JS,
+// the same way noise.ts's octave text is generated from MEDIUM_TIME_OCTAVES rather than retyped.
+// Applied to vapor and condensate (the two fields that make up the visible "gas" body); NOT to the
+// far plane, which is already blurred (a spatial average already hides blockiness on its own), or
+// to tracks (thin, high-contrast, already-sharp stamps — bicubic softening would blur the "fresh
+// ionization" look the head/tail intensity split exists for, at a cost with no matching benefit).
+const VG_CUBIC_WEIGHTS = `
+float4 vgCubicWeights(float v) {
+  float4 n = float4(1.0, 2.0, 3.0, 4.0) - v;
+  float4 s = n * n * n;
+  float x = s.x;
+  float y = s.y - 4.0 * s.x;
+  float z = s.z - 4.0 * s.y + 6.0 * s.x;
+  float w = 6.0 - x - y - z;
+  return float4(x, y, z, w) * (1.0 / 6.0);
+}
+`;
+
+function vgBicubicSampler(fnName: string, textureName: string): string {
+  return `
+half4 ${fnName}(float2 px) {
+  float2 shifted = px - 0.5;
+  float2 fxy = fract(shifted);
+  float2 base = shifted - fxy;
+  float4 xw = vgCubicWeights(fxy.x);
+  float4 yw = vgCubicWeights(fxy.y);
+  float2 sx = float2(xw.x + xw.z, xw.y + xw.w);
+  float2 sy = float2(yw.x + yw.z, yw.y + yw.w);
+  float2 offsetX = float2(base.x - 0.5 + xw.y / sx.x, base.x + 1.5 + xw.w / sx.y);
+  float2 offsetY = float2(base.y - 0.5 + yw.y / sy.x, base.y + 1.5 + yw.w / sy.y);
+  half4 s00 = ${textureName}.eval(float2(offsetX.x, offsetY.x));
+  half4 s10 = ${textureName}.eval(float2(offsetX.y, offsetY.x));
+  half4 s01 = ${textureName}.eval(float2(offsetX.x, offsetY.y));
+  half4 s11 = ${textureName}.eval(float2(offsetX.y, offsetY.y));
+  float wx = sx.x / (sx.x + sx.y);
+  float wy = sy.x / (sy.x + sy.y);
+  return mix(mix(s11, s01, wx), mix(s10, s00, wx), wy);
+}
+`;
+}
+
 export const MEDIUM_COMPOSITE_SHADER = `
 uniform shader u_vapor;
 uniform shader u_condensate;
@@ -60,25 +110,44 @@ uniform float  u_gravityBoost;
 uniform float  u_gravityBoostStart;
 
 ${VG_OKLAB_TO_SRGB}
+${VG_CUBIC_WEIGHTS}
+${vgBicubicSampler('vgBicubicVapor', 'u_vapor')}
+${vgBicubicSampler('vgBicubicCondensate', 'u_condensate')}
 
 half4 main(float2 xy) {
   float2 baseSrc = xy * u_dyeScale;
 
-  // Near plane — sampled exactly as before the depth work; the calibrated look lives here.
-  half4 vapor = u_vapor.eval(baseSrc);
-  half4 condensate = u_condensate.eval(baseSrc);
+  // Near plane — the calibrated look lives here. Bicubic (see the file header) on vapor and
+  // condensate; track stays a plain bilinear read.
+  half4 vapor = vgBicubicVapor(baseSrc);
+  half4 condensate = vgBicubicCondensate(baseSrc);
   half4 track = u_track.eval(baseSrc);
 
-  // Far plane — the identical field, scaled and offset (see the file header). A 4-tap box blur
-  // (no separate center sample, the cheapest isotropic blur available) supplies aerial perspective's
-  // blur and, as a side effect of averaging, its lower contrast too.
+  // Far plane — the identical field, scaled and offset (see the file header). An 8-tap ring, not
+  // the near plane's ±x/±y box: axis-aligned taps read the SAME column/row on both sides of any
+  // residual axis-aligned structure (a seam, a resize artifact), which is exactly how a straight
+  // line gets doubled into four parallel copies instead of softened away — measured directly via
+  // check-medium.mjs's isotropy gate (see its report). The ring is rotated a half-step (22.5°) off
+  // the axes so no tap direction ever coincides with a grid row or column. Radius stays in the same
+  // far-plane texture-space unit as before (u_farBlurRadius, grid-px) — only the tap PATTERN
+  // changed, not what it measures in.
   float2 farSrc = baseSrc * u_farScale + u_farOffset;
-  float2 blurX = float2(u_farBlurRadius, 0.0);
-  float2 blurY = float2(0.0, u_farBlurRadius);
-  half4 vaporFar = (u_vapor.eval(farSrc + blurX) + u_vapor.eval(farSrc - blurX) +
-                     u_vapor.eval(farSrc + blurY) + u_vapor.eval(farSrc - blurY)) * half4(0.25);
-  half4 condensateFar = (u_condensate.eval(farSrc + blurX) + u_condensate.eval(farSrc - blurX) +
-                          u_condensate.eval(farSrc + blurY) + u_condensate.eval(farSrc - blurY)) * half4(0.25);
+  float2 ring0 = float2( 0.9238795,  0.3826834) * u_farBlurRadius;
+  float2 ring1 = float2( 0.3826834,  0.9238795) * u_farBlurRadius;
+  float2 ring2 = float2(-0.3826834,  0.9238795) * u_farBlurRadius;
+  float2 ring3 = float2(-0.9238795,  0.3826834) * u_farBlurRadius;
+  float2 ring4 = float2(-0.9238795, -0.3826834) * u_farBlurRadius;
+  float2 ring5 = float2(-0.3826834, -0.9238795) * u_farBlurRadius;
+  float2 ring6 = float2( 0.3826834, -0.9238795) * u_farBlurRadius;
+  float2 ring7 = float2( 0.9238795, -0.3826834) * u_farBlurRadius;
+  half4 vaporFar = (u_vapor.eval(farSrc + ring0) + u_vapor.eval(farSrc + ring1) +
+                     u_vapor.eval(farSrc + ring2) + u_vapor.eval(farSrc + ring3) +
+                     u_vapor.eval(farSrc + ring4) + u_vapor.eval(farSrc + ring5) +
+                     u_vapor.eval(farSrc + ring6) + u_vapor.eval(farSrc + ring7)) * half4(0.125);
+  half4 condensateFar = (u_condensate.eval(farSrc + ring0) + u_condensate.eval(farSrc + ring1) +
+                          u_condensate.eval(farSrc + ring2) + u_condensate.eval(farSrc + ring3) +
+                          u_condensate.eval(farSrc + ring4) + u_condensate.eval(farSrc + ring5) +
+                          u_condensate.eval(farSrc + ring6) + u_condensate.eval(farSrc + ring7)) * half4(0.125);
 
   // Gravity's "denser layer at the bottom of the chamber" — a compositing-only boost (see
   // MEDIUM_DEFAULTS.gravityBottomBoost): it scales how density already in the conserved buffers is
