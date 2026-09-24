@@ -31,6 +31,14 @@ uniform float  u_phase;
 uniform float  u_curlFreq;
 uniform float  u_advectSpeed;
 uniform float  u_turbulence;
+// One float4 per MEDIUM_TIME_OCTAVES entry: xy is that octave's seamless spatial frequency, zw its
+// matching integer lattice period — both grid-size-dependent, so they can't be compile-time
+// constants (see vgPotentialSeamless/computeMediumSpatialPeriods in noise.ts). Recomputed by
+// web/medium.ts's bindVelocityUniforms every frame from the live grid dimensions.
+uniform float4 u_spatial0;
+uniform float4 u_spatial1;
+uniform float4 u_spatial2;
+uniform float4 u_spatial3;
 
 ${VG_CURL_NOISE}
 `;
@@ -41,15 +49,29 @@ ${VG_CURL_NOISE}
 // flicker across half the refresh rate. The rule is the same for ANY read of a smoke texture via
 // `.eval()` in this file: composite-shader.ts reads these same buffers for display and has to flip
 // the same way.
+//
+// `curl` is kept as its own variable (not folded straight into `vel`) so MEDIUM_ADVECT_VELOCITY_SETTLE
+// below can reuse its x component directly, at full (untouched by `u_turbulence`) strength.
 const MEDIUM_ADVECT_VELOCITY = `
-  float2 vel = vgCurlVelocity(xy * u_curlFreq, u_phase) * u_advectSpeed * u_turbulence;
+  float2 curl = vgCurlVelocitySeamless(xy * u_curlFreq, u_phase, u_spatial0, u_spatial1, u_spatial2, u_spatial3);
+  float2 vel = curl * u_advectSpeed * u_turbulence;
 `;
 
 // Gravity touches only the condensate — an addition on top of the shared field rather than a
 // separate calculation: droplets are carried by the same wind as vapor, plus a downward drift.
+//
+// `u_settleWiggle` adds a SECOND, unconditional share of the ambient curl's own sideways push —
+// unlike `vel`'s turbulence-gated share above, this one doesn't vanish when turbulence is low. A
+// constant per-cell downward speed with no lateral term traces a dead-straight vertical line: at
+// rest (turbulence ~0.045) the turbulence-gated curl is over an order of magnitude below
+// `u_settleSpeed` and does nothing to break that line up, which is exactly the artifact the
+// isotropy gate exists to catch (see check-medium.mjs and MEDIUM_DEFAULTS.condensateSettleWiggle's
+// own comment for the calibration). Reusing `curl` needs no new noise field and is periodic for
+// free — it is the same seamless field `vel` already reads.
 const MEDIUM_ADVECT_VELOCITY_SETTLE = `
 ${MEDIUM_ADVECT_VELOCITY}
   vel.y += u_settleSpeed;
+  vel.x += curl.x * u_advectSpeed * u_settleWiggle;
 `;
 
 // The gas itself leans down too, just far less than condensate: "from the side" only reads if
@@ -78,6 +100,7 @@ ${MEDIUM_ADVECT_VELOCITY_VAPOR}
 export const MEDIUM_CONDENSATE_FORWARD_SHADER = `
 ${MEDIUM_ADVECT_UNIFORMS}
 uniform float u_settleSpeed;
+uniform float u_settleWiggle;
 
 half4 main(float2 xy) {
 ${MEDIUM_ADVECT_VELOCITY_SETTLE}
@@ -134,6 +157,7 @@ ${MEDIUM_MACCORMACK_CORRECT}
 export const MEDIUM_CONDENSATE_CORRECT_SHADER = `
 ${MEDIUM_ADVECT_UNIFORMS}
 uniform float u_settleSpeed;
+uniform float u_settleWiggle;
 uniform shader u_forward;
 
 half4 main(float2 xy) {

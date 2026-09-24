@@ -5,6 +5,7 @@
 // they grow, settle, and exchange with vapor) and tracks (born from a stamp, fade through decay).
 // Vapor and condensate form ONE conserved sum — water; tracks aren't part of it, and their decay
 // and stamping haven't been folded into that accounting.
+import { computeMediumSpatialPeriods, type MediumSpatialOctave } from '../medium/noise';
 import {
   depthFarOffsetPx,
   MEDIUM_COMPOSITE_SHADER,
@@ -301,6 +302,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     dt: number,
     phase: number,
     p: VireUIKitMediumParams,
+    spatial: readonly MediumSpatialOctave[],
   ): void {
     setUniform(gl, loc('u_dyeSize'), [gridW, gridH]);
     setUniform(gl, loc('u_resolution'), [gridW, gridH]);
@@ -312,6 +314,10 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     // Only the vapor forward/correct programs declare u_vaporDrift; elsewhere loc() returns null
     // and setUniform silently skips it, same as the curl uniforms already do for the react passes.
     setUniform(gl, loc('u_vaporDrift'), p.gravityVaporDrift);
+    setUniform(gl, loc('u_spatial0'), [spatial[0].freqX, spatial[0].freqY, spatial[0].periodX, spatial[0].periodY]);
+    setUniform(gl, loc('u_spatial1'), [spatial[1].freqX, spatial[1].freqY, spatial[1].periodX, spatial[1].periodY]);
+    setUniform(gl, loc('u_spatial2'), [spatial[2].freqX, spatial[2].freqY, spatial[2].periodX, spatial[2].periodY]);
+    setUniform(gl, loc('u_spatial3'), [spatial[3].freqX, spatial[3].freqY, spatial[3].periodX, spatial[3].periodY]);
   }
 
   // The field's phase — curl-noise's time axis, accumulated here in float64 rather than derived
@@ -356,6 +362,8 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
       return;
     }
     const p = { ...MEDIUM_DEFAULTS, ...params };
+    // Per step, not cached on resize: a caller may override curlFreq between frames.
+    const spatial = computeMediumSpatialPeriods(gridW, gridH, p.curlFreq);
     // dt is clamped: a tab returning from the background would otherwise carry advection past the
     // grid's bounds in one jump, sweeping all the smoke to an edge in a single frame.
     const clampedDt = Math.min(Math.max(dt, 0), 1 / 15);
@@ -373,14 +381,15 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.bindFramebuffer(gl.FRAMEBUFFER, vaporForward.fbo);
     gl.useProgram(vaporForwardProgram);
     bindTextureAt(gl, 0, vapor[front].texture, vaporForwardProgram, 'u_dye');
-    bindVelocityUniforms(vaporForwardLoc, clampedDt, phase, p);
+    bindVelocityUniforms(vaporForwardLoc, clampedDt, phase, p, spatial);
     drawFullscreenTriangle(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, condensateForward.fbo);
     gl.useProgram(condensateForwardProgram);
     bindTextureAt(gl, 0, condensate[front].texture, condensateForwardProgram, 'u_dye');
-    bindVelocityUniforms(condensateForwardLoc, clampedDt, phase, p);
+    bindVelocityUniforms(condensateForwardLoc, clampedDt, phase, p, spatial);
     setUniform(gl, condensateForwardLoc('u_settleSpeed'), p.condensateSettleSpeed);
+    setUniform(gl, condensateForwardLoc('u_settleWiggle'), p.condensateSettleWiggle);
     drawFullscreenTriangle(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, vaporCorrected.fbo);
@@ -391,7 +400,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     // <name>Size for every `uniform shader`) — the second (cross-) sampler needs its own size set
     // separately, or it silently stays (0,0) and `.eval()` divides the coordinate by zero.
     setUniform(gl, vaporCorrectLoc('u_forwardSize'), gridSize);
-    bindVelocityUniforms(vaporCorrectLoc, clampedDt, phase, p);
+    bindVelocityUniforms(vaporCorrectLoc, clampedDt, phase, p, spatial);
     drawFullscreenTriangle(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, condensateCorrected.fbo);
@@ -399,8 +408,9 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     bindTextureAt(gl, 0, condensate[front].texture, condensateCorrectProgram, 'u_dye');
     bindTextureAt(gl, 1, condensateForward.texture, condensateCorrectProgram, 'u_forward');
     setUniform(gl, condensateCorrectLoc('u_forwardSize'), gridSize);
-    bindVelocityUniforms(condensateCorrectLoc, clampedDt, phase, p);
+    bindVelocityUniforms(condensateCorrectLoc, clampedDt, phase, p, spatial);
     setUniform(gl, condensateCorrectLoc('u_settleSpeed'), p.condensateSettleSpeed);
+    setUniform(gl, condensateCorrectLoc('u_settleWiggle'), p.condensateSettleWiggle);
     drawFullscreenTriangle(gl);
 
     // --- Reaction: vapor<->condensate exchange and droplet growth, on the already transported
@@ -444,7 +454,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.bindFramebuffer(gl.FRAMEBUFFER, track[back].fbo);
     gl.useProgram(trackAdvectProgram);
     bindTextureAt(gl, 0, track[front].texture, trackAdvectProgram, 'u_dye');
-    bindVelocityUniforms(trackAdvectLoc, clampedDt, phase, p);
+    bindVelocityUniforms(trackAdvectLoc, clampedDt, phase, p, spatial);
     setUniform(gl, trackAdvectLoc('u_decay'), p.decay);
     drawFullscreenTriangle(gl);
 

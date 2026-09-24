@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB = resolve(HERE, '../src/web/index.ts').replace(/\\/g, '/');
 const MEDIUM = resolve(HERE, '../src/medium/index.ts').replace(/\\/g, '/');
+const NOISE = resolve(HERE, '../src/medium/noise.ts').replace(/\\/g, '/');
 
 // --- Gravity (the bug this gate exists for) -------------------------------------------------
 
@@ -328,6 +329,53 @@ const COST_FRAMES = 3000;
  *  report). The depth composite must not cost more than this multiple of the pre-depth one. */
 const MAX_COST_RATIO_WITH_TIMER = 2;
 
+// --- Isotropy: the composited backdrop must not read as a lattice of straight lines --------------
+//
+// The product's OWN default grid at half its real size: round(1920/26) x round(952/26) — same
+// 74x37 grid the diagnosis in the fix's own brief was made against (MEDIUM_DEFAULT_CELL_PX at a
+// 1920x952 canvas), rendered at 960x476 (cell 13px) instead of the full 1920x952. Headless
+// SwiftShader has no GPU to accelerate the composite's ~25 dependent texture taps, and this gate
+// already runs two full pipelines (canary + correct) plus several diagnostic probes per run; the
+// isotropy/seam METRICS are ratios (axis/diagonal energy, seam/typical step) computed from the
+// SAME grid content at a smaller output scale, not absolute pixel counts, so they read the same
+// property at 1/4 the pixels and a large fraction of the wall-clock cost.
+const ISOTROPY_GRID_W = 74;
+const ISOTROPY_GRID_H = 37;
+const ISOTROPY_CANVAS_W = 960;
+const ISOTROPY_CANVAS_H = 476;
+const ISOTROPY_DT = 1 / 30;
+/** 60s of simulated time — plenty for the far-plane seam (present from the first wrap-around read)
+ *  and, more demandingly, for condensate settling to complete many full REPEAT wraps of the grid's
+ *  height (condensateSettleSpeed=8 grid-px/s over a 37-tall grid wraps roughly every 4.6s, so this
+ *  is ~13 wraps) — long enough for a straight-line trail to fully establish if nothing is breaking
+ *  it up. Blockiness needs no warmup at all (a steady property of the grid resolution), so this
+ *  window is sized by the SLOWEST of the three artifacts, not the fastest. */
+const ISOTROPY_STEPS = 1800;
+/** Degrees on each side of an axis/diagonal direction counted as "near" it — the brief's own figure. */
+const ISOTROPY_ANGLE_WINDOW_DEG = 10;
+/**
+ * Ratio of Sobel gradient energy within ±10° of the axes (0°/90°) to energy within ±10° of the
+ * diagonals (45°/135°) — the two windows are equal width (40° total each out of 180°), so an
+ * isotropic field's ratio sits near 1 by construction, not because of an arbitrary normalization.
+ *
+ * Gated. Measured on this rig at 1800 steps (960x476 / 74x37): correct 1.66, a canary sharing
+ * correct's frequencies but not its periodicity 3.74. The threshold sits between them with margin
+ * both ways. A reading of 13.3 once looked like noise in this metric and turned out to be a real
+ * bug — bicubic weights grouped as (x+z, y+w) instead of (x+y, z+w), which drew the grid as
+ * hard-edged squares — so a high ratio here means look at the frame, not at the metric.
+ */
+const MAX_ISOTROPY_RATIO = 2.5;
+/** Mean absolute luma step AT the far plane's tile-wrap column, relative to the median step at
+ *  ordinary (non-seam) columns nearby — mirrors the phase-wrap seam gate's own "seam vs typical"
+ *  ratio, read from the far plane's OWN rendered contribution alone (probeFarField), not the full
+ *  composite (an earlier draft measured the full frame and picked up unrelated near-plane content
+ *  at the same columns). A seamless field reads close to 1 (the wrap column is an ordinary column);
+ *  a genuine discontinuity reads larger. Measured on this rig (vapor, 1800 steps, 960x476/74x37):
+ *  correct 0.545, canary (same frequencies as correct, not periodic) 2.800 — kept with margin on
+ *  both sides of that gap rather than at either edge. */
+const MAX_SEAM_COLUMN_RATIO = 1.5;
+const MIN_CANARY_SEAM_COLUMN_RATIO = 2;
+
 const ENTRY = `
 import { createVireGlassRenderer } from 'vireglass/web';
 import { toGLSL } from 'vireglass';
@@ -342,19 +390,39 @@ import {
   setUniform,
 } from 'vireglass/web';
 import { createMediumBackdrop } from '${WEB}';
+import { computeMediumSpatialPeriods } from '${NOISE}';
 import {
   depthFarOffsetPx,
   MEDIUM_COMPOSITE_SHADER,
   MEDIUM_CONDENSATE_CORRECT_SHADER,
   MEDIUM_CONDENSATE_FORWARD_SHADER,
+  MEDIUM_CONDENSATE_REACT_SHADER,
   MEDIUM_DEFAULTS,
   MEDIUM_SEED_SHADER,
   MEDIUM_TIME_PERIOD,
   MEDIUM_VAPOR_CORRECT_SHADER,
   MEDIUM_VAPOR_FORWARD_SHADER,
+  MEDIUM_VAPOR_REACT_SHADER,
   VG_CURL_NOISE,
   VG_OKLAB_TO_SRGB,
 } from '${MEDIUM}';
+
+// Every hand-rolled probe rig below builds its OWN GL program straight from a real production
+// shader (MEDIUM_*_FORWARD/CORRECT_SHADER), so it also has to bind the seamless-noise uniforms
+// those shaders now declare (u_spatial0..3, see noise.ts/advect-shader.ts) — left unset, they
+// default to (0,0,0,0), which collapses vgPotentialSeamless to a SPATIALLY UNIFORM field (every
+// pixel samples the identical lattice cell) and silently zeroes curl everywhere. Most rigs run at
+// u_turbulence=0 anyway (isolating a different mechanism) so this never showed up as a wrong
+// PASS — except the contrast/decorrelation rigs, which need REAL turbulent mixing and, measured
+// directly, produced a materially different (weaker) contrast-reduction number with it silently
+// broken. \`bindSpatial\` centralizes the fix so every rig computes it the same way production does.
+function bindSpatial(gl, loc, w, h, curlFreq) {
+  const spatial = computeMediumSpatialPeriods(w, h, curlFreq);
+  setUniform(gl, loc('u_spatial0'), [spatial[0].freqX, spatial[0].freqY, spatial[0].periodX, spatial[0].periodY]);
+  setUniform(gl, loc('u_spatial1'), [spatial[1].freqX, spatial[1].freqY, spatial[1].periodX, spatial[1].periodY]);
+  setUniform(gl, loc('u_spatial2'), [spatial[2].freqX, spatial[2].freqY, spatial[2].periodX, spatial[2].periodY]);
+  setUniform(gl, loc('u_spatial3'), [spatial[3].freqX, spatial[3].freqY, spatial[3].periodX, spatial[3].periodY]);
+}
 
 function makeCanvas(w, h) {
   const canvas = document.createElement('canvas');
@@ -459,13 +527,17 @@ function makeGravityPass(gl, { gridW, gridH, canary }) {
     setUniform(gl, loc('u_dyeSize'), [gridW, gridH]);
     setUniform(gl, loc('u_resolution'), [gridW, gridH]);
     setUniform(gl, loc('u_dt'), dt);
-    // Phase doesn't matter here: u_turbulence is 0 (GRAVITY_TURBULENCE), which zeroes the curl
-    // term entirely (see MEDIUM_ADVECT_VELOCITY_SETTLE) — settle is the only velocity left.
+    // u_turbulence is 0 (GRAVITY_TURBULENCE), which zeroes the SHARED curl*advectSpeed*turbulence
+    // term (see MEDIUM_ADVECT_VELOCITY) — but not u_settleWiggle's own share of curl.x, which is
+    // added unconditionally (see MEDIUM_ADVECT_VELOCITY_SETTLE): phase and the spatial uniforms
+    // below DO matter now, or this rig would exercise a zeroed wiggle term instead of the real one.
     setUniform(gl, loc('u_phase'), 0);
     setUniform(gl, loc('u_curlFreq'), MEDIUM_DEFAULTS.curlFreq);
+    bindSpatial(gl, loc, gridW, gridH, MEDIUM_DEFAULTS.curlFreq);
     setUniform(gl, loc('u_advectSpeed'), MEDIUM_DEFAULTS.advectSpeed);
     setUniform(gl, loc('u_turbulence'), ${GRAVITY_TURBULENCE});
     setUniform(gl, loc('u_settleSpeed'), MEDIUM_DEFAULTS.condensateSettleSpeed);
+    setUniform(gl, loc('u_settleWiggle'), MEDIUM_DEFAULTS.condensateSettleWiggle);
   }
 
   function step(dt) {
@@ -816,6 +888,7 @@ function makeVaporOnlyRig(gl, w, h, seedSpots, turbulence = 1, vaporDrift = MEDI
     setUniform(gl, loc('u_dt'), dt);
     setUniform(gl, loc('u_phase'), phase);
     setUniform(gl, loc('u_curlFreq'), MEDIUM_DEFAULTS.curlFreq);
+    bindSpatial(gl, loc, w, h, MEDIUM_DEFAULTS.curlFreq);
     setUniform(gl, loc('u_advectSpeed'), MEDIUM_DEFAULTS.advectSpeed);
     setUniform(gl, loc('u_turbulence'), turbulence);
     setUniform(gl, loc('u_vaporDrift'), vaporDrift);
@@ -1357,6 +1430,527 @@ globalThis.vgCompositeCost = async () => {
   const wallMsDepth = timeComposite(MEDIUM_COMPOSITE_SHADER);
   return { gpuMs, wallMsBaseline, wallMsDepth };
 };
+
+// --- Isotropy: the composited backdrop must not read as a lattice of straight lines --------------
+//
+// Full transport pipeline (seed, MacCormack for vapor AND condensate, phase exchange, the real
+// composite) at the product's own default size and grid. Tracks are omitted from BOTH the canary
+// and the correct rig below: a track's own randomized stamp angle plays no part in the AXIS-ALIGNED
+// mechanisms under test, and leaving it out of both equally keeps the comparison isolated to
+// exactly the four things the fix changed (a sanity run with tracks included, through the real
+// public API, is in the fix's own report).
+//
+// canary=true is the pre-fix medium, not a single-variable switch: a non-periodic lattice, no
+// settle wiggle and the old composite together, so a failure of the correct rig can come from any
+// of the three. Its lattice shares the EXACT SAME per-octave
+// frequencies computeMediumSpatialPeriods gives the correct rig (so both rigs carry the same
+// turbulence intensity — see bindVelocity's own comment for why matching current main's RAW
+// MEDIUM_TIME_OCTAVES scales instead, a first-draft of this canary, was a confound rather than a
+// fix: at this small grid, correct's frequency ADJUSTMENT (needed to land on an integer period)
+// is itself enough to change how much condensate forms, independent of periodicity), just with
+// the period set so large mod() never wraps in practice — the identical trick NOISE_PROBE_NAIVE
+// above uses to reach a pre-periodic field. u_settleWiggle is 0. Only the COMPOSITE shader itself
+// is a genuinely frozen old copy (\`CANARY_COMPOSITE_SHADER\`, the pre-fix ±x/±y blur and no bicubic)
+// — the one piece of this fix that changed shader TEXT rather than a uniform value.
+const ISOTROPY_NO_WRAP = 1000000;
+
+const CANARY_COMPOSITE_SHADER = \`
+uniform shader u_vapor;
+uniform shader u_condensate;
+uniform shader u_track;
+uniform float2 u_dyeScale;
+uniform float3 u_lab0;
+uniform float3 u_lab1;
+uniform float3 u_lab2;
+uniform float3 u_labBg;
+uniform float3 u_labCondensate;
+uniform float  u_baseWeight;
+uniform float  u_condensateTint;
+uniform float  u_condensateGain;
+uniform float  u_farScale;
+uniform float2 u_farOffset;
+uniform float  u_farBlurRadius;
+uniform float  u_farWeight;
+uniform float  u_gravityBoost;
+uniform float  u_gravityBoostStart;
+
+\${VG_OKLAB_TO_SRGB}
+
+half4 main(float2 xy) {
+  float2 baseSrc = xy * u_dyeScale;
+  half4 vapor = u_vapor.eval(baseSrc);
+  half4 condensate = u_condensate.eval(baseSrc);
+  half4 track = u_track.eval(baseSrc);
+
+  float2 farSrc = baseSrc * u_farScale + u_farOffset;
+  float2 blurX = float2(u_farBlurRadius, 0.0);
+  float2 blurY = float2(0.0, u_farBlurRadius);
+  half4 vaporFar = (u_vapor.eval(farSrc + blurX) + u_vapor.eval(farSrc - blurX) +
+                     u_vapor.eval(farSrc + blurY) + u_vapor.eval(farSrc - blurY)) * half4(0.25);
+  half4 condensateFar = (u_condensate.eval(farSrc + blurX) + u_condensate.eval(farSrc - blurX) +
+                          u_condensate.eval(farSrc + blurY) + u_condensate.eval(farSrc - blurY)) * half4(0.25);
+
+  float bottomFrac = 1.0 - xy.y / u_resolution.y;
+  float bottomT = smoothstep(u_gravityBoostStart, 1.0, bottomFrac);
+  float bottomBoost = 1.0 + u_gravityBoost * bottomT;
+
+  float gasR = (float(vapor.r) + float(vaporFar.r) * u_farWeight) * bottomBoost;
+  float gasG = (float(vapor.g) + float(vaporFar.g) * u_farWeight) * bottomBoost;
+  float gasB = (float(vapor.b) + float(vaporFar.b) * u_farWeight) * bottomBoost;
+  float w0 = gasR + float(track.r);
+  float w1 = gasG + float(track.g);
+  float w2 = gasB + float(track.b);
+  float wBg = u_baseWeight;
+
+  float vaporLocal = max(w0 + w1 + w2, 1e-4);
+  float3 vaporHue = (u_lab0 * w0 + u_lab1 * w1 + u_lab2 * w2) / vaporLocal;
+  float3 condensateLab = mix(u_labCondensate, vaporHue, u_condensateTint);
+  float wCondensate =
+    (float(condensate.r) + float(condensateFar.r) * u_farWeight) * u_condensateGain * bottomBoost;
+
+  float total = max(w0 + w1 + w2 + wBg + wCondensate, 1e-4);
+  float3 mixLab =
+    (u_labBg * wBg + u_lab0 * w0 + u_lab1 * w1 + u_lab2 * w2 + condensateLab * wCondensate) / total;
+  float3 rgbLinear = clamp(vgOklabToLinear(mixLab), float3(0.0), float3(1.0));
+  float3 srgb = vgLinearToSrgb(rgbLinear);
+  return half4(half3(srgb), half(1.0));
+}
+\`;
+
+function makeIsotropyRig(gl, { gridW, gridH, canary }) {
+  const vaporForwardProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(MEDIUM_VAPOR_FORWARD_SHADER));
+  const vaporCorrectProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(MEDIUM_VAPOR_CORRECT_SHADER));
+  const vaporReactProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(MEDIUM_VAPOR_REACT_SHADER));
+  const condensateForwardProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(MEDIUM_CONDENSATE_FORWARD_SHADER));
+  const condensateCorrectProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(MEDIUM_CONDENSATE_CORRECT_SHADER));
+  const condensateReactProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(MEDIUM_CONDENSATE_REACT_SHADER));
+  const seedProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(MEDIUM_SEED_SHADER));
+  const compositeProgram = createProgram(
+    gl,
+    FULLSCREEN_TRIANGLE_VERTEX_SOURCE,
+    toGLSL(canary ? CANARY_COMPOSITE_SHADER : MEDIUM_COMPOSITE_SHADER),
+  );
+
+  const vfLoc = locationCache(gl, vaporForwardProgram);
+  const vcLoc = locationCache(gl, vaporCorrectProgram);
+  const vrLoc = locationCache(gl, vaporReactProgram);
+  const cfLoc = locationCache(gl, condensateForwardProgram);
+  const ccLoc = locationCache(gl, condensateCorrectProgram);
+  const crLoc = locationCache(gl, condensateReactProgram);
+  const seedLoc = locationCache(gl, seedProgram);
+  const compositeLoc = locationCache(gl, compositeProgram);
+
+  const hasFloat = gl.getExtension('EXT_color_buffer_float') !== null;
+  const format = hasFloat
+    ? { internalFormat: gl.RGBA16F, type: gl.HALF_FLOAT }
+    : { internalFormat: gl.RGBA8, type: gl.UNSIGNED_BYTE };
+  const mk = () => {
+    const texture = createTexture(gl, { width: gridW, height: gridH, wrap: gl.REPEAT, ...format });
+    const fbo = createFramebuffer(gl, texture);
+    return { texture, fbo };
+  };
+  const vapor = [mk(), mk()];
+  const condensate = [mk(), mk()];
+  const vaporForward = mk();
+  const vaporCorrected = mk();
+  const condensateForward = mk();
+  const condensateCorrected = mk();
+  const track = mk(); // stays constant zero — see the file header on why both rigs omit stamping
+  let front = 0;
+  let phase = 0;
+
+  // Water renormalization, mirrored from web/medium.ts's own step(): a semi-Lagrangian gather has
+  // no obligation to conserve vapor+condensate by itself, and over this rig's 60s window (vs. the
+  // water gate's 15s sampling) an uncorrected drift is large enough to matter — measured directly,
+  // an earlier draft of this rig with u_totalScale pinned to 1 let density collapse far enough that
+  // 8-bit quantization/banding (itself axis-aligned, from the rectangular pixel grid) dominated the
+  // isotropy reading instead of the actual structural artifacts this gate exists to measure.
+  function readTarget(target) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+    let sum = 0;
+    if (hasFloat) {
+      const buf = new Float32Array(gridW * gridH * 4);
+      gl.readPixels(0, 0, gridW, gridH, gl.RGBA, gl.FLOAT, buf);
+      for (let i = 0; i < buf.length; i += 4) sum += buf[i] + buf[i + 1] + buf[i + 2];
+    } else {
+      const buf = new Uint8Array(gridW * gridH * 4);
+      gl.readPixels(0, 0, gridW, gridH, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      for (let i = 0; i < buf.length; i += 4) sum += (buf[i] + buf[i + 1] + buf[i + 2]) / 255;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return sum;
+  }
+  const WATER_RENORM_INTERVAL_S = 1;
+  let waterTargetTotal = 0;
+  let waterScale = 1;
+  let timeSinceRenorm = 0;
+  let framesSinceRenorm = 0;
+
+  // The real production seed layout (web/medium.ts's own seed()) — three spots, not a single blob:
+  // isotropy is a question about the STEADY structure a real screen shows, not one feature.
+  gl.bindFramebuffer(gl.FRAMEBUFFER, vapor[front].fbo);
+  gl.viewport(0, 0, gridW, gridH);
+  gl.disable(gl.BLEND);
+  gl.useProgram(seedProgram);
+  setUniform(gl, seedLoc('u_resolution'), [gridW, gridH]);
+  setUniform(gl, seedLoc('u_spot0'), [gridW * 0.28, gridH * 0.64]);
+  setUniform(gl, seedLoc('u_spot1'), [gridW * 0.7, gridH * 0.32]);
+  setUniform(gl, seedLoc('u_spot2'), [gridW * 0.48, gridH * 0.84]);
+  setUniform(gl, seedLoc('u_spotRadius'), Math.max(gridW, gridH) * 0.18);
+  drawFullscreenTriangle(gl);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  waterTargetTotal = readTarget(vapor[front]) + readTarget(condensate[front]);
+
+  function bindVelocity(loc, dt) {
+    setUniform(gl, loc('u_dyeSize'), [gridW, gridH]);
+    setUniform(gl, loc('u_resolution'), [gridW, gridH]);
+    setUniform(gl, loc('u_dt'), dt);
+    setUniform(gl, loc('u_phase'), phase);
+    setUniform(gl, loc('u_curlFreq'), MEDIUM_DEFAULTS.curlFreq);
+    setUniform(gl, loc('u_advectSpeed'), MEDIUM_DEFAULTS.advectSpeed);
+    setUniform(gl, loc('u_turbulence'), MEDIUM_DEFAULTS.turbulence);
+    setUniform(gl, loc('u_vaporDrift'), MEDIUM_DEFAULTS.gravityVaporDrift);
+    // canary uses the EXACT SAME frequencies as correct (computeMediumSpatialPeriods), only with
+    // periods so large mod() never wraps — isolating PERIODICITY as the only variable between the
+    // two rigs. An earlier draft gave the canary the raw MEDIUM_TIME_OCTAVES scales directly
+    // (reproducing old vgPotential bit-for-bit); that is a faithful reproduction of current main,
+    // but it also gives the canary WEAKER turbulence than correct's frequency-adjusted octaves
+    // (needed to hit an integer period — see computeMediumSpatialPeriods's own comment), which on
+    // this small grid was enough to change whether condensate forms at all — a confound unrelated
+    // to periodicity that made the canary read as MORE isotropic than the fix, the opposite of a
+    // working canary. Sharing frequencies removes that confound; not wrapping is still the one
+    // thing current main actually got wrong.
+    const spatial = computeMediumSpatialPeriods(gridW, gridH, MEDIUM_DEFAULTS.curlFreq);
+    for (let i = 0; i < 4; i += 1) {
+      const periodX = canary ? ISOTROPY_NO_WRAP : spatial[i].periodX;
+      const periodY = canary ? ISOTROPY_NO_WRAP : spatial[i].periodY;
+      setUniform(gl, loc('u_spatial' + i), [spatial[i].freqX, spatial[i].freqY, periodX, periodY]);
+    }
+  }
+
+  function step(dt) {
+    phase = (phase + dt * MEDIUM_DEFAULTS.curlSpeed) % MEDIUM_TIME_PERIOD;
+    const back = front === 0 ? 1 : 0;
+    gl.viewport(0, 0, gridW, gridH);
+    gl.disable(gl.BLEND);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, vaporForward.fbo);
+    gl.useProgram(vaporForwardProgram);
+    bindTextureAt(gl, 0, vapor[front].texture, vaporForwardProgram, 'u_dye');
+    bindVelocity(vfLoc, dt);
+    drawFullscreenTriangle(gl);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, condensateForward.fbo);
+    gl.useProgram(condensateForwardProgram);
+    bindTextureAt(gl, 0, condensate[front].texture, condensateForwardProgram, 'u_dye');
+    bindVelocity(cfLoc, dt);
+    setUniform(gl, cfLoc('u_settleSpeed'), MEDIUM_DEFAULTS.condensateSettleSpeed);
+    setUniform(gl, cfLoc('u_settleWiggle'), canary ? 0 : MEDIUM_DEFAULTS.condensateSettleWiggle);
+    drawFullscreenTriangle(gl);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, vaporCorrected.fbo);
+    gl.useProgram(vaporCorrectProgram);
+    bindTextureAt(gl, 0, vapor[front].texture, vaporCorrectProgram, 'u_dye');
+    bindTextureAt(gl, 1, vaporForward.texture, vaporCorrectProgram, 'u_forward');
+    setUniform(gl, vcLoc('u_forwardSize'), [gridW, gridH]);
+    bindVelocity(vcLoc, dt);
+    drawFullscreenTriangle(gl);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, condensateCorrected.fbo);
+    gl.useProgram(condensateCorrectProgram);
+    bindTextureAt(gl, 0, condensate[front].texture, condensateCorrectProgram, 'u_dye');
+    bindTextureAt(gl, 1, condensateForward.texture, condensateCorrectProgram, 'u_forward');
+    setUniform(gl, ccLoc('u_forwardSize'), [gridW, gridH]);
+    bindVelocity(ccLoc, dt);
+    setUniform(gl, ccLoc('u_settleSpeed'), MEDIUM_DEFAULTS.condensateSettleSpeed);
+    setUniform(gl, ccLoc('u_settleWiggle'), canary ? 0 : MEDIUM_DEFAULTS.condensateSettleWiggle);
+    drawFullscreenTriangle(gl);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, vapor[back].fbo);
+    gl.useProgram(vaporReactProgram);
+    bindTextureAt(gl, 0, vaporCorrected.texture, vaporReactProgram, 'u_transported');
+    bindTextureAt(gl, 1, condensateCorrected.texture, vaporReactProgram, 'u_condensateTransported');
+    setUniform(gl, vrLoc('u_transportedSize'), [gridW, gridH]);
+    setUniform(gl, vrLoc('u_condensateTransportedSize'), [gridW, gridH]);
+    setUniform(gl, vrLoc('u_resolution'), [gridW, gridH]);
+    setUniform(gl, vrLoc('u_dt'), dt);
+    setUniform(gl, vrLoc('u_condensationRate'), MEDIUM_DEFAULTS.condensationRate);
+    setUniform(gl, vrLoc('u_condensationFloor'), MEDIUM_DEFAULTS.condensationFloor);
+    setUniform(gl, vrLoc('u_evaporationRate'), MEDIUM_DEFAULTS.evaporationRate);
+    setUniform(gl, vrLoc('u_totalScale'), waterScale);
+    drawFullscreenTriangle(gl);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, condensate[back].fbo);
+    gl.useProgram(condensateReactProgram);
+    bindTextureAt(gl, 0, condensateCorrected.texture, condensateReactProgram, 'u_transported');
+    bindTextureAt(gl, 1, vaporCorrected.texture, condensateReactProgram, 'u_vaporTransported');
+    bindTextureAt(gl, 2, condensate[front].texture, condensateReactProgram, 'u_dye');
+    setUniform(gl, crLoc('u_transportedSize'), [gridW, gridH]);
+    setUniform(gl, crLoc('u_vaporTransportedSize'), [gridW, gridH]);
+    setUniform(gl, crLoc('u_dyeSize'), [gridW, gridH]);
+    setUniform(gl, crLoc('u_resolution'), [gridW, gridH]);
+    setUniform(gl, crLoc('u_dt'), dt);
+    setUniform(gl, crLoc('u_condensationRate'), MEDIUM_DEFAULTS.condensationRate);
+    setUniform(gl, crLoc('u_condensationFloor'), MEDIUM_DEFAULTS.condensationFloor);
+    setUniform(gl, crLoc('u_evaporationRate'), MEDIUM_DEFAULTS.evaporationRate);
+    setUniform(gl, crLoc('u_spreadRate'), MEDIUM_DEFAULTS.condensateSpreadRate);
+    setUniform(gl, crLoc('u_totalScale'), waterScale);
+    drawFullscreenTriangle(gl);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    front = back;
+    framesSinceRenorm += 1;
+    timeSinceRenorm += dt;
+    if (waterTargetTotal > 0 && timeSinceRenorm >= WATER_RENORM_INTERVAL_S && framesSinceRenorm > 0) {
+      const current = readTarget(vapor[front]) + readTarget(condensate[front]);
+      if (current > 1e-6) {
+        const totalRatio = waterTargetTotal / current;
+        const perFrame = Math.pow(totalRatio, 1 / framesSinceRenorm);
+        waterScale = Math.min(1.05, Math.max(0.95, perFrame));
+      }
+      timeSinceRenorm = 0;
+      framesSinceRenorm = 0;
+    }
+  }
+
+  function composite(target) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+    gl.viewport(0, 0, target.width, target.height);
+    gl.disable(gl.BLEND);
+    gl.useProgram(compositeProgram);
+    bindTextureAt(gl, 0, vapor[front].texture, compositeProgram, 'u_vapor');
+    bindTextureAt(gl, 1, condensate[front].texture, compositeProgram, 'u_condensate');
+    bindTextureAt(gl, 2, track.texture, compositeProgram, 'u_track');
+    setUniform(gl, compositeLoc('u_vaporSize'), [gridW, gridH]);
+    setUniform(gl, compositeLoc('u_condensateSize'), [gridW, gridH]);
+    setUniform(gl, compositeLoc('u_trackSize'), [gridW, gridH]);
+    setUniform(gl, compositeLoc('u_resolution'), [target.width, target.height]);
+    setUniform(gl, compositeLoc('u_dyeScale'), [gridW / target.width, gridH / target.height]);
+    setUniform(gl, compositeLoc('u_lab0'), [0.5, 0.05, 0.05]);
+    setUniform(gl, compositeLoc('u_lab1'), [0.5, -0.05, 0.05]);
+    setUniform(gl, compositeLoc('u_lab2'), [0.5, 0.05, -0.05]);
+    setUniform(gl, compositeLoc('u_labBg'), [0.1, 0, 0]);
+    setUniform(gl, compositeLoc('u_labCondensate'), [0.9, 0, 0]);
+    setUniform(gl, compositeLoc('u_baseWeight'), MEDIUM_DEFAULTS.baseWeight);
+    setUniform(gl, compositeLoc('u_condensateTint'), MEDIUM_DEFAULTS.condensateTint);
+    setUniform(gl, compositeLoc('u_condensateGain'), MEDIUM_DEFAULTS.condensateGain);
+    setUniform(gl, compositeLoc('u_farScale'), MEDIUM_DEFAULTS.depthFarScale);
+    const farOffset = depthFarOffsetPx(MEDIUM_DEFAULTS.depthFarOffsetFrac, gridW, gridH);
+    setUniform(gl, compositeLoc('u_farOffset'), farOffset);
+    setUniform(gl, compositeLoc('u_farBlurRadius'), MEDIUM_DEFAULTS.depthFarBlurRadius);
+    setUniform(gl, compositeLoc('u_farWeight'), MEDIUM_DEFAULTS.depthFarWeight);
+    setUniform(gl, compositeLoc('u_gravityBoost'), MEDIUM_DEFAULTS.gravityBottomBoost);
+    setUniform(gl, compositeLoc('u_gravityBoostStart'), MEDIUM_DEFAULTS.gravityBottomBoostStart);
+    drawFullscreenTriangle(gl);
+    return farOffset;
+  }
+
+  return {
+    step,
+    composite,
+    vaporTexture: () => vapor[front].texture,
+    condensateTexture: () => condensate[front].texture,
+    gridW,
+    gridH,
+  };
+}
+
+// The far plane's OWN rendered contribution, isolated from the near plane entirely: composite-
+// shader.ts's vaporFar/condensateFar terms (ring blur) and CANARY_COMPOSITE_SHADER's own
+// (±x/±y box blur), reproduced as standalone probes. The seam check below measures THIS, not the
+// full mixed composite — an earlier draft measured the full frame at the far plane's wrap columns
+// and found a large "seam" that turned out to be the (unrelated) NEAR-plane bicubic content at
+// those same arbitrary screen columns, not anything about the far-plane tile boundary at all; a
+// probe that never reads the near plane can't have that confound.
+const FAR_BOX_BLUR_PROBE_SHADER = \`
+uniform shader u_vapor;
+uniform float  u_scale;
+uniform float2 u_offset;
+uniform float  u_blurRadius;
+half4 main(float2 xy) {
+  float2 src = xy * u_scale + u_offset;
+  float2 bx = float2(u_blurRadius, 0.0);
+  float2 by = float2(0.0, u_blurRadius);
+  half4 v = (u_vapor.eval(src + bx) + u_vapor.eval(src - bx) +
+             u_vapor.eval(src + by) + u_vapor.eval(src - by)) * half4(0.25);
+  float w = float(v.r) + float(v.g) + float(v.b);
+  return half4(half3(w), half(1.0));
+}
+\`;
+
+const FAR_RING_BLUR_PROBE_SHADER = \`
+uniform shader u_vapor;
+uniform float  u_scale;
+uniform float2 u_offset;
+uniform float  u_blurRadius;
+half4 main(float2 xy) {
+  float2 src = xy * u_scale + u_offset;
+  float2 ring0 = float2( 0.9238795,  0.3826834) * u_blurRadius;
+  float2 ring1 = float2( 0.3826834,  0.9238795) * u_blurRadius;
+  float2 ring2 = float2(-0.3826834,  0.9238795) * u_blurRadius;
+  float2 ring3 = float2(-0.9238795,  0.3826834) * u_blurRadius;
+  float2 ring4 = float2(-0.9238795, -0.3826834) * u_blurRadius;
+  float2 ring5 = float2(-0.3826834, -0.9238795) * u_blurRadius;
+  float2 ring6 = float2( 0.3826834, -0.9238795) * u_blurRadius;
+  float2 ring7 = float2( 0.9238795, -0.3826834) * u_blurRadius;
+  half4 v = (u_vapor.eval(src + ring0) + u_vapor.eval(src + ring1) +
+             u_vapor.eval(src + ring2) + u_vapor.eval(src + ring3) +
+             u_vapor.eval(src + ring4) + u_vapor.eval(src + ring5) +
+             u_vapor.eval(src + ring6) + u_vapor.eval(src + ring7)) * half4(0.125);
+  float w = float(v.r) + float(v.g) + float(v.b);
+  return half4(half3(w), half(1.0));
+}
+\`;
+
+function probeFarField(gl, rig, cw, ch, { blur, field }) {
+  const shader =
+    blur === 'none' ? DEPTH_PARALLAX_PROBE_SHADER : blur === 'ring' ? FAR_RING_BLUR_PROBE_SHADER : FAR_BOX_BLUR_PROBE_SHADER;
+  const probeProgram = createProgram(gl, FULLSCREEN_TRIANGLE_VERTEX_SOURCE, toGLSL(shader));
+  const probeLoc = locationCache(gl, probeProgram);
+  const dyeScaleX = rig.gridW / cw;
+  const farOffset = depthFarOffsetPx(MEDIUM_DEFAULTS.depthFarOffsetFrac, rig.gridW, rig.gridH);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, cw, ch);
+  gl.disable(gl.BLEND);
+  gl.useProgram(probeProgram);
+  const tex = field === 'condensate' ? rig.condensateTexture() : rig.vaporTexture();
+  bindTextureAt(gl, 0, tex, probeProgram, 'u_vapor');
+  setUniform(gl, probeLoc('u_vaporSize'), [rig.gridW, rig.gridH]);
+  // Composes content->grid scale and the far-plane's own scale into ONE factor — the same product
+  // composite-shader.ts's farSrc = (xy * u_dyeScale) * u_farScale + u_farOffset reduces to.
+  setUniform(gl, probeLoc('u_scale'), dyeScaleX * MEDIUM_DEFAULTS.depthFarScale);
+  setUniform(gl, probeLoc('u_offset'), farOffset);
+  if (blur !== 'none') setUniform(gl, probeLoc('u_blurRadius'), MEDIUM_DEFAULTS.depthFarBlurRadius);
+  setUniform(gl, probeLoc('u_resolution'), [cw, ch]);
+  drawFullscreenTriangle(gl);
+  const buf = readCanvas(gl, cw, ch);
+  const luma = new Array(cw * ch);
+  for (let i = 0; i < cw * ch; i += 1) luma[i] = buf[i * 4];
+  gl.deleteProgram(probeProgram);
+  return { luma, dyeScaleX, farOffsetX: farOffset[0] };
+}
+
+/** Sobel gradient magnitude/orientation, binned into "near an axis" (0°/90°, mod 180°) vs "near a
+ *  diagonal" (45°/135°) energy — run in-page so only the final numbers cross the CDP bridge, not a
+ *  1920x952 pixel array. \`energy\` is squared magnitude, the usual convention (energy ~ amplitude^2).
+ *  The two windows are equal width by construction (see MAX_ISOTROPY_RATIO's own comment), so this
+ *  needs no separate normalization to read near 1 for an isotropic field.
+ *
+ *  \`yStart\`/\`yEnd\` restrict the rows scanned — this gate excludes the gravity bottom-boost band
+ *  (see the caller): MEDIUM_DEFAULTS.gravityBottomBoost ramps a SMOOTH, purely vertical density
+ *  gradient into the bottom quarter of every frame, by design (the "denser at the chamber floor"
+ *  cue) — nothing this fix touches. A pure vertical gradient has gx=0 everywhere, so its gradient
+ *  angle is EXACTLY 90°, landing 100% in the axis bin and 0% in the diagonal one; measured directly,
+ *  including that band inflates the ratio by a large, constant amount regardless of how isotropic
+ *  the turbulent structure itself is — the same reason the aerial-perspective/boost gates each
+ *  isolate their own one mechanism (zero the other) instead of reading a confounded frame. */
+function vgIsotropyRatio(luma, w, h, yStart, yEnd) {
+  const windowRad = (${ISOTROPY_ANGLE_WINDOW_DEG} * Math.PI) / 180;
+  let axisEnergy = 0;
+  let diagEnergy = 0;
+  for (let y = Math.max(1, yStart); y < Math.min(h - 1, yEnd); y += 1) {
+    for (let x = 1; x < w - 1; x += 1) {
+      const tl = luma[(y - 1) * w + (x - 1)];
+      const t = luma[(y - 1) * w + x];
+      const tr = luma[(y - 1) * w + (x + 1)];
+      const l = luma[y * w + (x - 1)];
+      const r = luma[y * w + (x + 1)];
+      const bl = luma[(y + 1) * w + (x - 1)];
+      const b = luma[(y + 1) * w + x];
+      const br = luma[(y + 1) * w + (x + 1)];
+      const gx = tr + 2 * r + br - (tl + 2 * l + bl);
+      const gy = bl + 2 * b + br - (tl + 2 * t + tr);
+      const energy = gx * gx + gy * gy;
+      if (energy < 1e-9) continue;
+      let angle = Math.atan2(gy, gx);
+      if (angle < 0) angle += Math.PI;
+      const distToAxis = Math.min(angle, Math.abs(angle - Math.PI / 2), Math.abs(angle - Math.PI));
+      const distToDiag = Math.min(Math.abs(angle - Math.PI / 4), Math.abs(angle - (3 * Math.PI) / 4));
+      if (distToAxis <= windowRad) axisEnergy += energy;
+      if (distToDiag <= windowRad) diagEnergy += energy;
+    }
+  }
+  return { axisEnergy, diagEnergy, ratio: diagEnergy > 1e-9 ? axisEnergy / diagEnergy : Infinity };
+}
+
+/** Mean absolute luma step at the far plane's tile-wrap column(s) (where floor(farSrc.x / gridW)
+ *  changes between adjacent screen columns — the SAME condition that puts the wrapped sample on the
+ *  other side of the periodic texture) vs. the median step at ordinary columns away from any seam.
+ *  Only the x (vertical-line) seam is measured — the y (horizontal-line) one is the same mechanism
+ *  on the other axis, and the fix is axis-agnostic. */
+function vgSeamColumnRatio(luma, w, h, gridW, dyeScaleX, farScale, farOffsetX) {
+  const bucketAt = (x) => Math.floor((x * dyeScaleX * farScale + farOffsetX) / gridW);
+  const seamCols = [];
+  let prevBucket = bucketAt(0);
+  for (let x = 1; x < w; x += 1) {
+    const bucket = bucketAt(x);
+    if (bucket !== prevBucket) seamCols.push(x);
+    prevBucket = bucket;
+  }
+  const colStep = (x) => {
+    let sum = 0;
+    for (let y = 0; y < h; y += 1) sum += Math.abs(luma[y * w + x] - luma[y * w + (x - 1)]);
+    return sum / h;
+  };
+  const seamStep = seamCols.length
+    ? seamCols.map(colStep).reduce((a, b) => a + b, 0) / seamCols.length
+    : 0;
+  const margin = 5;
+  const stride = 37;
+  const typicalSteps = [];
+  for (let x = 10; x < w - 10; x += stride) {
+    if (seamCols.every((s) => Math.abs(s - x) > margin)) typicalSteps.push(colStep(x));
+  }
+  typicalSteps.sort((a, b) => a - b);
+  const typicalStep = typicalSteps[Math.floor(typicalSteps.length / 2)] ?? 0;
+  return {
+    seamCols,
+    seamStep,
+    typicalStep,
+    ratio: typicalStep > 1e-9 ? seamStep / typicalStep : Infinity,
+  };
+}
+
+globalThis.vgIsotropySeries = async ({ canary }) => {
+  const gridW = ${ISOTROPY_GRID_W};
+  const gridH = ${ISOTROPY_GRID_H};
+  const cw = ${ISOTROPY_CANVAS_W};
+  const ch = ${ISOTROPY_CANVAS_H};
+  const canvas = makeCanvas(cw, ch);
+  const renderer = createVireGlassRenderer(canvas);
+  renderer.resize(cw, ch);
+  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+  const rig = makeIsotropyRig(gl, { gridW, gridH, canary });
+
+  for (let i = 0; i < ${ISOTROPY_STEPS}; i += 1) rig.step(${ISOTROPY_DT});
+
+  renderer.render({
+    density: 1,
+    debug: 'normal',
+    pieces: [],
+    backdrop: (glArg, target) => {
+      rig.composite(target);
+    },
+  });
+
+  const buf = readCanvas(gl, cw, ch);
+  const luma = new Array(cw * ch);
+  for (let i = 0; i < cw * ch; i += 1) {
+    luma[i] = 0.2126 * buf[i * 4] + 0.7152 * buf[i * 4 + 1] + 0.0722 * buf[i * 4 + 2];
+  }
+
+  // Row 0 is the canvas's own visual BOTTOM (see readCanvas's comment) — the gravity boost band
+  // (MEDIUM_DEFAULTS.gravityBottomBoostStart..1 of frame height) lives at LOW row indices here.
+  const boostRows = Math.ceil((1 - MEDIUM_DEFAULTS.gravityBottomBoostStart) * ch);
+  const isotropy = vgIsotropyRatio(luma, cw, ch, boostRows, ch);
+
+  // The seam check reads ONLY the far plane's own rendered contribution (see probeFarField's file
+  // header) — not the full mixed composite, which also carries the (unrelated) near-plane bicubic
+  // content at those same screen columns.
+  const farProbe = probeFarField(gl, rig, cw, ch, { blur: canary ? 'box' : 'ring', field: 'vapor' });
+  const seam = vgSeamColumnRatio(farProbe.luma, cw, ch, gridW, farProbe.dyeScaleX, MEDIUM_DEFAULTS.depthFarScale, farProbe.farOffsetX);
+  return { isotropy, seam };
+};
 `;
 
 function centroidTrend(samples) {
@@ -1727,6 +2321,46 @@ async function main() {
     }
   }
 
+  // --- 12. Isotropy: the composited backdrop reads as gas, not a lattice of straight lines. -------
+  //
+  console.log(`--- isotropy: gradient energy near the axes (0/90deg) vs near the diagonals (45/135deg), at ${ISOTROPY_CANVAS_W}x${ISOTROPY_CANVAS_H} / ${ISOTROPY_GRID_W}x${ISOTROPY_GRID_H} ---`);
+  const isotropyCorrect = await page.evaluate((a) => globalThis.vgIsotropySeries(a), { canary: false });
+  console.log(
+    `  correct: axis energy ${isotropyCorrect.isotropy.axisEnergy.toExponential(3)}, diagonal energy ${isotropyCorrect.isotropy.diagEnergy.toExponential(3)}, ratio ${isotropyCorrect.isotropy.ratio.toFixed(3)}`,
+  );
+  console.log(
+    `  correct seam (vapor, far plane only): step ${isotropyCorrect.seam.seamStep.toFixed(3)}, typical step ${isotropyCorrect.seam.typicalStep.toFixed(3)}, ratio ${isotropyCorrect.seam.ratio.toFixed(3)} (${isotropyCorrect.seam.seamCols.length} wrap column(s))`,
+  );
+  if (!(isotropyCorrect.isotropy.ratio <= MAX_ISOTROPY_RATIO)) {
+    failed.push(
+      `isotropy: axis/diagonal gradient energy is ${isotropyCorrect.isotropy.ratio.toFixed(3)}, exceeding ${MAX_ISOTROPY_RATIO} — the backdrop reads as straight lines along the axes`,
+    );
+  }
+  if (!(isotropyCorrect.seam.ratio <= MAX_SEAM_COLUMN_RATIO)) {
+    failed.push(
+      `isotropy: far-plane seam step is ${isotropyCorrect.seam.ratio.toFixed(3)}x the typical column step, exceeding ${MAX_SEAM_COLUMN_RATIO}x — the tile boundary is still visible`,
+    );
+  }
+
+  console.log('--- canary: same frequencies as correct, not periodic (isolates periodicity — see the file header) ---');
+  const isotropyCanary = await page.evaluate((a) => globalThis.vgIsotropySeries(a), { canary: true });
+  console.log(
+    `  canary: axis energy ${isotropyCanary.isotropy.axisEnergy.toExponential(3)}, diagonal energy ${isotropyCanary.isotropy.diagEnergy.toExponential(3)}, ratio ${isotropyCanary.isotropy.ratio.toFixed(3)}`,
+  );
+  console.log(
+    `  canary seam (vapor, far plane only): step ${isotropyCanary.seam.seamStep.toFixed(3)}, typical step ${isotropyCanary.seam.typicalStep.toFixed(3)}, ratio ${isotropyCanary.seam.ratio.toFixed(3)} (${isotropyCanary.seam.seamCols.length} wrap column(s))`,
+  );
+  if (!(isotropyCanary.isotropy.ratio > MAX_ISOTROPY_RATIO)) {
+    failed.push(
+      `isotropy canary did not fail (ratio ${isotropyCanary.isotropy.ratio.toFixed(3)}) — this gate is not sensitive to a non-periodic field`,
+    );
+  }
+  if (!(isotropyCanary.seam.ratio >= MIN_CANARY_SEAM_COLUMN_RATIO)) {
+    failed.push(
+      `isotropy seam canary did not fail (ratio ${isotropyCanary.seam.ratio.toFixed(3)}) — this gate is not actually sensitive to the tile-boundary regression`,
+    );
+  }
+
   await browser.close();
 
   if (failed.length) {
@@ -1735,7 +2369,7 @@ async function main() {
     return;
   }
   console.log(
-    "check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), the phase wrap is seamless (canary caught), the far depth plane reads slower and lower-contrast than the near one (both canaries caught), the far plane decorrelates from the near one at 128x72 (canary caught), the bottom boost is a steady-state property and vapor drift is a valid motion cue (both canaries caught), and the depth composite's cost over the pre-depth one is reported",
+    "check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), the phase wrap is seamless (canary caught), the far depth plane reads slower and lower-contrast than the near one (both canaries caught), the far plane decorrelates from the near one at 128x72 (canary caught), the bottom boost is a steady-state property and vapor drift is a valid motion cue (both canaries caught), the depth composite's cost over the pre-depth one is reported, and the composited backdrop at the product's own default size reads as isotropic gas, not a lattice of straight lines (canary caught)",
   );
 }
 

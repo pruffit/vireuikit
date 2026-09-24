@@ -80,16 +80,28 @@ The backdrop reads as a chamber seen from the side, not a flat field, without a 
 the composite samples the same vapor/condensate grid twice, once at identity and once at a larger
 scale and a fixed offset (`MEDIUM_DEFAULTS.depthFarScale`/`depthFarOffsetFrac`, the offset as a
 fraction of the grid so it stays clear of the wrap at any grid size) — the far read is both slower
-on screen and finer-grained, since the field's own motion maps to screen motion as `v / scale`. A
-cheap 4-tap blur on that far read (`depthFarBlurRadius`) supplies aerial perspective's softness and
-lower contrast in the same pass, weighted down (`depthFarWeight`) so it never competes with the near
-plane. Gravity is two separate properties: a small downward drift on vapor's own velocity
-(`gravityVaporDrift`, a motion cue only — a uniform drift on this periodic grid cannot itself
-accumulate density) and a compositing-only density boost near the bottom of the frame
-(`gravityBottomBoost`/`gravityBottomBoostStart`, a steady-state property that cannot affect the
-conserved water total) that actually produces the "denser at the bottom" reading.
-Each emitted track also carries a `depth` (0 far … 1 near) that scales its own width and intensity,
-so a track reads thinner, dimmer and softer the farther back it lives.
+on screen and finer-grained, since the field's own motion maps to screen motion as `v / scale`. An
+8-tap rotated ring blur on that far read (`depthFarBlurRadius`) supplies aerial perspective's
+softness and lower contrast in the same pass, weighted down (`depthFarWeight`) so it never competes
+with the near plane; the ring (not an axis-aligned box) keeps that blur from turning a residual
+seam or resize artifact into parallel straight lines. Gravity is two separate properties: a small
+downward drift on vapor's own velocity (`gravityVaporDrift`, a motion cue only — a uniform drift on
+this periodic grid cannot itself accumulate density) and a compositing-only density boost near the
+bottom of the frame (`gravityBottomBoost`/`gravityBottomBoostStart`, a steady-state property that
+cannot affect the conserved water total) that actually produces the "denser at the bottom" reading.
+Condensate settling adds a second, always-on share of the ambient curl field's own sideways push
+(`condensateSettleWiggle`) so a droplet falling at a constant speed doesn't trace a dead-straight
+vertical line when turbulence is otherwise low. Each emitted track also carries a `depth` (0 far …
+1 near) that scales its own width and intensity, so a track reads thinner, dimmer and softer the
+farther back it lives.
+
+The curl-noise potential itself is periodic over the simulation grid in space, the same way it
+already was in time: each octave's spatial frequency is adjusted, per grid size, to the nearest
+value that makes a full grid width (or height) an exact integer number of lattice cells
+(`computeMediumSpatialPeriods`) — so velocity never jumps at the domain's own wrap, and the far
+plane's tile boundary reads as an ordinary point in the field rather than a seam. The near plane's
+vapor and condensate reads use cubic B-spline reconstruction (4 bilinear taps) instead of plain
+bilinear, so the simulation grid's own cells don't read as squares at typical (coarse) grid sizes.
 
 ## License
 
