@@ -74,8 +74,8 @@ half4 ${fnName}(float2 px) {
   float2 base = shifted - fxy;
   float4 xw = vgCubicWeights(fxy.x);
   float4 yw = vgCubicWeights(fxy.y);
-  float2 sx = float2(xw.x + xw.z, xw.y + xw.w);
-  float2 sy = float2(yw.x + yw.z, yw.y + yw.w);
+  float2 sx = float2(xw.x + xw.y, xw.z + xw.w);
+  float2 sy = float2(yw.x + yw.y, yw.z + yw.w);
   float2 offsetX = float2(base.x - 0.5 + xw.y / sx.x, base.x + 1.5 + xw.w / sx.y);
   float2 offsetY = float2(base.y - 0.5 + yw.y / sy.x, base.y + 1.5 + yw.w / sy.y);
   half4 s00 = ${textureName}.eval(float2(offsetX.x, offsetY.x));
