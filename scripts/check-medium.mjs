@@ -357,16 +357,13 @@ const ISOTROPY_ANGLE_WINDOW_DEG = 10;
  * diagonals (45°/135°) — the two windows are equal width (40° total each out of 180°), so an
  * isotropic field's ratio sits near 1 by construction, not because of an arbitrary normalization.
  *
- * NOT gated. Measured on this rig at 1800 steps (960x476/74x37): correct 13.3, a canary sharing
- * correct's own frequencies but not its periodicity 3.7 — WORSE than the canary, the wrong
- * direction, and it did not hold consistently across step counts or canary constructions tried
- * during this fix (full account in the ship report). The far-plane seam (below, gated) and the
- * pre-existing aerial-perspective contrast gate each isolate one well-understood piece of the same
- * question and both move the right way; this whole-frame ratio bundles those with the coarse
- * grid's own reconstruction behavior at extreme (26x) upsampling in a way this pass did not fully
- * separate. Logged every run for the data trail rather than gated on a number not yet understood
- * well enough to enforce.
+ * Gated. Measured on this rig at 1800 steps (960x476 / 74x37): correct 1.66, a canary sharing
+ * correct's frequencies but not its periodicity 3.74. The threshold sits between them with margin
+ * both ways. A reading of 13.3 once looked like noise in this metric and turned out to be a real
+ * bug — bicubic weights grouped as (x+z, y+w) instead of (x+y, z+w), which drew the grid as
+ * hard-edged squares — so a high ratio here means look at the frame, not at the metric.
  */
+const MAX_ISOTROPY_RATIO = 2.5;
 /** Mean absolute luma step AT the far plane's tile-wrap column, relative to the median step at
  *  ordinary (non-seam) columns nearby — mirrors the phase-wrap seam gate's own "seam vs typical"
  *  ratio, read from the far plane's OWN rendered contribution alone (probeFarField), not the full
@@ -2323,10 +2320,7 @@ async function main() {
 
   // --- 12. Isotropy: the composited backdrop reads as gas, not a lattice of straight lines. -------
   //
-  // The axis/diagonal ratio is REPORTED, not gated (REPORT_ONLY_ISOTROPY_RATIO's own comment says
-  // why) — the seam ratio (the far plane's own contribution, isolated from the near plane) IS
-  // gated, and is the well-understood, reproducible half of this measurement.
-  console.log(`--- isotropy: gradient energy near the axes (0/90deg) vs near the diagonals (45/135deg), at ${ISOTROPY_CANVAS_W}x${ISOTROPY_CANVAS_H} / ${ISOTROPY_GRID_W}x${ISOTROPY_GRID_H} (report-only) ---`);
+  console.log(`--- isotropy: gradient energy near the axes (0/90deg) vs near the diagonals (45/135deg), at ${ISOTROPY_CANVAS_W}x${ISOTROPY_CANVAS_H} / ${ISOTROPY_GRID_W}x${ISOTROPY_GRID_H} ---`);
   const isotropyCorrect = await page.evaluate((a) => globalThis.vgIsotropySeries(a), { canary: false });
   console.log(
     `  correct: axis energy ${isotropyCorrect.isotropy.axisEnergy.toExponential(3)}, diagonal energy ${isotropyCorrect.isotropy.diagEnergy.toExponential(3)}, ratio ${isotropyCorrect.isotropy.ratio.toFixed(3)}`,
@@ -2334,6 +2328,11 @@ async function main() {
   console.log(
     `  correct seam (vapor, far plane only): step ${isotropyCorrect.seam.seamStep.toFixed(3)}, typical step ${isotropyCorrect.seam.typicalStep.toFixed(3)}, ratio ${isotropyCorrect.seam.ratio.toFixed(3)} (${isotropyCorrect.seam.seamCols.length} wrap column(s))`,
   );
+  if (!(isotropyCorrect.isotropy.ratio <= MAX_ISOTROPY_RATIO)) {
+    failed.push(
+      `isotropy: axis/diagonal gradient energy is ${isotropyCorrect.isotropy.ratio.toFixed(3)}, exceeding ${MAX_ISOTROPY_RATIO} — the backdrop reads as straight lines along the axes`,
+    );
+  }
   if (!(isotropyCorrect.seam.ratio <= MAX_SEAM_COLUMN_RATIO)) {
     failed.push(
       `isotropy: far-plane seam step is ${isotropyCorrect.seam.ratio.toFixed(3)}x the typical column step, exceeding ${MAX_SEAM_COLUMN_RATIO}x — the tile boundary is still visible`,
@@ -2348,6 +2347,11 @@ async function main() {
   console.log(
     `  canary seam (vapor, far plane only): step ${isotropyCanary.seam.seamStep.toFixed(3)}, typical step ${isotropyCanary.seam.typicalStep.toFixed(3)}, ratio ${isotropyCanary.seam.ratio.toFixed(3)} (${isotropyCanary.seam.seamCols.length} wrap column(s))`,
   );
+  if (!(isotropyCanary.isotropy.ratio > MAX_ISOTROPY_RATIO)) {
+    failed.push(
+      `isotropy canary did not fail (ratio ${isotropyCanary.isotropy.ratio.toFixed(3)}) — this gate is not sensitive to a non-periodic field`,
+    );
+  }
   if (!(isotropyCanary.seam.ratio >= MIN_CANARY_SEAM_COLUMN_RATIO)) {
     failed.push(
       `isotropy seam canary did not fail (ratio ${isotropyCanary.seam.ratio.toFixed(3)}) — this gate is not actually sensitive to the tile-boundary regression`,

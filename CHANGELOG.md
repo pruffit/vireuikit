@@ -24,14 +24,10 @@ grid (1920x952, 74x37): four causes, four independent fixes.
   Sigg & Hadwiger 2005) instead of plain bilinear, so the grid's own cells stop reading as squares
   with staircase edges at typical (coarse) grid sizes. Track and the (already blurred) far plane
   stay plain bilinear.
-- `check:medium` adds an isotropy gate: Sobel gradient energy near the axes (0°/90°) vs. the
-  diagonals (45°/135°) on the composited frame at the product's own size/grid, plus a seam check
-  isolating the far plane's own contribution at its tile-wrap column. The seam check is gated (a
-  canary sharing the fix's own noise frequencies but not its periodicity must read as discontinuous
-  there; the fix must not). The whole-frame axis/diagonal ratio is reported every run but not
-  gated — measured on this rig it did not consistently separate the fix from that same canary, most
-  likely a coarse-grid reconstruction effect at extreme (26x) upsampling this pass did not fully
-  isolate from the seam itself; left as a known gap rather than a threshold picked to avoid it.
+- `check:medium` adds an isotropy gate on the composited frame at the product's own grid: Sobel
+  gradient energy near the axes (0°/90°) against the diagonals (45°/135°) — 1.66 for this release,
+  3.74 for a canary without spatial periodicity, threshold 2.5 — and a seam check at the far
+  plane's tile-wrap column (0.55 of a typical step against 2.80 for the canary).
 
 ## 0.2.0
 
