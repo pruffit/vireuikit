@@ -38,6 +38,8 @@ import {
   locationCache,
   setUniform,
 } from 'vireglass/web';
+import { createTrackLayer, type VireUIKitLiveTrack } from './track-layer';
+import { buildTrackLayerInstances, createTrackLayerProgram } from './track-layer-gl';
 
 export type MediumRuntime = {
   /** Recreates the grid on the first call (seeding it); on a later call with a different size,
@@ -55,6 +57,13 @@ export type MediumRuntime = {
    * and their own decay extinguishes them; there is no lifetime timer here.
    */
   emit(emissions: readonly VireUIKitMediumEmission[]): void;
+  /**
+   * Ages, drifts and caps the crisp screen-space track layer's own live-track list (see
+   * `track-layer.ts`) and folds `emissions` into it as fresh tracks — independent of `emit()`
+   * above: that one stamps the SOFT grid residue, this one feeds the SHARP geometry `composite`
+   * draws over it. Called once per frame, same as `emit`.
+   */
+  stepTrackLayer(dt: number, emissions: readonly VireUIKitMediumEmission[]): void;
   /**
    * Composites the current density (vapor + condensate + tracks) into a buffer already bound by
    * the caller (the renderer's `contentFbo`) — this is exactly how the medium acts as the second
@@ -107,6 +116,9 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   const seedProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_SEED_SHADER));
   const emitProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_EMIT_SHADER));
   const resampleProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_RESAMPLE_SHADER));
+  const trackLayerProgram = createTrackLayerProgram(gl);
+  const trackLayer = createTrackLayer();
+  let liveTracks: readonly VireUIKitLiveTrack[] = [];
 
   const vaporForwardLoc = locationCache(gl, vaporForwardProgram);
   const vaporCorrectLoc = locationCache(gl, vaporCorrectProgram);
@@ -545,6 +557,10 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
+  function stepTrackLayer(dt: number, emissions: readonly VireUIKitMediumEmission[]): void {
+    liveTracks = trackLayer.step(dt, emissions);
+  }
+
   function composite(
     contentWidth: number,
     contentHeight: number,
@@ -591,6 +607,12 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     setUniform(gl, compositeLoc('u_grainJitterFreq'), p.mistGrainJitterFreq);
     setUniform(gl, compositeLoc('u_trackLightFloor'), p.trackLightFloor);
     drawFullscreenTriangle(gl);
+
+    // The crisp screen-space layer draws OVER the fullscreen composite just written, additively, in
+    // the SAME target framebuffer — see track-layer-gl.ts's own file header for why this is a raw
+    // instanced GLSL pass rather than another fullscreen shader in the DSL above.
+    const { data, count } = buildTrackLayerInstances(liveTracks, contentWidth, contentHeight, p.trackLayerAmount);
+    trackLayerProgram.draw(contentWidth, contentHeight, data, count, p.trackLightFloor, p.lights);
   }
 
   function readTarget(target: DyeTarget): number {
@@ -702,12 +724,14 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.deleteProgram(seedProgram);
     gl.deleteProgram(emitProgram);
     gl.deleteProgram(resampleProgram);
+    trackLayerProgram.destroy();
   }
 
   return {
     ensureGrid,
     step,
     emit,
+    stepTrackLayer,
     composite,
     readTotals,
     readVaporGrid,

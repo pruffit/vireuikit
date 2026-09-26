@@ -40,6 +40,11 @@ export type VireUIKitMediumEmission = VireUIKitMediumTrackPreset & {
    *  `tailWidthFrac`/`intensity` below (see `buildEmission`); carried here too so a caller inspecting
    *  an emission can see why. */
   depth: number;
+  /** Which preset this emission was built from — `applyTrackDepth` already folds depth into the
+   *  numeric fields above, but the crisp screen-space track layer (`web/track-layer.ts`) still needs
+   *  the NAME: droplet density/size and per-kind lifetime are keyed off it, not off any numeric
+   *  field here (a depth-scaled `headWidthFrac` alone can't tell an alpha from an electron). */
+  kind: VireUIKitMediumTrackPresetName;
 };
 
 export type VireUIKitMediumDynamicsInput = {
@@ -122,6 +127,7 @@ function buildEmission(
     angle: angleOverride ?? hash01(seed * 7.31) * Math.PI * 2,
     seed,
     depth,
+    kind: presetName,
   };
 }
 

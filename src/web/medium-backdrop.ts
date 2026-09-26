@@ -42,6 +42,7 @@ export function createMediumBackdrop(): MediumBackdrop {
       runtime.ensureGrid(frame.gridWidth, frame.gridHeight);
       runtime.step(frame.dt, frame.params);
       runtime.emit(frame.emissions ?? []);
+      runtime.stepTrackLayer(frame.dt, frame.emissions ?? []);
       gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
       runtime.composite(target.width, target.height, frame.params);
     },

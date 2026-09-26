@@ -208,6 +208,13 @@ export type VireUIKitMediumParams = {
    *  in a real chamber to read even where the ambient light is weak — this is that floor, not a
    *  second light source. */
   trackLightFloor: number;
+  /** ≥0 — master strength of the crisp, screen-space track layer (`web/track-layer.ts`): a grid
+   *  cell cannot carry a thin sharp line (see that module's own header), so the grid stamp this
+   *  file's `decay`/`trackLightFloor` govern stays the soft, gas-carried residue, and THIS is the
+   *  bright, sharp geometry drawn over it in content pixels. 0 disables it outright — the canary
+   *  `check:medium` uses to prove its "sharp at birth" gate is actually sensitive to the layer,
+   *  not to the residue underneath it. */
+  trackLayerAmount: number;
 };
 
 const BASE_COLOR: VireUIKitMediumChannel = [0.07, 0.08, 0.1];
@@ -302,6 +309,7 @@ export const MEDIUM_DEFAULTS: VireUIKitMediumParams = {
   mistGrainJitterPx: 2.2,
   mistGrainJitterFreq: 0.9,
   trackLightFloor: 0.32,
+  trackLayerAmount: 1,
 };
 
 /**
@@ -459,3 +467,44 @@ export const MEDIUM_TRACK_DEPTH_WIDTH_RANGE: readonly [number, number] = [0.55, 
  *  often enough to read as a track, or depth would look like tracks randomly failing to spawn
  *  rather than fading into the distance. */
 export const MEDIUM_TRACK_DEPTH_INTENSITY_RANGE: readonly [number, number] = [0.4, 1];
+
+/**
+ * How long a live track stays in the crisp screen-space layer (`web/track-layer.ts`), seconds, by
+ * preset — tuned by eye against the reference's own "roughly one to two seconds"
+ * (`docs`/the brief's own reference frames): `alpha` is the shortest, thickest burst ray; `muon`,
+ * a cosmic ray crossing the whole chamber, lingers longest. Independent of `MEDIUM_DEFAULTS.decay`,
+ * which times the SOFT gas-carried residue left behind in the grid, not this layer.
+ */
+export const MEDIUM_TRACK_LAYER_LIFE_SECONDS: Readonly<Record<keyof typeof MEDIUM_TRACK_PRESETS, number>> = {
+  alpha: 1.8,
+  electron: 1.4,
+  muon: 2.2,
+};
+
+/** Oldest-out cap on the live-track list (`web/track-layer.ts`) — a burst of a dozen-plus alpha
+ *  rays every few seconds would otherwise grow the instanced draw without bound over a long
+ *  session; 64 is comfortably above what a few overlapping bursts plus background radiation ever
+ *  need alive at once. */
+export const MEDIUM_TRACK_LAYER_MAX_TRACKS = 64;
+
+/** How much a live track's own width grows over its life, as a fraction of its birth width (0 = no
+ *  growth, 1 = doubled by the time it's removed) — "wider ... at ~1.5s", the same broadening the
+ *  grid residue already shows, but on the crisp layer's own geometry. */
+export const MEDIUM_TRACK_LAYER_WIDEN_GAIN = 0.9;
+
+/** Shapes the brightness-vs-age curve as `(1 - age/life) ** gamma`: reaches exactly 0 at removal
+ *  (no pop when a track leaves the list) while staying close to full brightness for the first part
+ *  of its life (>1 skews the fade toward the end rather than a flat linear ramp down). */
+export const MEDIUM_TRACK_LAYER_FADE_GAMMA = 1.6;
+
+/** Downward drift, as a fraction of `min(contentWidth, contentHeight)` per second — droplets that
+ *  formed along a track keep settling after the stamp itself, the same physical idea as
+ *  `MEDIUM_DEFAULTS.condensateSettleSpeed` but for this layer's own screen-space geometry rather
+ *  than the simulation grid. Small: over a track's longest life (muon, 2.2s) this alone moves it
+ *  well under a tenth of the frame. */
+export const MEDIUM_TRACK_LAYER_GRAVITY_SAG = 0.018;
+
+/** Scales the curl field's push on a live track (see `web/track-layer.ts`'s `curlVelocityJS`),
+ *  units of `min(contentWidth, contentHeight)` per second per unit of curl velocity — small enough
+ *  to read as "nudged", not carried the way the gas itself is by `MEDIUM_DEFAULTS.advectSpeed`. */
+export const MEDIUM_TRACK_LAYER_CURL_PUSH = 0.05;

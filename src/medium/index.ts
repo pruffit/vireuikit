@@ -13,3 +13,4 @@ export * from './advect-shader';
 export * from './composite-shader';
 export * from './emit-shader';
 export * from './dynamics';
+export * from './light-rig';
