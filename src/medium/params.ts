@@ -400,8 +400,8 @@ export const MEDIUM_MIN_EMISSION_INTERVAL = 1.2;
 
 /** Average interval between solitary "background emission" tracks at rest, seconds, plus a random
  *  `MEDIUM_NATURAL_JITTER` on top — rare, with no discernible rhythm. */
-export const MEDIUM_NATURAL_INTERVAL = 4;
-export const MEDIUM_NATURAL_JITTER = 6;
+export const MEDIUM_NATURAL_INTERVAL = 8;
+export const MEDIUM_NATURAL_JITTER = 12;
 
 /** The sensitive layer — fractions of height, top to bottom. Above it there isn't enough
  *  supersaturation for a track to appear at all, so background emission is only ever visible here. */

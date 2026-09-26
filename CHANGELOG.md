@@ -25,7 +25,7 @@ condensation tracks — instead of colored smoke clouds with no visible light so
 - **Three track kinds, not two plus a filler.** `MEDIUM_TRACK_PRESETS` is now `alpha`/`electron`/
   `muon` (was `alpha`/`beta`/`natural`). Tracks carry no color of their own; they are lit like the
   mist, plus `trackLightFloor`. `decay` moved from 0.06 to 1.1/s so the grid residue fades within
-  one to two seconds. Calm-state background radiation now arrives every 4–10 s instead of 25–60 s.
+  one to two seconds. Calm-state background radiation now arrives every 8–20 s instead of 25–60 s.
 - `check:medium` adds gates, each with a canary: a spotlight's beam reads brighter than the same
   distance outside it; a stamped grid track broadens and fades within +1.5s; the crisp layer is
   sharp at birth and broader and dimmer by +1.4s.

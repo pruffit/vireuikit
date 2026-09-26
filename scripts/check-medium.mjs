@@ -432,9 +432,8 @@ const MIN_CANARY_TRACK_FADE_RATIO = 0.95;
 // perpendicular scanline at its own midpoint column), stamped once through the real medium.pass()
 // API and read immediately (birth) and again TRACK_LAYER_LATER_S later with no further emissions:
 // long enough for the layer's own age-based widen/fade to show, short of MEDIUM_TRACK_LAYER_LIFE_
-// SECONDS.muon (2.2s) so the track is still alive to measure. A same-scene, no-emission background
-// frame is subtracted per pixel before weighting — the ambient lights/mist gradient varies smoothly
-// across the frame on its own, and would otherwise bias the weighted sigma independent of the track.
+// SECONDS.muon (2.2s) so the track is still alive to measure. The same run with the layer off is
+// subtracted per pixel, so the grid residue, gas and lights cancel and only the layer is measured.
 const TRACK_LAYER_CANVAS_W = 1920;
 const TRACK_LAYER_CANVAS_H = 952;
 const TRACK_LAYER_GRID_W = 74;
@@ -446,10 +445,14 @@ const TRACK_LAYER_LATER_S = 1.4;
  *  this size, see MEDIUM_TRACK_LAYER_LOOK), not a ~26px grid-cell blur. The emission sits at mid
  *  depth, so no defocus. Threshold from a measured run. */
 const MAX_TRACK_LAYER_BIRTH_SIGMA_PX = 8;
+/** Half-height of the cross-section window around the column's peak, px. */
+const TRACK_LAYER_WINDOW_PX = 30;
+/** Layer-only luma summed over the window below which no track is visible at all. */
+const TRACK_LAYER_MIN_MASS = 20;
 /** Ratio of the cross-section's sigma at +1.4s vs at birth — how much the layer's own geometry
  *  broadened (see MEDIUM_TRACK_LAYER_LOOK.broaden). Threshold from a measured run. */
 const MIN_TRACK_LAYER_BROADEN_RATIO = 1.15;
-/** Ratio of total track brightness (background-subtracted) at +1.4s vs at birth — how much it
+/** Ratio of the layer's total brightness at +1.4s vs at birth — how much it
  *  dimmed (see MEDIUM_TRACK_LAYER_FADE_GAMMA/LIFE_SECONDS). Threshold from a measured run. */
 const MAX_TRACK_LAYER_FADE_RATIO = 0.6;
 
@@ -2180,43 +2183,42 @@ globalThis.vgTrackLayerShapeSeries = async ({ trackLayerAmount }) => {
   const ch = ${TRACK_LAYER_CANVAS_H};
   const gridW = ${TRACK_LAYER_GRID_W};
   const gridH = ${TRACK_LAYER_GRID_H};
-  const canvas = makeCanvas(cw, ch);
-  const renderer = createVireGlassRenderer(canvas);
-  renderer.resize(cw, ch);
-  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
-  const medium = createMediumBackdrop();
   const dt = ${TRACK_LAYER_DT};
-  const params = { trackLayerAmount };
   const muon = MEDIUM_TRACK_PRESETS.muon;
   const minDim = Math.min(cw, ch);
   const emission = { ...muon, source: [0.5, 0.5], angle: 0, seed: 1, depth: 0.5, kind: 'muon' };
 
-  function frame(emissions) {
-    renderer.render({
-      density: 1,
-      debug: 'normal',
-      pieces: [],
-      backdrop: medium.pass({ gridWidth: gridW, gridHeight: gridH, dt, params, emissions }),
-    });
+  // The same deterministic run twice: once as asked, once with the layer off. Their difference is
+  // the layer alone — the grid residue, gas and lights are identical in both and cancel.
+  function run(amount) {
+    const canvas = makeCanvas(cw, ch);
+    const renderer = createVireGlassRenderer(canvas);
+    renderer.resize(cw, ch);
+    const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+    const medium = createMediumBackdrop();
+    const params = { trackLayerAmount: amount };
+    function frame(emissions) {
+      renderer.render({
+        density: 1,
+        debug: 'normal',
+        pieces: [],
+        backdrop: medium.pass({ gridWidth: gridW, gridHeight: gridH, dt, params, emissions }),
+      });
+    }
+    for (let i = 0; i < ${TRACK_LAYER_WARMUP_STEPS}; i += 1) frame([]);
+    frame([emission]);
+    const birth = readCanvas(gl, cw, ch);
+    const steps = Math.round(${TRACK_LAYER_LATER_S} / dt);
+    for (let i = 0; i < steps; i += 1) frame([]);
+    const later = readCanvas(gl, cw, ch);
+    medium.destroy();
+    return { birth, later };
   }
+  const shown = run(trackLayerAmount);
+  const reference = run(0);
 
-  // No-emission warmup so mist/lights settle BEFORE the background reference is captured — the
-  // background subtraction below only isolates the track's own contribution if the ambient scene
-  // it's subtracted from is itself already representative, not still ramping from a cold start.
-  for (let i = 0; i < ${TRACK_LAYER_WARMUP_STEPS}; i += 1) frame([]);
-  const background = readCanvas(gl, cw, ch);
-
-  frame([emission]);
-  const birth = readCanvas(gl, cw, ch);
-  const steps = Math.round(${TRACK_LAYER_LATER_S} / dt);
-  for (let i = 0; i < steps; i += 1) frame([]);
-  const later = readCanvas(gl, cw, ch);
-  medium.destroy();
-
-  // angle=0 (straight along +x from the frame center, see web/track-layer-gl.ts's px conversion) —
-  // a vertical scanline at the track's own midpoint column is exactly perpendicular to it. Sigma is
-  // a density-weighted standard deviation across that scanline, luma background-subtracted per pixel
-  // (see the file header) — a robust "width" with no threshold to pick by hand.
+  // angle=0 (straight along +x from the frame center) — a vertical scanline at the track's midpoint
+  // column is perpendicular to it. Sigma is a luma-weighted standard deviation across that scanline.
   const midCol = Math.min(Math.max(Math.round(cw / 2 + (muon.lengthFrac * minDim) / 2), 0), cw - 1);
   const boxColStart = Math.max(0, Math.floor(cw / 2 - 20));
   const boxColEnd = Math.min(cw, Math.ceil(cw / 2 + muon.lengthFrac * minDim + 20));
@@ -2227,33 +2229,42 @@ globalThis.vgTrackLayerShapeSeries = async ({ trackLayerAmount }) => {
     const i = idx * 4;
     return 0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2];
   }
-  function diffAt(buf, row, col) {
-    const idx = row * cw + col;
-    return Math.max(0, luma(buf, idx) - luma(background, idx));
-  }
-
-  function crossSection(buf) {
+  // Width is read in a window around the column's peak: stray droplets far from the core would
+  // otherwise dominate the second moment.
+  function crossSection(buf, ref) {
+    const diffAt = (row, col) => {
+      const idx = row * cw + col;
+      return Math.max(0, luma(buf, idx) - luma(ref, idx));
+    };
+    let peakRow = 0;
+    for (let r = 0; r < ch; r += 1) if (diffAt(r, midCol) > diffAt(peakRow, midCol)) peakRow = r;
+    const r0 = Math.max(0, peakRow - ${TRACK_LAYER_WINDOW_PX});
+    const r1 = Math.min(ch - 1, peakRow + ${TRACK_LAYER_WINDOW_PX});
     let mass = 0;
     let weighted = 0;
-    for (let r = 0; r < ch; r += 1) {
-      const d = diffAt(buf, r, midCol);
+    for (let r = r0; r <= r1; r += 1) {
+      const d = diffAt(r, midCol);
       mass += d;
       weighted += d * r;
     }
-    const meanRow = mass > 1e-6 ? weighted / mass : ch / 2;
+    const meanRow = mass > 1e-6 ? weighted / mass : peakRow;
     let variance = 0;
-    for (let r = 0; r < ch; r += 1) {
-      const d = diffAt(buf, r, midCol);
+    for (let r = r0; r <= r1; r += 1) {
+      const d = diffAt(r, midCol);
       variance += d * (r - meanRow) * (r - meanRow);
     }
-    const sigma = mass > 1e-6 ? Math.sqrt(variance / mass) : 0;
+    // Nothing visible is not a sharp track.
+    const sigma = mass > ${TRACK_LAYER_MIN_MASS} ? Math.sqrt(variance / mass) : Infinity;
     let total = 0;
     for (let r = boxRowStart; r < boxRowEnd; r += 1) {
-      for (let c = boxColStart; c < boxColEnd; c += 1) total += diffAt(buf, r, c);
+      for (let c = boxColStart; c < boxColEnd; c += 1) total += diffAt(r, c);
     }
     return { sigma, total };
   }
-  return { birth: crossSection(birth), later: crossSection(later) };
+  return {
+    birth: crossSection(shown.birth, reference.birth),
+    later: crossSection(shown.later, reference.later),
+  };
 };
 `;
 
@@ -2752,12 +2763,12 @@ async function main() {
     );
   }
 
-  console.log('--- canary: trackLayerAmount=0 must NOT read sharp — only the soft grid residue remains ---');
+  console.log('--- canary: trackLayerAmount=0 must NOT read sharp — nothing of the layer is left to measure ---');
   const layerCanary = await page.evaluate((a) => globalThis.vgTrackLayerShapeSeries(a), { trackLayerAmount: 0 });
   console.log(`  birth: sigma ${layerCanary.birth.sigma.toFixed(2)}px, total ${layerCanary.birth.total.toFixed(1)}`);
   if (layerCanary.birth.sigma <= MAX_TRACK_LAYER_BIRTH_SIGMA_PX) {
     failed.push(
-      `track layer canary did not fail (birth sigma ${layerCanary.birth.sigma.toFixed(2)}px with trackLayerAmount=0) — this gate is not actually sensitive to the crisp layer, only to the soft grid residue underneath it`,
+      `track layer canary did not fail (birth sigma ${layerCanary.birth.sigma.toFixed(2)}px with trackLayerAmount=0) — this gate is not actually sensitive to the crisp layer`,
     );
   }
 
