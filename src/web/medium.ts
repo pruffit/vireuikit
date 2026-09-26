@@ -398,7 +398,8 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
       !vaporForward ||
       !vaporCorrected ||
       !condensateForward ||
-      !condensateCorrected
+      !condensateCorrected ||
+      !shadow
     ) {
       return;
     }
@@ -499,22 +500,20 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     setUniform(gl, trackAdvectLoc('u_decay'), p.decay);
     drawFullscreenTriangle(gl);
 
-    if (shadow) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, shadow.fbo);
-      gl.useProgram(shadowProgram);
-      bindTextureAt(gl, 0, vapor[back].texture, shadowProgram, 'u_vapor');
-      bindTextureAt(gl, 1, condensate[back].texture, shadowProgram, 'u_condensate');
-      setUniform(gl, shadowLoc('u_vaporSize'), gridSize);
-      setUniform(gl, shadowLoc('u_condensateSize'), gridSize);
-      setUniform(gl, shadowLoc('u_resolution'), gridSize);
-      setUniform(gl, shadowLoc('u_condensateGain'), p.condensateGain);
-      setUniform(gl, shadowLoc('u_extinction'), p.shadowExtinction);
-      for (const slot of [1, 2]) {
-        const position = p.lights[slot]?.position ?? [0, 0];
-        setUniform(gl, shadowLoc(`u_light${slot}Grid`), [position[0] * gridW, position[1] * gridH]);
-      }
-      drawFullscreenTriangle(gl);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, shadow.fbo);
+    gl.useProgram(shadowProgram);
+    bindTextureAt(gl, 0, vapor[back].texture, shadowProgram, 'u_vapor');
+    bindTextureAt(gl, 1, condensate[back].texture, shadowProgram, 'u_condensate');
+    setUniform(gl, shadowLoc('u_vaporSize'), gridSize);
+    setUniform(gl, shadowLoc('u_condensateSize'), gridSize);
+    setUniform(gl, shadowLoc('u_resolution'), gridSize);
+    setUniform(gl, shadowLoc('u_condensateGain'), p.condensateGain);
+    setUniform(gl, shadowLoc('u_extinction'), p.shadowExtinction);
+    for (const slot of [1, 2]) {
+      const position = p.lights[slot]?.position ?? [0, 0];
+      setUniform(gl, shadowLoc(`u_light${slot}Grid`), [position[0] * gridW, position[1] * gridH]);
     }
+    drawFullscreenTriangle(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     front = back;
@@ -583,7 +582,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     contentHeight: number,
     params: Partial<VireUIKitMediumParams> = {},
   ): void {
-    if (!vapor || !condensate || !track) return;
+    if (!vapor || !condensate || !track || !shadow) return;
     const p = { ...MEDIUM_DEFAULTS, ...params };
     gl.viewport(0, 0, contentWidth, contentHeight);
     gl.disable(gl.BLEND);
@@ -591,7 +590,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     bindTextureAt(gl, 0, vapor[front].texture, compositeProgram, 'u_vapor');
     bindTextureAt(gl, 1, condensate[front].texture, compositeProgram, 'u_condensate');
     bindTextureAt(gl, 2, track[front].texture, compositeProgram, 'u_track');
-    if (shadow) bindTextureAt(gl, 3, shadow.texture, compositeProgram, 'u_shadow');
+    bindTextureAt(gl, 3, shadow.texture, compositeProgram, 'u_shadow');
     setUniform(gl, compositeLoc('u_vaporSize'), [gridW, gridH]);
     setUniform(gl, compositeLoc('u_condensateSize'), [gridW, gridH]);
     setUniform(gl, compositeLoc('u_trackSize'), [gridW, gridH]);
@@ -626,7 +625,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     // the SAME target framebuffer — see track-layer-gl.ts's own file header for why this is a raw
     // instanced GLSL pass rather than another fullscreen shader in the DSL above.
     const { data, count } = buildTrackLayerInstances(liveTracks, contentWidth, contentHeight, p.trackLayerAmount);
-    trackLayerProgram.draw(contentWidth, contentHeight, data, count, p.trackLightFloor, p.lights);
+    trackLayerProgram.draw(contentWidth, contentHeight, data, count, p.trackLightFloor, p.lights, shadow.texture);
   }
 
   function readTarget(target: DyeTarget): number {

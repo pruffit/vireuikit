@@ -63,7 +63,7 @@ strip near neutral. Vapor species (`channelColors`) fold into a near-neutral amb
 
 Tracks come in three kinds (`MEDIUM_TRACK_PRESETS`): `alpha` (short, thick, thickening toward its
 end — the playing source sprays a burst of them from the cover's position, a few on the beat and
-the rest over the next second and a half), `electron` (thin, wiggly) and `muon` (long, straight,
+the rest over the next 1.6 s), `electron` (thin, wiggly) and `muon` (long, straight,
 thin). The calm state schedules a lone electron or muon every 8–20 s from no source at all. Each track is drawn twice: as a soft residue stamped into the simulation grid, and
 as a crisp droplet chain in content pixels (`trackLayerAmount`, `MEDIUM_TRACK_LAYER_LOOK`) that
 appears at full length, then broadens, sags and fades over one to two seconds. Tracks are lit by

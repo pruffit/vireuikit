@@ -1,7 +1,7 @@
 // The crisp track layer's GPU half: one instanced, additive quad per live track, drawn into the
 // backdrop's target right after the fullscreen composite. Raw GLSL ES 3.0 rather than the
 // transpiled shader dialect, which only draws fullscreen passes; the Android port needs its own path.
-import { locationCache, setUniform } from 'vireglass/web';
+import { bindTextureAt, locationCache, setUniform } from 'vireglass/web';
 import {
   MEDIUM_TRACK_LAYER_LIFE_SECONDS,
   MEDIUM_TRACK_LAYER_LOOK,
@@ -18,6 +18,7 @@ layout(location = 4) in vec4 a_grain;
 
 uniform vec2 u_resolution;
 uniform float u_trackLightFloor;
+uniform sampler2D u_shadow;
 uniform vec2 u_light0Pos;
 uniform vec2 u_light0Dir;
 uniform float u_light0CosCone;
@@ -96,9 +97,11 @@ void main() {
   // Lit per corner: light varies over hundreds of px, a track is a few px wide. The backdrop
   // target stores the scene top row at y = 0; lights use y up.
   vec2 xy = vec2(pos.x, u_resolution.y - pos.y);
+  // The same gas shadow the composite applies to the spotlights (shadow-shader.ts, y up).
+  vec4 shadow = texture(u_shadow, xy / u_resolution);
   float light0 = vgLightAmount(xy, u_light0Pos, u_light0Dir, u_light0CosCone, u_light0Falloff, u_resolution, 1.7) * u_light0Intensity;
-  float light1 = vgLightAmount(xy, u_light1Pos, u_light1Dir, u_light1CosCone, u_light1Falloff, u_resolution, 4.1) * u_light1Intensity;
-  float light2 = vgLightAmount(xy, u_light2Pos, u_light2Dir, u_light2CosCone, u_light2Falloff, u_resolution, 8.3) * u_light2Intensity;
+  float light1 = vgLightAmount(xy, u_light1Pos, u_light1Dir, u_light1CosCone, u_light1Falloff, u_resolution, 4.1) * u_light1Intensity * shadow.r;
+  float light2 = vgLightAmount(xy, u_light2Pos, u_light2Dir, u_light2CosCone, u_light2Falloff, u_resolution, 8.3) * u_light2Intensity * shadow.g;
   v_illum = u_light0Color * light0 + u_light1Color * light1 + u_light2Color * light2 + vec3(u_trackLightFloor);
   gl_Position = vec4((pos / u_resolution) * 2.0 - 1.0, 0.0, 1.0);
 }
@@ -259,6 +262,7 @@ export type TrackLayerProgram = {
     count: number,
     trackLightFloor: number,
     lights: readonly (VireUIKitMediumLight | undefined)[],
+    shadow: WebGLTexture,
   ): void;
   destroy(): void;
 };
@@ -331,6 +335,7 @@ export function createTrackLayerProgram(gl: WebGL2RenderingContext): TrackLayerP
     count: number,
     trackLightFloor: number,
     lights: readonly (VireUIKitMediumLight | undefined)[],
+    shadow: WebGLTexture,
   ): void {
     if (count <= 0) return;
     gl.useProgram(program);
@@ -341,6 +346,7 @@ export function createTrackLayerProgram(gl: WebGL2RenderingContext): TrackLayerP
     setUniform(gl, loc('u_resolution'), [contentWidth, contentHeight]);
     setUniform(gl, loc('u_trackLightFloor'), trackLightFloor);
     for (let slot = 0; slot < 3; slot += 1) bindLight(slot, lights[slot]);
+    bindTextureAt(gl, 0, shadow, program, 'u_shadow');
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);

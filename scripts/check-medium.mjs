@@ -397,6 +397,10 @@ const BEAM_MAX_RADIUS_FRAC = 0.6;
  *  Thresholds set from a measured run — see the report printed by this gate. */
 const MIN_BEAM_RATIO = 1.5;
 const MAX_CANARY_BEAM_RATIO = 1.15;
+/** Inside-beam luma with the gas shadow on vs `shadowExtinction = 0`: the gas between the lamp and
+ *  the chamber has to dim the beam, but not put it out. Thresholds from a measured run. */
+const MAX_SHADOW_RATIO = 0.95;
+const MIN_SHADOW_RATIO = 0.1;
 
 // --- Chamber look: a track is sharp at birth, then broadens, sags and fades ----------------------
 //
@@ -2084,7 +2088,7 @@ function vgBeamRatio(luma, cw, ch, lightPosFrac, lightDir, coneAngle) {
   return { insideMean, outsideMean, insideN, outsideN, ratio: outsideMean > 1e-6 ? insideMean / outsideMean : Infinity };
 }
 
-globalThis.vgBeamSeries = async ({ lightOn }) => {
+globalThis.vgBeamSeries = async ({ lightOn, shadowExtinction }) => {
   const gridW = ${BEAM_GRID_W};
   const gridH = ${BEAM_GRID_H};
   const cw = ${BEAM_CANVAS_W};
@@ -2095,17 +2099,20 @@ globalThis.vgBeamSeries = async ({ lightOn }) => {
   const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
   const medium = createMediumBackdrop();
   const dt = ${BEAM_DT};
-  // One light only (a spotlight, MEDIUM_DEFAULTS.lights[1]) — isolates the cone mechanism from the
-  // sum of all three shipped lights, the same "zero the other mechanism" isolation the boost/
-  // contrast gates already use for their own one variable.
+  // One spotlight only, in its own slot 1 (slot 0 takes no gas shadow): isolates the beam from the
+  // sum of all three shipped lights.
   const baseLight = MEDIUM_DEFAULTS.lights[1];
-  const lights = [{ ...baseLight, intensity: lightOn ? baseLight.intensity : 0 }];
+  const lights = [
+    { ...MEDIUM_DEFAULTS.lights[0], intensity: 0 },
+    { ...baseLight, intensity: lightOn ? baseLight.intensity : 0 },
+  ];
+  const params = shadowExtinction === undefined ? { lights } : { lights, shadowExtinction };
   function frame() {
     renderer.render({
       density: 1,
       debug: 'normal',
       pieces: [],
-      backdrop: medium.pass({ gridWidth: gridW, gridHeight: gridH, dt, params: { lights } }),
+      backdrop: medium.pass({ gridWidth: gridW, gridHeight: gridH, dt, params }),
     });
   }
   for (let i = 0; i < ${BEAM_WARMUP_STEPS}; i += 1) frame();
@@ -2699,6 +2706,28 @@ async function main() {
     );
   }
 
+  console.log('--- shadows: the gas between the lamp and the chamber dims the beam ---');
+  const beamClear = await page.evaluate((a) => globalThis.vgBeamSeries(a), { lightOn: true, shadowExtinction: 0 });
+  const shadowRatio = beamClear.insideMean > 1e-6 ? beamCorrect.insideMean / beamClear.insideMean : 1;
+  console.log(
+    `  inside-beam mean ${beamCorrect.insideMean.toFixed(2)} with the shadow, ${beamClear.insideMean.toFixed(2)} without, ratio ${shadowRatio.toFixed(3)}`,
+  );
+  if (!(shadowRatio <= MAX_SHADOW_RATIO && shadowRatio >= MIN_SHADOW_RATIO)) {
+    failed.push(
+      `shadows: beam ratio ${shadowRatio.toFixed(3)} with the gas shadow is outside [${MIN_SHADOW_RATIO}, ${MAX_SHADOW_RATIO}] — the gas does not shade the beam, or puts it out`,
+    );
+  }
+
+  console.log('--- canary: extinction 0 on both sides must not read as a shadow ---');
+  const beamClearAgain = await page.evaluate((a) => globalThis.vgBeamSeries(a), { lightOn: true, shadowExtinction: 0 });
+  const shadowCanaryRatio = beamClear.insideMean > 1e-6 ? beamClearAgain.insideMean / beamClear.insideMean : 1;
+  console.log(`  ratio ${shadowCanaryRatio.toFixed(3)}`);
+  if (shadowCanaryRatio <= MAX_SHADOW_RATIO) {
+    failed.push(
+      `shadows canary did not fail (ratio ${shadowCanaryRatio.toFixed(3)} with no extinction) — this gate is not actually sensitive to the shadow pass`,
+    );
+  }
+
   // --- 14. Chamber look: a track is sharp at birth, then broadens, sags and fades. ----------------
   console.log('--- track shape: a stamped track broadens and fades over +1.5s -------------------------------');
   const trackCorrect = await page.evaluate((a) => globalThis.vgTrackShapeSeries(a), { canary: false });
@@ -2780,7 +2809,7 @@ async function main() {
     return;
   }
   console.log(
-    "check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), the phase wrap is seamless (canary caught), the far depth plane reads slower and lower-contrast than the near one (both canaries caught), the far plane decorrelates from the near one at 128x72 (canary caught), the bottom boost is a steady-state property and vapor drift is a valid motion cue (both canaries caught), the depth composite's cost over the pre-depth one is reported, the composited backdrop at the product's own default size reads as isotropic gas, not a lattice of straight lines (canary caught), a light's cone reads as a visible beam (canary caught), a stamped track broadens and fades within +1.5s (canary caught), and the crisp screen-space track layer reads sharp at birth and broadens/dims by +1.4s (canary caught)",
+    "check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), the phase wrap is seamless (canary caught), the far depth plane reads slower and lower-contrast than the near one (both canaries caught), the far plane decorrelates from the near one at 128x72 (canary caught), the bottom boost is a steady-state property and vapor drift is a valid motion cue (both canaries caught), the depth composite's cost over the pre-depth one is reported, the composited backdrop at the product's own default size reads as isotropic gas, not a lattice of straight lines (canary caught), a light's cone reads as a visible beam (canary caught), the gas shades the beam (canary caught), a stamped track broadens and fades within +1.5s (canary caught), and the crisp screen-space track layer reads sharp at birth and broadens/dims by +1.4s (canary caught)",
   );
 }
 
