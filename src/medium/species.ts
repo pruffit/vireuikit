@@ -1,8 +1,13 @@
-// Vapor species tones are DERIVED from a character, not picked as three separate colors. The
-// three most common colors of a piece of cover art are not a palette: they land all around the
-// hue wheel, and the species mix with each other too — a mix of two opposing hues passes through
-// gray. A narrow arc around a single hue is the guard against that: mixes inside it simply have
-// nowhere to pass through gray.
+// Tones are DERIVED from a character, not picked as separate colors. The three most common colors
+// of a piece of cover art are not a palette: they land all around the hue wheel, and mixing two
+// opposing hues passes through gray. A narrow arc around a single hue is the guard against that —
+// mixes inside it simply have nowhere to pass through gray.
+//
+// This derivation now typically feeds `lights` (params.ts), not `channelColors`: a chamber's gas is
+// invisible, only what scatters light reads at all (see MEDIUM_COMPOSITE_SHADER) — a caller building
+// a light rig from cover art applies `characterOf`/`speciesFamily` to the LIGHTS' colors. The
+// functions stay general (any N-tone family around a character), so nothing here changed; only
+// where a consumer plugs the result in did.
 
 import { oklabToSrgb, srgbToOklab } from './oklab';
 import type { VireUIKitMediumChannel } from './params';

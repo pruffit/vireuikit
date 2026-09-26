@@ -1,4 +1,5 @@
 import { VG_OKLAB_TO_SRGB } from './oklab';
+import { VG_VALUE_NOISE } from './noise';
 
 // Composites vapor, condensate and track density into color — DIRECTLY into the buffer the lens
 // samples: this is not a separate pass drawn over the glass, it fills the same contentTexture an
@@ -89,10 +90,56 @@ half4 ${fnName}(float2 px) {
 `;
 }
 
+// LIGHT: the gas above is the OLD "colored vapor" mechanism — kept exactly as it was
+// (still driving the isotropy/contrast/decorrelation/parallax/gravity gates in check-medium.mjs,
+// none of which know about lights) so it stays a valid, near-neutral ambient base by default
+// (`channelColors` defaults to a near-black family — see params.ts). What actually reads as the
+// reference does — a dark volume where light is a separate, visible thing — is ADDITIVE on top of
+// it, in linear light, so a rig that never binds the uniforms below (their GL default is 0) renders
+// bit-for-bit as before.
+//
+// A light is a soft lobe from a fixed point (`vgLightAmount`): position/direction arrive already in the
+// SAME up-is-positive-y fraction space `gravityBottomBoost` above uses, converted to real content
+// pixels here so a circular pool of light stays circular regardless of the frame's aspect ratio
+// (distance is normalized by height alone, not by each axis separately, for the same reason).
+// `u_light0..2` are flat, fixed-slot uniforms, not an array — `setUniform` (vireglass/web) has no
+// array form, only scalars up to vec4 (the same reason species already use `u_lab0/1/2` instead of
+// one array uniform); an unused slot is simply intensity 0.
+//
+// `channelColors` used to be the species' hue; now `u_channelScatter` is how strongly each species
+// SCATTERS the lights' color instead — hue moved to the lights, species are what they scatter, not
+// what they tint (see params.ts's `channelScatter`).
+
+const VG_LIGHT = `
+float vgLightAmount(float2 xy, float2 lightPosFrac, float2 lightDir, float cosCone, float falloff, float2 resolution, float seed) {
+  float2 rel = xy - lightPosFrac * resolution;
+  // A cone of 180° or more is an edge strip: light spreads from a line, not a point.
+  if (cosCone <= -0.999) {
+    float depth = max(dot(rel, lightDir), 0.0);
+    return exp(-(depth / max(resolution.y, 1.0)) * falloff);
+  }
+  float dist = length(rel);
+  float2 dirN = dist > 1e-4 ? rel / dist : lightDir;
+  float cosAngle = dot(dirN, lightDir);
+  // A soft lobe with half intensity at the cone angle and no boundary at all: a lamp in haze has
+  // no drawn edge.
+  float lobe = log(0.5) / log(clamp(cosCone, 0.05, 0.999));
+  float edge = pow(max(cosAngle, 0.0), lobe);
+  float atten = exp(-(dist / max(resolution.y, 1.0)) * falloff);
+  if (edge * atten < 0.001) return 0.0;
+  // Static shafts inside the beam: brightness varies with the angle around the lamp, so streaks
+  // fan out from the source the way light through dusty air does.
+  float angle = atan(dirN.x * lightDir.y - dirN.y * lightDir.x, cosAngle);
+  float shafts = 0.6 + 0.32 * vgValueNoise(float2(angle * 14.0, seed)) + 0.18 * vgValueNoise(float2(angle * 33.0, seed + 5.3));
+  return edge * atten * clamp(shafts, 0.0, 1.0);
+}
+`;
+
 export const MEDIUM_COMPOSITE_SHADER = `
 uniform shader u_vapor;
 uniform shader u_condensate;
 uniform shader u_track;
+uniform shader u_shadow;
 uniform float2 u_dyeScale;
 uniform float3 u_lab0;
 uniform float3 u_lab1;
@@ -108,11 +155,33 @@ uniform float  u_farBlurRadius;
 uniform float  u_farWeight;
 uniform float  u_gravityBoost;
 uniform float  u_gravityBoostStart;
+uniform float3 u_channelScatter;
+uniform float2 u_light0Pos;
+uniform float2 u_light0Dir;
+uniform float  u_light0CosCone;
+uniform float  u_light0Falloff;
+uniform float3 u_light0Color;
+uniform float  u_light0Intensity;
+uniform float2 u_light1Pos;
+uniform float2 u_light1Dir;
+uniform float  u_light1CosCone;
+uniform float  u_light1Falloff;
+uniform float3 u_light1Color;
+uniform float  u_light1Intensity;
+uniform float2 u_light2Pos;
+uniform float2 u_light2Dir;
+uniform float  u_light2CosCone;
+uniform float  u_light2Falloff;
+uniform float3 u_light2Color;
+uniform float  u_light2Intensity;
+uniform float  u_trackLightFloor;
 
 ${VG_OKLAB_TO_SRGB}
 ${VG_CUBIC_WEIGHTS}
 ${vgBicubicSampler('vgBicubicVapor', 'u_vapor')}
 ${vgBicubicSampler('vgBicubicCondensate', 'u_condensate')}
+${VG_VALUE_NOISE}
+${VG_LIGHT}
 
 half4 main(float2 xy) {
   float2 baseSrc = xy * u_dyeScale;
@@ -180,7 +249,34 @@ half4 main(float2 xy) {
   float total = max(w0 + w1 + w2 + wBg + wCondensate, 1e-4);
   float3 mixLab =
     (u_labBg * wBg + u_lab0 * w0 + u_lab1 * w1 + u_lab2 * w2 + condensateLab * wCondensate) / total;
-  float3 rgbLinear = clamp(vgOklabToLinear(mixLab), float3(0.0), float3(1.0));
+  // The dark ambient base — this is where the OLD mechanism stops (see the file header on
+  // VG_LIGHT): unclamped here, clamped once at the very end, after the lit layer adds in.
+  float3 rgbLinearBase = vgOklabToLinear(mixLab);
+
+  // Spotlights reach this point dimmed by the gas in front of them (shadow-shader.ts).
+  half4 shadow = u_shadow.eval(baseSrc);
+  float light0 = vgLightAmount(xy, u_light0Pos, u_light0Dir, u_light0CosCone, u_light0Falloff, u_resolution, 1.7) * u_light0Intensity;
+  float light1 = vgLightAmount(xy, u_light1Pos, u_light1Dir, u_light1CosCone, u_light1Falloff, u_resolution, 4.1) * u_light1Intensity
+    * float(shadow.r);
+  float light2 = vgLightAmount(xy, u_light2Pos, u_light2Dir, u_light2CosCone, u_light2Falloff, u_resolution, 8.3) * u_light2Intensity
+    * float(shadow.g);
+  float3 illum = u_light0Color * light0 + u_light1Color * light1 + u_light2Color * light2;
+
+  float totalScatter = gasR * u_channelScatter.x + gasG * u_channelScatter.y + gasB * u_channelScatter.z;
+  float fogDensity = totalScatter + wCondensate;
+  float mist = 0.006 + fogDensity * 0.2;
+
+  // TRACKS: lit the same way as the mist, plus a floor so a track already on screen never vanishes
+  // entirely just because it drifted out of a cone (a fresh ionization trail reads brighter than
+  // ambient mist in a real chamber). The floor is added to ITS OWN color, not multiplied into illum:
+  // illum is exactly [0,0,0] in a fully unlit spot (every light's amount is 0 there), so a floor
+  // multiplied by illum would vanish exactly where it exists to help — it needs a color of its own
+  // (a neutral, self-luminous glow) rather than borrowing whichever light happens to be nearby.
+  float trackDensity = max(float(track.r), max(float(track.g), float(track.b)));
+  float3 trackGlow = (1.0 - exp(-trackDensity * 0.4)) * (illum + float3(u_trackLightFloor)) * 0.08;
+
+  float3 rgbLinear = rgbLinearBase * 0.025 + illum * mist + trackGlow;
+  rgbLinear = float3(1.0) - exp(-rgbLinear * 1.0);
   float3 srgb = vgLinearToSrgb(rgbLinear);
   return half4(half3(srgb), half(1.0));
 }

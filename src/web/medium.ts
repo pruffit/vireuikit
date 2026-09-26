@@ -14,8 +14,10 @@ import {
   MEDIUM_CONDENSATE_REACT_SHADER,
   MEDIUM_DEFAULTS,
   MEDIUM_EMIT_SHADER,
+  MEDIUM_MAX_LIGHTS,
   MEDIUM_RESAMPLE_SHADER,
   MEDIUM_SEED_SHADER,
+  MEDIUM_SHADOW_SHADER,
   MEDIUM_TIME_PERIOD,
   MEDIUM_TRACK_ADVECT_SHADER,
   MEDIUM_VAPOR_CORRECT_SHADER,
@@ -23,6 +25,7 @@ import {
   MEDIUM_VAPOR_REACT_SHADER,
   srgbToOklab,
   type VireUIKitMediumEmission,
+  type VireUIKitMediumLight,
   type VireUIKitMediumParams,
 } from '../medium';
 import { toGLSL } from 'vireglass';
@@ -35,6 +38,8 @@ import {
   locationCache,
   setUniform,
 } from 'vireglass/web';
+import { createTrackLayer, type VireUIKitLiveTrack } from './track-layer';
+import { buildTrackLayerInstances, createTrackLayerProgram } from './track-layer-gl';
 
 export type MediumRuntime = {
   /** Recreates the grid on the first call (seeding it); on a later call with a different size,
@@ -52,6 +57,13 @@ export type MediumRuntime = {
    * and their own decay extinguishes them; there is no lifetime timer here.
    */
   emit(emissions: readonly VireUIKitMediumEmission[]): void;
+  /**
+   * Ages, drifts and caps the crisp screen-space track layer's own live-track list (see
+   * `track-layer.ts`) and folds `emissions` into it as fresh tracks — independent of `emit()`
+   * above: that one stamps the SOFT grid residue, this one feeds the SHARP geometry `composite`
+   * draws over it. Called once per frame, same as `emit`.
+   */
+  stepTrackLayer(dt: number, emissions: readonly VireUIKitMediumEmission[]): void;
   /**
    * Composites the current density (vapor + condensate + tracks) into a buffer already bound by
    * the caller (the renderer's `contentFbo`) — this is exactly how the medium acts as the second
@@ -71,6 +83,10 @@ export type MediumRuntime = {
    *  cell (condensate has no color — see `readVaporGrid`'s r/g/b for the contrast). Used by the
    *  gravity gate to find the density-weighted row where the mass sits. */
   readCondensateGrid(): { cols: number; rows: number; data: number[] } | null;
+  /** The raw TRACK grid, at simulation-grid resolution, `data` as one density value per cell (a
+   *  track carries no color — see `readCondensateGrid`). Used by the "sharp at birth, soft later"
+   *  gate to measure a stamped track's cross-section directly. */
+  readTrackGrid(): { cols: number; rows: number; data: number[] } | null;
   destroy(): void;
 };
 
@@ -100,6 +116,10 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   const seedProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_SEED_SHADER));
   const emitProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_EMIT_SHADER));
   const resampleProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_RESAMPLE_SHADER));
+  const shadowProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_SHADOW_SHADER));
+  const trackLayerProgram = createTrackLayerProgram(gl);
+  const trackLayer = createTrackLayer();
+  let liveTracks: readonly VireUIKitLiveTrack[] = [];
 
   const vaporForwardLoc = locationCache(gl, vaporForwardProgram);
   const vaporCorrectLoc = locationCache(gl, vaporCorrectProgram);
@@ -112,6 +132,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   const seedLoc = locationCache(gl, seedProgram);
   const emitLoc = locationCache(gl, emitProgram);
   const resampleLoc = locationCache(gl, resampleProgram);
+  const shadowLoc = locationCache(gl, shadowProgram);
 
   let gridW = 0;
   let gridH = 0;
@@ -124,6 +145,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   let vaporCorrected: DyeTarget | null = null;
   let condensateForward: DyeTarget | null = null;
   let condensateCorrected: DyeTarget | null = null;
+  let shadow: DyeTarget | null = null;
   let front = 0;
 
   function makeTarget(w: number, h: number): DyeTarget {
@@ -172,6 +194,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     destroyTarget(vaporCorrected);
     destroyTarget(condensateForward);
     destroyTarget(condensateCorrected);
+    destroyTarget(shadow);
     vapor = null;
     condensate = null;
     track = null;
@@ -179,6 +202,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     vaporCorrected = null;
     condensateForward = null;
     condensateCorrected = null;
+    shadow = null;
   }
 
   // Three spots at fixed, spread-out grid points — the "initial spots", and the entire water
@@ -247,6 +271,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     vaporCorrected = makeTarget(w, h);
     condensateForward = makeTarget(w, h);
     condensateCorrected = makeTarget(w, h);
+    shadow = makeTarget(w, h);
     front = 0;
 
     // Total water scales with cell count, not just density: a bilinear resample roughly preserves
@@ -276,6 +301,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
       vaporCorrected = makeTarget(w, h);
       condensateForward = makeTarget(w, h);
       condensateCorrected = makeTarget(w, h);
+      shadow = makeTarget(w, h);
       front = 0;
       seed(w, h);
       // The target water total — right after seeding, before the first step: this is "the entire
@@ -291,6 +317,21 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     }
 
     resizeGrid(w, h);
+  }
+
+  /** Binds one light slot (`u_light<slot>*`) of `MEDIUM_COMPOSITE_SHADER` — `undefined` (a `lights`
+   *  array shorter than `MEDIUM_MAX_LIGHTS`) binds intensity 0, same as simply never setting the
+   *  uniform (GL's own default), so an unused slot contributes nothing either way. */
+  function bindLightUniforms(slot: number, light: VireUIKitMediumLight | undefined): void {
+    const position = light?.position ?? [0, 0];
+    const direction = light?.direction ?? [0, 1];
+    const dirLen = Math.hypot(direction[0], direction[1]) || 1;
+    setUniform(gl, compositeLoc(`u_light${slot}Pos`), position);
+    setUniform(gl, compositeLoc(`u_light${slot}Dir`), [direction[0] / dirLen, direction[1] / dirLen]);
+    setUniform(gl, compositeLoc(`u_light${slot}CosCone`), Math.cos(light?.coneAngle ?? 0));
+    setUniform(gl, compositeLoc(`u_light${slot}Falloff`), light?.falloff ?? 0);
+    setUniform(gl, compositeLoc(`u_light${slot}Color`), light?.color ?? [0, 0, 0]);
+    setUniform(gl, compositeLoc(`u_light${slot}Intensity`), light?.intensity ?? 0);
   }
 
   /** Shared velocity-field uniforms — one set for both phases' forward/correct passes and for
@@ -357,7 +398,8 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
       !vaporForward ||
       !vaporCorrected ||
       !condensateForward ||
-      !condensateCorrected
+      !condensateCorrected ||
+      !shadow
     ) {
       return;
     }
@@ -458,6 +500,21 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     setUniform(gl, trackAdvectLoc('u_decay'), p.decay);
     drawFullscreenTriangle(gl);
 
+    gl.bindFramebuffer(gl.FRAMEBUFFER, shadow.fbo);
+    gl.useProgram(shadowProgram);
+    bindTextureAt(gl, 0, vapor[back].texture, shadowProgram, 'u_vapor');
+    bindTextureAt(gl, 1, condensate[back].texture, shadowProgram, 'u_condensate');
+    setUniform(gl, shadowLoc('u_vaporSize'), gridSize);
+    setUniform(gl, shadowLoc('u_condensateSize'), gridSize);
+    setUniform(gl, shadowLoc('u_resolution'), gridSize);
+    setUniform(gl, shadowLoc('u_condensateGain'), p.condensateGain);
+    setUniform(gl, shadowLoc('u_extinction'), p.shadowExtinction);
+    for (const slot of [1, 2]) {
+      const position = p.lights[slot]?.position ?? [0, 0];
+      setUniform(gl, shadowLoc(`u_light${slot}Grid`), [position[0] * gridW, position[1] * gridH]);
+    }
+    drawFullscreenTriangle(gl);
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     front = back;
     framesSinceRenorm += 1;
@@ -510,11 +567,14 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
       setUniform(gl, emitLoc('u_tailDim'), e.tailDim);
       setUniform(gl, emitLoc('u_intensity'), e.intensity);
       setUniform(gl, emitLoc('u_seed'), e.seed);
-      setUniform(gl, emitLoc('u_channelMask'), e.channel);
       drawFullscreenTriangle(gl);
     }
     gl.disable(gl.BLEND);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  function stepTrackLayer(dt: number, emissions: readonly VireUIKitMediumEmission[]): void {
+    liveTracks = trackLayer.step(dt, emissions);
   }
 
   function composite(
@@ -522,7 +582,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     contentHeight: number,
     params: Partial<VireUIKitMediumParams> = {},
   ): void {
-    if (!vapor || !condensate || !track) return;
+    if (!vapor || !condensate || !track || !shadow) return;
     const p = { ...MEDIUM_DEFAULTS, ...params };
     gl.viewport(0, 0, contentWidth, contentHeight);
     gl.disable(gl.BLEND);
@@ -530,9 +590,11 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     bindTextureAt(gl, 0, vapor[front].texture, compositeProgram, 'u_vapor');
     bindTextureAt(gl, 1, condensate[front].texture, compositeProgram, 'u_condensate');
     bindTextureAt(gl, 2, track[front].texture, compositeProgram, 'u_track');
+    bindTextureAt(gl, 3, shadow.texture, compositeProgram, 'u_shadow');
     setUniform(gl, compositeLoc('u_vaporSize'), [gridW, gridH]);
     setUniform(gl, compositeLoc('u_condensateSize'), [gridW, gridH]);
     setUniform(gl, compositeLoc('u_trackSize'), [gridW, gridH]);
+    setUniform(gl, compositeLoc('u_shadowSize'), [gridW, gridH]);
     setUniform(gl, compositeLoc('u_resolution'), [contentWidth, contentHeight]);
     setUniform(gl, compositeLoc('u_dyeScale'), [gridW / contentWidth, gridH / contentHeight]);
     // The palette's forward direction (sRGB → Oklab) — here, once per frame (frame constants),
@@ -554,7 +616,16 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     setUniform(gl, compositeLoc('u_farWeight'), p.depthFarWeight);
     setUniform(gl, compositeLoc('u_gravityBoost'), p.gravityBottomBoost);
     setUniform(gl, compositeLoc('u_gravityBoostStart'), p.gravityBottomBoostStart);
+    setUniform(gl, compositeLoc('u_channelScatter'), p.channelScatter);
+    for (let slot = 0; slot < MEDIUM_MAX_LIGHTS; slot += 1) bindLightUniforms(slot, p.lights[slot]);
+    setUniform(gl, compositeLoc('u_trackLightFloor'), p.trackLightFloor);
     drawFullscreenTriangle(gl);
+
+    // The crisp screen-space layer draws OVER the fullscreen composite just written, additively, in
+    // the SAME target framebuffer — see track-layer-gl.ts's own file header for why this is a raw
+    // instanced GLSL pass rather than another fullscreen shader in the DSL above.
+    const { data, count } = buildTrackLayerInstances(liveTracks, contentWidth, contentHeight, p.trackLayerAmount);
+    trackLayerProgram.draw(contentWidth, contentHeight, data, count, p.trackLightFloor, p.lights, shadow.texture);
   }
 
   function readTarget(target: DyeTarget): number {
@@ -631,6 +702,28 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     return { cols: gridW, rows: gridH, data };
   }
 
+  // One number per cell, same reasoning as readCondensateGrid: a track carries no color of its own
+  // (emit-shader.ts stamps r=g=b — see its own comment) since MEDIUM_COMPOSITE_SHADER now lights
+  // tracks rather than tinting them. Used by the "sharp at birth, soft later" gate to measure a
+  // stamped track's cross-section directly, without compositing/lighting in the way.
+  function readTrackGrid(): { cols: number; rows: number; data: number[] } | null {
+    if (!track) return null;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, track[front].fbo);
+    const cells = gridW * gridH;
+    const data = new Array(cells);
+    if (format.type === gl.HALF_FLOAT) {
+      const buf = new Float32Array(cells * 4);
+      gl.readPixels(0, 0, gridW, gridH, gl.RGBA, gl.FLOAT, buf);
+      for (let i = 0; i < cells; i += 1) data[i] = buf[i * 4];
+    } else {
+      const buf = new Uint8Array(cells * 4);
+      gl.readPixels(0, 0, gridW, gridH, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      for (let i = 0; i < cells; i += 1) data[i] = buf[i * 4] / 255;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { cols: gridW, rows: gridH, data };
+  }
+
   function destroy(): void {
     destroyTargets();
     gl.deleteProgram(vaporForwardProgram);
@@ -643,8 +736,21 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.deleteProgram(compositeProgram);
     gl.deleteProgram(seedProgram);
     gl.deleteProgram(emitProgram);
+    gl.deleteProgram(shadowProgram);
     gl.deleteProgram(resampleProgram);
+    trackLayerProgram.destroy();
   }
 
-  return { ensureGrid, step, emit, composite, readTotals, readVaporGrid, readCondensateGrid, destroy };
+  return {
+    ensureGrid,
+    step,
+    emit,
+    stepTrackLayer,
+    composite,
+    readTotals,
+    readVaporGrid,
+    readCondensateGrid,
+    readTrackGrid,
+    destroy,
+  };
 }

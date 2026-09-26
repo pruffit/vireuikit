@@ -12,10 +12,14 @@ describe('MEDIUM_EMIT_SHADER: the "track, not a sprite" criterion', () => {
     expect(MEDIUM_EMIT_SHADER).toContain(VG_VALUE_NOISE);
   });
 
-  it('carries head/tail geometry and the channel the density is stamped into', () => {
-    for (const name of ['u_source', 'u_head', 'u_headWidth', 'u_tailWidth', 'u_channelMask', 'u_intensity']) {
+  it('carries head/tail geometry and brightness', () => {
+    for (const name of ['u_source', 'u_head', 'u_headWidth', 'u_tailWidth', 'u_intensity']) {
       expect(MEDIUM_EMIT_SHADER).toContain(name);
     }
+  });
+
+  it('stamps no color of its own: a track is lit, not tinted (see MEDIUM_COMPOSITE_SHADER)', () => {
+    expect(MEDIUM_EMIT_SHADER).not.toContain('u_channelMask');
   });
 
   it('transpiles into well-formed GLSL (the same pipeline as every other shader)', () => {

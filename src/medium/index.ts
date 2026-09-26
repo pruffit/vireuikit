@@ -12,4 +12,6 @@ export * from './resample-shader';
 export * from './advect-shader';
 export * from './composite-shader';
 export * from './emit-shader';
+export * from './shadow-shader';
 export * from './dynamics';
+export * from './light-rig';

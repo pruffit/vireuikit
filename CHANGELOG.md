@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+The medium now reads as a real cloud chamber — a dark volume lit by static lamps, with sharp
+condensation tracks — instead of colored smoke clouds with no visible light source.
+
+- **Lights, as data.** `lights` (`VireUIKitMediumParams`, up to `MEDIUM_MAX_LIGHTS = 3`): static
+  sources — position, direction, cone half-angle, falloff, color, intensity — added in linear light
+  on top of the near-neutral species mix. Defaults: an edge strip along the floor and two
+  spotlights above the frame. A spotlight is a soft lobe with no edge and static shafts inside it;
+  a cone of 180° or more is an edge strip.
+- **Beams are shaped by the gas.** A grid-resolution shadow pass (`MEDIUM_SHADOW_SHADER`,
+  `shadowExtinction`) dims each spotlight by the vapor and droplets between the lamp and a point.
+- **Cover color goes to the lights.** `lightRigForCover`/`lightRigForCharacter` tint the spotlights
+  toward the cover's hue like gels (gamut-mapped, so a saturated hue does not clip to another one)
+  and nudge the edge strip only slightly. `channelScatter` replaces `channelColors`' old role in
+  the lit layer.
+- **Sharp tracks.** A screen-space track layer draws every emission as a droplet chain in content
+  pixels over the soft grid residue (`trackLayerAmount`, `MEDIUM_TRACK_LAYER_LOOK`,
+  `MEDIUM_TRACK_LAYER_LIFE_SECONDS`): a Gaussian core that beads along its length plus stray
+  droplets, born at full length, then broadening as `sqrt(age)`, sagging and fading. Near tracks
+  defocus into wide soft bands. An alpha burst lands a few rays on the beat and spreads the rest
+  over `MEDIUM_TRACK_LAYER_BURST_SPREAD` seconds.
+- **Three track kinds, not two plus a filler.** `MEDIUM_TRACK_PRESETS` is now `alpha`/`electron`/
+  `muon` (was `alpha`/`beta`/`natural`). Tracks carry no color of their own; they are lit like the
+  mist, plus `trackLightFloor`. `decay` moved from 0.06 to 1.1/s so the grid residue fades within
+  one to two seconds. Calm-state background radiation now arrives every 8–20 s instead of 25–60 s.
+- `check:medium` adds gates, each with a canary: a spotlight's beam reads brighter than the same
+  distance outside it; a stamped grid track broadens and fades within +1.5s; the crisp layer is
+  sharp at birth and broader and dimmer by +1.4s.
+
 ## 0.3.0
 
 Fixes the backdrop reading as a lattice of straight lines at the product's own default size and

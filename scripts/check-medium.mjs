@@ -376,6 +376,90 @@ const MAX_ISOTROPY_RATIO = 2.5;
 const MAX_SEAM_COLUMN_RATIO = 1.5;
 const MIN_CANARY_SEAM_COLUMN_RATIO = 2;
 
+// --- Chamber look: lights are a separate, visible entity ----------------------------------------
+//
+// The full production medium (createMediumBackdrop, real API — condensation needs its own ramp,
+// same reasoning as WATER_WARMUP_S), with every light but one forced to zero intensity so the
+// measurement isolates the cone mechanism itself rather than the sum of all three shipped lights.
+const BEAM_GRID_W = 96;
+const BEAM_GRID_H = 48;
+const BEAM_CANVAS_W = 480;
+const BEAM_CANVAS_H = 240;
+const BEAM_DT = 1 / 30;
+/** Same 20s condensation-ramp warmup as WATER_WARMUP_S, through the same real full-medium API —
+ *  fogDensity (vapor+condensate) needs both phases developed before a light has anything to light. */
+const BEAM_WARMUP_STEPS = 600;
+/** Inner/outer radius of the sampled annulus, as a fraction of min(canvas dims) past the canvas
+ *  edge nearest the light. */
+const BEAM_MIN_RADIUS_FRAC = 0.1;
+const BEAM_MAX_RADIUS_FRAC = 0.6;
+/** Ratio of mean luma well inside the light's cone to well outside it, at the same distance band.
+ *  Thresholds set from a measured run — see the report printed by this gate. */
+const MIN_BEAM_RATIO = 1.5;
+const MAX_CANARY_BEAM_RATIO = 1.15;
+/** Inside-beam luma with the gas shadow on vs `shadowExtinction = 0`: the gas between the lamp and
+ *  the chamber has to dim the beam, but not put it out. Thresholds from a measured run. */
+const MAX_SHADOW_RATIO = 0.95;
+const MIN_SHADOW_RATIO = 0.1;
+
+// --- Chamber look: a track is sharp at birth, then broadens, sags and fades ----------------------
+//
+// The real full-medium API again, but read through readTrackGrid() (raw density, no compositing or
+// lighting in the way) — a single manually-built `muon` emission (long, straight, thin: the easiest
+// shape to take a clean perpendicular cross-section of) stamped once, then left to advect and decay
+// on its own for TRACK_LATER_S with no further emissions.
+const TRACK_GRID_W = 96;
+const TRACK_GRID_H = 48;
+const TRACK_DT = 1 / 30;
+const TRACK_LATER_S = 1.5;
+/** Ratio of the cross-section's Gaussian sigma (a density-weighted standard deviation across a
+ *  scanline perpendicular to the track) at +1.5s vs at birth — how much it broadened. Thresholds
+ *  from a measured run. */
+const MIN_TRACK_BROADEN_RATIO = 1.2;
+/** Ratio of total track density at +1.5s vs at birth — how much of it faded. Below 1: some of the
+ *  stamp is gone, not merely spread thinner (broadening alone conserves the sum; decay is what
+ *  actually loses it). Thresholds from a measured run. */
+const MAX_TRACK_FADE_RATIO = 0.6;
+/** The canary (decay=0, turbulence=0 — no motion to broaden, no decay to fade) must show close to
+ *  NO change in either measure: at zero velocity the backtrace samples its own exact texel center
+ *  every frame, so bilinear resampling introduces essentially no diffusion on its own. */
+const MAX_CANARY_TRACK_BROADEN_RATIO = 1.05;
+const MIN_CANARY_TRACK_FADE_RATIO = 0.95;
+
+// --- Chamber look: the crisp screen-space track layer is sharp at birth -------------------------
+//
+// The gate above measures the SOFT grid residue via readTrackGrid(); this one measures the layer
+// drawn OVER it (track-layer.ts/track-layer-gl.ts), which has no grid buffer of its own — read back
+// from the FINAL composited canvas instead (readCanvas, the same technique the beam gate
+// uses), at the product's own content resolution so a preset's width FRACTION lands on the
+// same content-px the real product shows. A single straight `muon` emission (angle=0 — a clean
+// perpendicular scanline at its own midpoint column), stamped once through the real medium.pass()
+// API and read immediately (birth) and again TRACK_LAYER_LATER_S later with no further emissions:
+// long enough for the layer's own age-based widen/fade to show, short of MEDIUM_TRACK_LAYER_LIFE_
+// SECONDS.muon (2.2s) so the track is still alive to measure. The same run with the layer off is
+// subtracted per pixel, so the grid residue, gas and lights cancel and only the layer is measured.
+const TRACK_LAYER_CANVAS_W = 1920;
+const TRACK_LAYER_CANVAS_H = 952;
+const TRACK_LAYER_GRID_W = 74;
+const TRACK_LAYER_GRID_H = 37;
+const TRACK_LAYER_DT = 1 / 30;
+const TRACK_LAYER_WARMUP_STEPS = 40;
+const TRACK_LAYER_LATER_S = 1.4;
+/** Birth cross-section sigma, content-px — has to read SHARP (the muon look's core is under 1px at
+ *  this size, see MEDIUM_TRACK_LAYER_LOOK), not a ~26px grid-cell blur. The emission sits at mid
+ *  depth, so no defocus. Threshold from a measured run. */
+const MAX_TRACK_LAYER_BIRTH_SIGMA_PX = 8;
+/** Half-height of the cross-section window around the column's peak, px. */
+const TRACK_LAYER_WINDOW_PX = 30;
+/** Layer-only luma summed over the window below which no track is visible at all. */
+const TRACK_LAYER_MIN_MASS = 20;
+/** Ratio of the cross-section's sigma at +1.4s vs at birth — how much the layer's own geometry
+ *  broadened (see MEDIUM_TRACK_LAYER_LOOK.broaden). Threshold from a measured run. */
+const MIN_TRACK_LAYER_BROADEN_RATIO = 1.15;
+/** Ratio of the layer's total brightness at +1.4s vs at birth — how much it
+ *  dimmed (see MEDIUM_TRACK_LAYER_FADE_GAMMA/LIFE_SECONDS). Threshold from a measured run. */
+const MAX_TRACK_LAYER_FADE_RATIO = 0.6;
+
 const ENTRY = `
 import { createVireGlassRenderer } from 'vireglass/web';
 import { toGLSL } from 'vireglass';
@@ -400,6 +484,7 @@ import {
   MEDIUM_DEFAULTS,
   MEDIUM_SEED_SHADER,
   MEDIUM_TIME_PERIOD,
+  MEDIUM_TRACK_PRESETS,
   MEDIUM_VAPOR_CORRECT_SHADER,
   MEDIUM_VAPOR_FORWARD_SHADER,
   MEDIUM_VAPOR_REACT_SHADER,
@@ -424,11 +509,21 @@ function bindSpatial(gl, loc, w, h, curlFreq) {
   setUniform(gl, loc('u_spatial3'), [spatial[3].freqX, spatial[3].freqY, spatial[3].periodX, spatial[3].periodY]);
 }
 
+// NOT attached to document.body: a WebGL2 context works fine on a detached canvas (every read here
+// goes through gl.readPixels/renderer.render, never layout or a visible paint), and Chromium caps
+// the number of SIMULTANEOUSLY LIVE WebGL contexts per page (observed here: adding this package's
+// own three new gates on top of the existing dozen tipped the running total over that cap mid-run —
+// "WARNING: Too many active WebGL contexts. Oldest context will be lost." — which silently evicts
+// whichever gate's context is oldest, not necessarily the one at fault, and reads back as a stall
+// or a hang, not a clean error). A canvas that was appended to document.body stays reachable from
+// the DOM tree for the rest of the page's life even after its own JS variable goes out of scope, so
+// its context never becomes eligible for GC-driven release; every earlier gate's canvas was still
+// pinned in memory by the time this file's later gates ran. A detached canvas is reclaimed (context
+// and all) the moment nothing references it any more — ordinary GC, no explicit cleanup needed here.
 function makeCanvas(w, h) {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
-  document.body.append(canvas);
   return canvas;
 }
 
@@ -1951,6 +2046,233 @@ globalThis.vgIsotropySeries = async ({ canary }) => {
   const seam = vgSeamColumnRatio(farProbe.luma, cw, ch, gridW, farProbe.dyeScaleX, MEDIUM_DEFAULTS.depthFarScale, farProbe.farOffsetX);
   return { isotropy, seam };
 };
+// --- Chamber look: lights are a separate, visible entity -----------------------------------------
+//
+// Mean luma well inside the light's cone vs well outside it, at the SAME distance band — a ring
+// sample (many pixels averaged), not a single point, so per-pixel noise cancels out rather
+// than dominating either bucket. lightPosFrac/lightDir arrive in the SAME up-is-positive-y fraction
+// space MEDIUM_COMPOSITE_SHADER's lights use; luma is row 0 = the canvas's own visual BOTTOM (see
+// readCanvas's comment) — the SAME sense as that fraction space, so no flip is needed here either.
+function vgBeamRatio(luma, cw, ch, lightPosFrac, lightDir, coneAngle) {
+  const lightPx = [lightPosFrac[0] * cw, lightPosFrac[1] * ch];
+  const cosCone = Math.cos(coneAngle);
+  // Lamps sit off-canvas: the distance band starts where the canvas does.
+  const edge = Math.hypot(Math.max(0, -lightPx[0], lightPx[0] - cw), Math.max(0, -lightPx[1], lightPx[1] - ch));
+  const minR = edge + Math.min(cw, ch) * ${BEAM_MIN_RADIUS_FRAC};
+  const maxR = edge + Math.min(cw, ch) * ${BEAM_MAX_RADIUS_FRAC};
+  let insideSum = 0;
+  let insideN = 0;
+  let outsideSum = 0;
+  let outsideN = 0;
+  for (let row = 0; row < ch; row += 1) {
+    for (let col = 0; col < cw; col += 1) {
+      const dx = col - lightPx[0];
+      const dy = row - lightPx[1];
+      const dist = Math.hypot(dx, dy);
+      if (dist < minR || dist > maxR) continue;
+      const cosAngle = (dx * lightDir[0] + dy * lightDir[1]) / dist;
+      const v = luma[row * cw + col];
+      // Margins on both sides of the cone edge so the soft transition band itself doesn't dilute
+      // either bucket — "well inside" and "well outside", not "on either side of the edge".
+      if (cosAngle > cosCone + (1 - cosCone) * 0.3) {
+        insideSum += v;
+        insideN += 1;
+      } else if (cosAngle < cosCone - 0.15) {
+        outsideSum += v;
+        outsideN += 1;
+      }
+    }
+  }
+  const insideMean = insideN > 0 ? insideSum / insideN : 0;
+  const outsideMean = outsideN > 0 ? outsideSum / outsideN : 0;
+  return { insideMean, outsideMean, insideN, outsideN, ratio: outsideMean > 1e-6 ? insideMean / outsideMean : Infinity };
+}
+
+globalThis.vgBeamSeries = async ({ lightOn, shadowExtinction }) => {
+  const gridW = ${BEAM_GRID_W};
+  const gridH = ${BEAM_GRID_H};
+  const cw = ${BEAM_CANVAS_W};
+  const ch = ${BEAM_CANVAS_H};
+  const canvas = makeCanvas(cw, ch);
+  const renderer = createVireGlassRenderer(canvas);
+  renderer.resize(cw, ch);
+  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+  const medium = createMediumBackdrop();
+  const dt = ${BEAM_DT};
+  // One spotlight only, in its own slot 1 (slot 0 takes no gas shadow): isolates the beam from the
+  // sum of all three shipped lights.
+  const baseLight = MEDIUM_DEFAULTS.lights[1];
+  const lights = [
+    { ...MEDIUM_DEFAULTS.lights[0], intensity: 0 },
+    { ...baseLight, intensity: lightOn ? baseLight.intensity : 0 },
+  ];
+  const params = shadowExtinction === undefined ? { lights } : { lights, shadowExtinction };
+  function frame() {
+    renderer.render({
+      density: 1,
+      debug: 'normal',
+      pieces: [],
+      backdrop: medium.pass({ gridWidth: gridW, gridHeight: gridH, dt, params }),
+    });
+  }
+  for (let i = 0; i < ${BEAM_WARMUP_STEPS}; i += 1) frame();
+  const buf = readCanvas(gl, cw, ch);
+  medium.destroy();
+  const luma = new Array(cw * ch);
+  for (let i = 0; i < cw * ch; i += 1) {
+    luma[i] = 0.2126 * buf[i * 4] + 0.7152 * buf[i * 4 + 1] + 0.0722 * buf[i * 4 + 2];
+  }
+  return vgBeamRatio(luma, cw, ch, baseLight.position, baseLight.direction, baseLight.coneAngle);
+};
+
+// --- Chamber look: a track is sharp at birth, then broadens, sags and fades ----------------------
+//
+// One manually-built muon emission (long, straight, thin — the easiest shape to take a clean
+// perpendicular cross-section of) stamped through the real emit() path, read back via
+// readTrackGrid() (raw density, no compositing/lighting in the way) immediately (birth) and again
+// TRACK_LATER_S of simulated time later with no further emissions.
+globalThis.vgTrackShapeSeries = async ({ canary }) => {
+  const gridW = ${TRACK_GRID_W};
+  const gridH = ${TRACK_GRID_H};
+  const canvas = makeCanvas(gridW, gridH);
+  const renderer = createVireGlassRenderer(canvas);
+  renderer.resize(gridW, gridH);
+  const medium = createMediumBackdrop();
+  const dt = ${TRACK_DT};
+  // The canary removes every mechanism that could broaden or fade a stamp: zero turbulence leaves
+  // the backtrace sampling its own exact texel center every frame (no diffusion of its own), and
+  // zero decay leaves the total exactly where it was stamped.
+  const params = canary ? { decay: 0, turbulence: 0, condensateSettleWiggle: 0 } : {};
+  const muon = MEDIUM_TRACK_PRESETS.muon;
+  const minDim = Math.min(gridW, gridH);
+  const emission = { ...muon, source: [0.5, 0.5], angle: 0, seed: 1, depth: 1, kind: 'muon' };
+
+  function frame(emissions) {
+    renderer.render({
+      density: 1,
+      debug: 'normal',
+      pieces: [],
+      backdrop: medium.pass({ gridWidth: gridW, gridHeight: gridH, dt, params, emissions }),
+    });
+  }
+  frame([emission]);
+  const birth = medium.readTrackGrid();
+  const steps = Math.round(${TRACK_LATER_S} / dt);
+  for (let i = 0; i < steps; i += 1) frame([]);
+  const later = medium.readTrackGrid();
+  medium.destroy();
+
+  // angle=0 (straight along +x from grid-center, see web/medium.ts's emit()) — a vertical scanline
+  // at the track's own midpoint column is exactly perpendicular to it. Sigma is a density-weighted
+  // standard deviation across that scanline: a robust "width" with no threshold to pick by hand.
+  const midCol = Math.min(Math.max(Math.round(gridW / 2 + (muon.lengthFrac * minDim) / 2), 0), gridW - 1);
+  function crossSection(grid) {
+    let mass = 0;
+    let weighted = 0;
+    let total = 0;
+    for (let r = 0; r < gridH; r += 1) mass += grid.data[r * gridW + midCol];
+    for (let r = 0; r < gridH; r += 1) weighted += grid.data[r * gridW + midCol] * r;
+    for (let i = 0; i < grid.data.length; i += 1) total += grid.data[i];
+    const meanRow = mass > 1e-6 ? weighted / mass : gridH / 2;
+    let variance = 0;
+    for (let r = 0; r < gridH; r += 1) {
+      const v = grid.data[r * gridW + midCol];
+      variance += v * (r - meanRow) * (r - meanRow);
+    }
+    const sigma = mass > 1e-6 ? Math.sqrt(variance / mass) : 0;
+    return { sigma, total };
+  }
+  return { birth: crossSection(birth), later: crossSection(later) };
+};
+
+globalThis.vgTrackLayerShapeSeries = async ({ trackLayerAmount }) => {
+  const cw = ${TRACK_LAYER_CANVAS_W};
+  const ch = ${TRACK_LAYER_CANVAS_H};
+  const gridW = ${TRACK_LAYER_GRID_W};
+  const gridH = ${TRACK_LAYER_GRID_H};
+  const dt = ${TRACK_LAYER_DT};
+  const muon = MEDIUM_TRACK_PRESETS.muon;
+  const minDim = Math.min(cw, ch);
+  const emission = { ...muon, source: [0.5, 0.5], angle: 0, seed: 1, depth: 0.5, kind: 'muon' };
+
+  // The same deterministic run twice: once as asked, once with the layer off. Their difference is
+  // the layer alone — the grid residue, gas and lights are identical in both and cancel.
+  function run(amount) {
+    const canvas = makeCanvas(cw, ch);
+    const renderer = createVireGlassRenderer(canvas);
+    renderer.resize(cw, ch);
+    const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+    const medium = createMediumBackdrop();
+    const params = { trackLayerAmount: amount };
+    function frame(emissions) {
+      renderer.render({
+        density: 1,
+        debug: 'normal',
+        pieces: [],
+        backdrop: medium.pass({ gridWidth: gridW, gridHeight: gridH, dt, params, emissions }),
+      });
+    }
+    for (let i = 0; i < ${TRACK_LAYER_WARMUP_STEPS}; i += 1) frame([]);
+    frame([emission]);
+    const birth = readCanvas(gl, cw, ch);
+    const steps = Math.round(${TRACK_LAYER_LATER_S} / dt);
+    for (let i = 0; i < steps; i += 1) frame([]);
+    const later = readCanvas(gl, cw, ch);
+    medium.destroy();
+    return { birth, later };
+  }
+  const shown = run(trackLayerAmount);
+  const reference = run(0);
+
+  // angle=0 (straight along +x from the frame center) — a vertical scanline at the track's midpoint
+  // column is perpendicular to it. Sigma is a luma-weighted standard deviation across that scanline.
+  const midCol = Math.min(Math.max(Math.round(cw / 2 + (muon.lengthFrac * minDim) / 2), 0), cw - 1);
+  const boxColStart = Math.max(0, Math.floor(cw / 2 - 20));
+  const boxColEnd = Math.min(cw, Math.ceil(cw / 2 + muon.lengthFrac * minDim + 20));
+  const boxRowStart = Math.max(0, Math.floor(ch / 2 - 60));
+  const boxRowEnd = Math.min(ch, Math.ceil(ch / 2 + 60));
+
+  function luma(buf, idx) {
+    const i = idx * 4;
+    return 0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2];
+  }
+  // Width is read in a window around the column's peak: stray droplets far from the core would
+  // otherwise dominate the second moment.
+  function crossSection(buf, ref) {
+    const diffAt = (row, col) => {
+      const idx = row * cw + col;
+      return Math.max(0, luma(buf, idx) - luma(ref, idx));
+    };
+    let peakRow = 0;
+    for (let r = 0; r < ch; r += 1) if (diffAt(r, midCol) > diffAt(peakRow, midCol)) peakRow = r;
+    const r0 = Math.max(0, peakRow - ${TRACK_LAYER_WINDOW_PX});
+    const r1 = Math.min(ch - 1, peakRow + ${TRACK_LAYER_WINDOW_PX});
+    let mass = 0;
+    let weighted = 0;
+    for (let r = r0; r <= r1; r += 1) {
+      const d = diffAt(r, midCol);
+      mass += d;
+      weighted += d * r;
+    }
+    const meanRow = mass > 1e-6 ? weighted / mass : peakRow;
+    let variance = 0;
+    for (let r = r0; r <= r1; r += 1) {
+      const d = diffAt(r, midCol);
+      variance += d * (r - meanRow) * (r - meanRow);
+    }
+    // Nothing visible is not a sharp track.
+    const sigma = mass > ${TRACK_LAYER_MIN_MASS} ? Math.sqrt(variance / mass) : Infinity;
+    let total = 0;
+    for (let r = boxRowStart; r < boxRowEnd; r += 1) {
+      for (let c = boxColStart; c < boxColEnd; c += 1) total += diffAt(r, c);
+    }
+    return { sigma, total };
+  }
+  return {
+    birth: crossSection(shown.birth, reference.birth),
+    later: crossSection(shown.later, reference.later),
+  };
+};
 `;
 
 function centroidTrend(samples) {
@@ -2361,6 +2683,124 @@ async function main() {
     );
   }
 
+  // --- 13. Chamber look: beams are visible — luminance inside a light's cone vs outside it. -------
+  console.log('--- beams: luminance inside a light\'s cone reads brighter than outside it, at the same distance ---');
+  const beamCorrect = await page.evaluate((a) => globalThis.vgBeamSeries(a), { lightOn: true });
+  console.log(
+    `  inside-cone mean ${beamCorrect.insideMean.toFixed(2)} (n=${beamCorrect.insideN}), outside mean ${beamCorrect.outsideMean.toFixed(2)} (n=${beamCorrect.outsideN}), ratio ${beamCorrect.ratio.toFixed(3)}`,
+  );
+  if (!(beamCorrect.ratio >= MIN_BEAM_RATIO)) {
+    failed.push(
+      `beams: inside/outside luma ratio ${beamCorrect.ratio.toFixed(3)} is below the required ${MIN_BEAM_RATIO} — the light's cone does not read as a visible beam`,
+    );
+  }
+
+  console.log('--- canary: the same light at zero intensity must not show a cone-shaped difference ---');
+  const beamCanary = await page.evaluate((a) => globalThis.vgBeamSeries(a), { lightOn: false });
+  console.log(
+    `  inside-cone mean ${beamCanary.insideMean.toFixed(2)}, outside mean ${beamCanary.outsideMean.toFixed(2)}, ratio ${beamCanary.ratio.toFixed(3)}`,
+  );
+  if (!(beamCanary.ratio <= MAX_CANARY_BEAM_RATIO)) {
+    failed.push(
+      `beams canary did not fail (ratio ${beamCanary.ratio.toFixed(3)} with the light off) — this gate is not actually sensitive to the light mechanism`,
+    );
+  }
+
+  console.log('--- shadows: the gas between the lamp and the chamber dims the beam ---');
+  const beamClear = await page.evaluate((a) => globalThis.vgBeamSeries(a), { lightOn: true, shadowExtinction: 0 });
+  const shadowRatio = beamClear.insideMean > 1e-6 ? beamCorrect.insideMean / beamClear.insideMean : 1;
+  console.log(
+    `  inside-beam mean ${beamCorrect.insideMean.toFixed(2)} with the shadow, ${beamClear.insideMean.toFixed(2)} without, ratio ${shadowRatio.toFixed(3)}`,
+  );
+  if (!(shadowRatio <= MAX_SHADOW_RATIO && shadowRatio >= MIN_SHADOW_RATIO)) {
+    failed.push(
+      `shadows: beam ratio ${shadowRatio.toFixed(3)} with the gas shadow is outside [${MIN_SHADOW_RATIO}, ${MAX_SHADOW_RATIO}] — the gas does not shade the beam, or puts it out`,
+    );
+  }
+
+  console.log('--- canary: extinction 0 on both sides must not read as a shadow ---');
+  const beamClearAgain = await page.evaluate((a) => globalThis.vgBeamSeries(a), { lightOn: true, shadowExtinction: 0 });
+  const shadowCanaryRatio = beamClear.insideMean > 1e-6 ? beamClearAgain.insideMean / beamClear.insideMean : 1;
+  console.log(`  ratio ${shadowCanaryRatio.toFixed(3)}`);
+  if (shadowCanaryRatio <= MAX_SHADOW_RATIO) {
+    failed.push(
+      `shadows canary did not fail (ratio ${shadowCanaryRatio.toFixed(3)} with no extinction) — this gate is not actually sensitive to the shadow pass`,
+    );
+  }
+
+  // --- 14. Chamber look: a track is sharp at birth, then broadens, sags and fades. ----------------
+  console.log('--- track shape: a stamped track broadens and fades over +1.5s -------------------------------');
+  const trackCorrect = await page.evaluate((a) => globalThis.vgTrackShapeSeries(a), { canary: false });
+  const broadenRatio = trackCorrect.birth.sigma > 1e-6 ? trackCorrect.later.sigma / trackCorrect.birth.sigma : Infinity;
+  const fadeRatio = trackCorrect.birth.total > 1e-6 ? trackCorrect.later.total / trackCorrect.birth.total : 1;
+  console.log(
+    `  birth: sigma ${trackCorrect.birth.sigma.toFixed(3)}, total ${trackCorrect.birth.total.toFixed(2)}`,
+  );
+  console.log(
+    `  +${TRACK_LATER_S}s: sigma ${trackCorrect.later.sigma.toFixed(3)}, total ${trackCorrect.later.total.toFixed(2)}`,
+  );
+  console.log(`  broaden ratio ${broadenRatio.toFixed(3)}, fade ratio ${fadeRatio.toFixed(3)}`);
+  if (!(broadenRatio >= MIN_TRACK_BROADEN_RATIO)) {
+    failed.push(
+      `track shape: broaden ratio ${broadenRatio.toFixed(3)} is below the required ${MIN_TRACK_BROADEN_RATIO} — a track does not visibly broaden`,
+    );
+  }
+  if (!(fadeRatio <= MAX_TRACK_FADE_RATIO)) {
+    failed.push(
+      `track shape: fade ratio ${fadeRatio.toFixed(3)} exceeds ${MAX_TRACK_FADE_RATIO} — a track does not visibly fade within ${TRACK_LATER_S}s`,
+    );
+  }
+
+  console.log('--- canary: zero turbulence and zero decay must show almost no broadening or fading ---');
+  const trackCanary = await page.evaluate((a) => globalThis.vgTrackShapeSeries(a), { canary: true });
+  const canaryBroadenRatio =
+    trackCanary.birth.sigma > 1e-6 ? trackCanary.later.sigma / trackCanary.birth.sigma : 1;
+  const canaryFadeRatio = trackCanary.birth.total > 1e-6 ? trackCanary.later.total / trackCanary.birth.total : 1;
+  console.log(`  broaden ratio ${canaryBroadenRatio.toFixed(3)}, fade ratio ${canaryFadeRatio.toFixed(3)}`);
+  if (!(canaryBroadenRatio <= MAX_CANARY_TRACK_BROADEN_RATIO && canaryFadeRatio >= MIN_CANARY_TRACK_FADE_RATIO)) {
+    failed.push(
+      `track shape canary did not fail (broaden ${canaryBroadenRatio.toFixed(3)}, fade ${canaryFadeRatio.toFixed(3)}) — this gate is not actually sensitive to turbulence/decay`,
+    );
+  }
+
+  // --- 15. Chamber look: the crisp screen-space track layer is sharp at birth. --------------------
+  console.log('--- track layer: sharp at birth, broadens and dims by +1.4s -----------------------------------');
+  const layerCorrect = await page.evaluate((a) => globalThis.vgTrackLayerShapeSeries(a), { trackLayerAmount: 1 });
+  const layerBroadenRatio =
+    layerCorrect.birth.sigma > 1e-6 ? layerCorrect.later.sigma / layerCorrect.birth.sigma : Infinity;
+  const layerFadeRatio = layerCorrect.birth.total > 1e-6 ? layerCorrect.later.total / layerCorrect.birth.total : 1;
+  console.log(
+    `  birth: sigma ${layerCorrect.birth.sigma.toFixed(2)}px, total ${layerCorrect.birth.total.toFixed(1)}`,
+  );
+  console.log(
+    `  +${TRACK_LAYER_LATER_S}s: sigma ${layerCorrect.later.sigma.toFixed(2)}px, total ${layerCorrect.later.total.toFixed(1)}`,
+  );
+  console.log(`  broaden ratio ${layerBroadenRatio.toFixed(3)}, fade ratio ${layerFadeRatio.toFixed(3)}`);
+  if (!(layerCorrect.birth.sigma <= MAX_TRACK_LAYER_BIRTH_SIGMA_PX)) {
+    failed.push(
+      `track layer: birth sigma ${layerCorrect.birth.sigma.toFixed(2)}px exceeds ${MAX_TRACK_LAYER_BIRTH_SIGMA_PX}px — the crisp layer is not reading sharp at birth`,
+    );
+  }
+  if (!(layerBroadenRatio >= MIN_TRACK_LAYER_BROADEN_RATIO)) {
+    failed.push(
+      `track layer: broaden ratio ${layerBroadenRatio.toFixed(3)} is below the required ${MIN_TRACK_LAYER_BROADEN_RATIO} — the layer's own geometry does not visibly broaden with age`,
+    );
+  }
+  if (!(layerFadeRatio <= MAX_TRACK_LAYER_FADE_RATIO)) {
+    failed.push(
+      `track layer: fade ratio ${layerFadeRatio.toFixed(3)} exceeds ${MAX_TRACK_LAYER_FADE_RATIO} — the layer does not visibly dim with age`,
+    );
+  }
+
+  console.log('--- canary: trackLayerAmount=0 must NOT read sharp — nothing of the layer is left to measure ---');
+  const layerCanary = await page.evaluate((a) => globalThis.vgTrackLayerShapeSeries(a), { trackLayerAmount: 0 });
+  console.log(`  birth: sigma ${layerCanary.birth.sigma.toFixed(2)}px, total ${layerCanary.birth.total.toFixed(1)}`);
+  if (layerCanary.birth.sigma <= MAX_TRACK_LAYER_BIRTH_SIGMA_PX) {
+    failed.push(
+      `track layer canary did not fail (birth sigma ${layerCanary.birth.sigma.toFixed(2)}px with trackLayerAmount=0) — this gate is not actually sensitive to the crisp layer`,
+    );
+  }
+
   await browser.close();
 
   if (failed.length) {
@@ -2369,7 +2809,7 @@ async function main() {
     return;
   }
   console.log(
-    "check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), the phase wrap is seamless (canary caught), the far depth plane reads slower and lower-contrast than the near one (both canaries caught), the far plane decorrelates from the near one at 128x72 (canary caught), the bottom boost is a steady-state property and vapor drift is a valid motion cue (both canaries caught), the depth composite's cost over the pre-depth one is reported, and the composited backdrop at the product's own default size reads as isotropic gas, not a lattice of straight lines (canary caught)",
+    "check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), the phase wrap is seamless (canary caught), the far depth plane reads slower and lower-contrast than the near one (both canaries caught), the far plane decorrelates from the near one at 128x72 (canary caught), the bottom boost is a steady-state property and vapor drift is a valid motion cue (both canaries caught), the depth composite's cost over the pre-depth one is reported, the composited backdrop at the product's own default size reads as isotropic gas, not a lattice of straight lines (canary caught), a light's cone reads as a visible beam (canary caught), the gas shades the beam (canary caught), a stamped track broadens and fades within +1.5s (canary caught), and the crisp screen-space track layer reads sharp at birth and broadens/dims by +1.4s (canary caught)",
   );
 }
 

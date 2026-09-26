@@ -5,6 +5,43 @@ import { neutralSpecies } from './species';
 // into uniforms.
 export type VireUIKitMediumChannel = readonly [number, number, number];
 
+/**
+ * A static light source, as data — the chamber's illumination is a separate entity from the gas it
+ * lights (see `MEDIUM_COMPOSITE_SHADER`): the medium itself is dark, and everything visible is
+ * light scattered by mist, condensate and tracks inside a light's reach.
+ */
+export type VireUIKitMediumLight = {
+  /** Fraction of the frame, 0…1 both axes. `y=0` is the chamber's visual BOTTOM edge, `y=1` the
+   *  top — the same convention `gravityBottomBoost` already uses in `MEDIUM_COMPOSITE_SHADER`. */
+  position: readonly [number, number];
+  /** Unit direction (any nonzero vector is normalized before upload) the light points into the
+   *  chamber, in the SAME up-is-positive-y convention as `position`. Kept off the exact
+   *  vertical/horizontal axes by default: an on-axis beam edge is itself axis-aligned, which is
+   *  exactly the straight-line artifact `check:medium`'s isotropy gate polices, and an angled shaft
+   *  also reads more like a real illuminated volume than a spotlight aimed straight down a wall. */
+  direction: readonly [number, number];
+  /** Half-angle of the light's cone, radians. Wide (close to a right angle or beyond) for an edge
+   *  strip that washes the whole chamber width — there the shaping comes from distance falloff, not
+   *  a cone edge — narrow for a spotlight, where the cone edge IS the visible beam. */
+  coneAngle: number;
+  /** 1/(fraction of frame height) — how fast illumination drops off with distance from the light.
+   *  Distance is normalized by frame HEIGHT (not a raw fraction of each axis) so a circular pool of
+   *  light stays circular on screen regardless of the frame's aspect ratio. */
+  falloff: number;
+  /** sRGB 0…1. Defaults to a cool neutral; a caller deriving a light rig from cover art applies
+   *  `speciesFamily`/`characterOf` (`species.ts`) to THESE colors now, not to `channelColors` —
+   *  see the comment on `channelColors` below. */
+  color: VireUIKitMediumChannel;
+  /** ≥0 multiplier on this light's contribution. 0 turns it off without removing it from the array. */
+  intensity: number;
+};
+
+/** How many lights `MEDIUM_COMPOSITE_SHADER` reads — a fixed, small count of flat uniforms
+ *  (`u_light0*`/`u_light1*`/`u_light2*`), the same pattern `u_lab0/1/2` already uses for species:
+ *  `setUniform` (vireglass/web) has no array form, only scalars up to vec4. A `lights` array
+ *  shorter than this is padded with intensity-0 entries; a longer one is truncated. */
+export const MEDIUM_MAX_LIGHTS = 3;
+
 export type VireUIKitMediumParams = {
   /** 1/s — how fast the TRACK density decays per second. Water (vapor+condensate) does not decay:
    *  it is a conserved volume, only moving between phases and being transported. */
@@ -69,9 +106,16 @@ export type VireUIKitMediumParams = {
   /** Near-white sRGB tone of droplets with no hue seeding (`condensateTint=0`) — droplets scatter
    *  light rather than color it. */
   condensateColor: VireUIKitMediumChannel;
-  /** Each vapor species' hue, sRGB 0…1. Derived as a family around one tone (`speciesFamily`),
-   *  not picked as three separate colors — see `species.ts`. */
+  /** Each vapor species' hue, sRGB 0…1, folded into the dark ambient mix underneath the lit layer
+   *  (see `MEDIUM_COMPOSITE_SHADER`) — a minor, near-neutral hint by default. Colour now lives on
+   *  `lights`, not here: a real chamber's gas is invisible, only what scatters light reads at all
+   *  (see `channelScatter`). Kept for callers that still want a tinted ambient base, and because the
+   *  isotropy/contrast/depth gates in `check-medium.mjs` measure structure through it directly. */
   channelColors: readonly [VireUIKitMediumChannel, VireUIKitMediumChannel, VireUIKitMediumChannel];
+  /** How strongly each vapor species scatters light, relative to the others — what a species IS,
+   *  now that colour lives on `lights` (see `channelColors`). `[1, 1, 1]` (equal) by default; a
+   *  caller can make one species read as denser mist than another without touching its hue. */
+  channelScatter: VireUIKitMediumChannel;
   /** The platform's neutral tone — what the medium is, alone, with no source playing. */
   baseColor: VireUIKitMediumChannel;
   /** Background weight in the Oklab mix: keeps the platform tone visible even where the smoke is dense. */
@@ -137,12 +181,74 @@ export type VireUIKitMediumParams = {
    *  `smoothstep`. The brief asks for a denser LAYER at the floor of the chamber, not a boost that
    *  reaches halfway up the frame — kept in the bottom quarter. */
   gravityBottomBoostStart: number;
+  /** Static lights — the chamber's illumination, entirely separate from the gas (see
+   *  `VireUIKitMediumLight`). Padded/truncated to `MEDIUM_MAX_LIGHTS` by the web runtime. */
+  lights: readonly VireUIKitMediumLight[];
+  /** How strongly the gas between a spotlight and a point dims it, per frame height of dense gas. */
+  shadowExtinction: number;
+  /** 0…1 — a track's minimum visibility regardless of local illumination, added to the light
+   *  reaching it. Tracks are lit the same way as mist, but a fresh ionization trail is bright enough
+   *  in a real chamber to read even where the ambient light is weak — this is that floor, not a
+   *  second light source. */
+  trackLightFloor: number;
+  /** ≥0 — master strength of the crisp, screen-space track layer (`web/track-layer.ts`): a grid
+   *  cell cannot carry a thin sharp line (see that module's own header), so the grid stamp this
+   *  file's `decay`/`trackLightFloor` govern stays the soft, gas-carried residue, and THIS is the
+   *  bright, sharp geometry drawn over it in content pixels. 0 disables it outright — the canary
+   *  `check:medium` uses to prove its "sharp at birth" gate is actually sensitive to the layer,
+   *  not to the residue underneath it. */
+  trackLayerAmount: number;
 };
 
 const BASE_COLOR: VireUIKitMediumChannel = [0.07, 0.08, 0.1];
 
+const normalize2 = (v: readonly [number, number]): readonly [number, number] => {
+  const len = Math.hypot(v[0], v[1]) || 1;
+  return [v[0] / len, v[1] / len];
+};
+
+/** Cool neutral — the reference's fluorescent-tube/LED-strip look, not a warm incandescent one. */
+const MEDIUM_DEFAULT_LIGHT_COLOR: VireUIKitMediumChannel = [0.78, 0.85, 0.94];
+
+/**
+ * An edge strip along the chamber floor plus two spotlights above the frame, aimed down across it
+ * toward the source point. The lamps stay off screen, so a beam never shows its apex, and the two
+ * differ slightly in position, angle and strength: an exact mirror reads as staged.
+ */
+export const MEDIUM_DEFAULT_LIGHTS: readonly VireUIKitMediumLight[] = [
+  {
+    position: [0.5, 0.0],
+    direction: [0, 1],
+    coneAngle: Math.PI,
+    falloff: 16,
+    color: MEDIUM_DEFAULT_LIGHT_COLOR,
+    intensity: 0.28,
+  },
+  {
+    position: [0.12, 1.45],
+    direction: normalize2([0.38, -1.03]),
+    coneAngle: (9 * Math.PI) / 180,
+    falloff: 0.7,
+    color: MEDIUM_DEFAULT_LIGHT_COLOR,
+    intensity: 1.1,
+  },
+  {
+    position: [0.9, 1.4],
+    direction: normalize2([-0.4, -0.98]),
+    coneAngle: (8 * Math.PI) / 180,
+    falloff: 0.75,
+    color: MEDIUM_DEFAULT_LIGHT_COLOR,
+    intensity: 0.9,
+  },
+];
+
 export const MEDIUM_DEFAULTS: VireUIKitMediumParams = {
-  decay: 0.06,
+  // A stamped track has to visibly broaden and fade within the reference's "roughly one to two
+  // seconds", not the ~11s half-life a 0.06 decay gives — measured against check-medium.mjs's track
+  // gate (birth vs +1.5s cross-section width and total density): 1.1 leaves ~30% of the peak at 1s
+  // and ~17% at 1.5s, comfortably faded without dying before MacCormack's own diffusion has time to
+  // visibly broaden the stamp.
+  decay: 1.1,
   curlFreq: 0.045,
   curlSpeed: 0.12,
   advectSpeed: 26,
@@ -157,6 +263,7 @@ export const MEDIUM_DEFAULTS: VireUIKitMediumParams = {
   condensateGain: 5,
   condensateColor: [0.94, 0.95, 0.97],
   channelColors: neutralSpecies(BASE_COLOR),
+  channelScatter: [1, 1, 1],
   baseColor: BASE_COLOR,
   baseWeight: 0.9,
   depthFarScale: 1.6,
@@ -166,6 +273,10 @@ export const MEDIUM_DEFAULTS: VireUIKitMediumParams = {
   gravityVaporDrift: 0.6,
   gravityBottomBoost: 2,
   gravityBottomBoostStart: 0.75,
+  lights: MEDIUM_DEFAULT_LIGHTS,
+  shadowExtinction: 3,
+  trackLightFloor: 0.8,
+  trackLayerAmount: 1,
 };
 
 /**
@@ -205,9 +316,11 @@ export const MEDIUM_DEFAULT_CELL_PX = 26;
 
 /**
  * The geometry of one track stamp (`emit-shader.ts`), in FRACTIONS of `min(gridW, gridH)` rather
- * than pixels — so a preset doesn't depend on the simulation grid's resolution. Two presets:
- * alpha is a thick, short, straight track; beta is a thin, long, ragged one. The third, natural,
- * is dim and short, for the occasional background track at rest (not tied to cover art).
+ * than pixels — so a preset doesn't depend on the simulation grid's resolution. Three presets, the
+ * reference's three visible kinds: `alpha` is a thick, short, straight ray — `createMediumDynamics`
+ * stamps a dozen or so of these at once per event, radiating from one point, so a single ray is
+ * short on purpose. `electron` is thin, long-ish and ragged (wiggly, granular). `muon` is long,
+ * straight and thin — a cosmic ray crossing the whole chamber, unrelated to any source.
  */
 export type VireUIKitMediumTrackPreset = {
   lengthFrac: number;
@@ -224,7 +337,7 @@ export type VireUIKitMediumTrackPreset = {
 };
 
 export const MEDIUM_TRACK_PRESETS: Readonly<
-  Record<'alpha' | 'beta' | 'natural', VireUIKitMediumTrackPreset>
+  Record<'alpha' | 'electron' | 'muon', VireUIKitMediumTrackPreset>
 > = {
   alpha: {
     lengthFrac: 0.22,
@@ -236,7 +349,7 @@ export const MEDIUM_TRACK_PRESETS: Readonly<
     tailDim: 0.55,
     intensity: 1.15,
   },
-  beta: {
+  electron: {
     lengthFrac: 0.42,
     headWidthFrac: 0.018,
     tailWidthFrac: 0.05,
@@ -244,17 +357,17 @@ export const MEDIUM_TRACK_PRESETS: Readonly<
     raggedFreq: 5,
     settleFrac: 0.05,
     tailDim: 0.45,
-    intensity: 0.85,
+    intensity: 0.6,
   },
-  natural: {
-    lengthFrac: 0.13,
-    headWidthFrac: 0.02,
-    tailWidthFrac: 0.04,
-    raggedFrac: 0.02,
-    raggedFreq: 4,
-    settleFrac: 0.02,
-    tailDim: 0.5,
-    intensity: 0.4,
+  muon: {
+    lengthFrac: 0.7,
+    headWidthFrac: 0.012,
+    tailWidthFrac: 0.02,
+    raggedFrac: 0,
+    raggedFreq: 0,
+    settleFrac: 0.01,
+    tailDim: 0.75,
+    intensity: 0.5,
   },
 };
 
@@ -287,24 +400,140 @@ export const MEDIUM_MIN_EMISSION_INTERVAL = 1.2;
 
 /** Average interval between solitary "background emission" tracks at rest, seconds, plus a random
  *  `MEDIUM_NATURAL_JITTER` on top — rare, with no discernible rhythm. */
-export const MEDIUM_NATURAL_INTERVAL = 25;
-export const MEDIUM_NATURAL_JITTER = 35;
+export const MEDIUM_NATURAL_INTERVAL = 8;
+export const MEDIUM_NATURAL_JITTER = 12;
 
 /** The sensitive layer — fractions of height, top to bottom. Above it there isn't enough
  *  supersaturation for a track to appear at all, so background emission is only ever visible here. */
 export const MEDIUM_SENSITIVE_TOP = 0.55;
 export const MEDIUM_SENSITIVE_BOTTOM = 0.95;
 
+/** How many alpha rays a single decay event stamps at once, radiating from the same source point —
+ *  the reference's starburst, not a lone track (`MEDIUM_TRACK_PRESETS.alpha` is the shape of ONE
+ *  ray). Randomized per event within this range. */
+export const MEDIUM_ALPHA_BURST_RAYS: readonly [number, number] = [8, 16];
+
+/** Per-ray length multiplier within a burst, so the rays read as an organic spray rather than a
+ *  wheel of identical spokes — the reference's rays visibly differ in reach. */
+export const MEDIUM_ALPHA_RAY_LENGTH_SCALE: readonly [number, number] = [0.55, 1];
+
 /** Per-emission depth range applied to a track's width (`headWidthFrac`/`tailWidthFrac`), far…near.
  *  The same knob reads as both "thin" and "soft": a Gaussian stamp's edge steepness scales with its
  *  own width (`emit-shader.ts`'s only extent parameter), so shrinking it for a far track thins and
  *  softens it in the same stroke — there is no second knob to hang an independent softness number
  *  on. Floored at 0.55: below that a far `alpha` track's head narrows past what MacCormack's own
- *  numerical smoothing already blurs it to, and the depth cue disappears into that noise floor. */
-export const MEDIUM_TRACK_DEPTH_WIDTH_RANGE: readonly [number, number] = [0.55, 1];
+ *  numerical smoothing already blurs it to, and the depth cue disappears into that noise floor.
+ *  The near end now runs past 1 (1.2, not 1): depth of field needs the NEAREST tracks a little
+ *  LARGER than the base preset too, not just full-size — the reference shows near tracks blurring
+ *  into big soft shapes rather than merely reading "as sharp as it gets". The same knob does both
+ *  jobs again: a wider-than-base stamp is also a softer-edged one. */
+export const MEDIUM_TRACK_DEPTH_WIDTH_RANGE: readonly [number, number] = [0.55, 1.2];
 
 /** Per-emission depth range applied to a track's intensity, far…near — "dim". Floored at 0.4, not
  *  lower: a far track still has to clear `MEDIUM_DEFAULTS.condensationFloor`'s excess threshold
  *  often enough to read as a track, or depth would look like tracks randomly failing to spawn
  *  rather than fading into the distance. */
 export const MEDIUM_TRACK_DEPTH_INTENSITY_RANGE: readonly [number, number] = [0.4, 1];
+
+/**
+ * How long a live track stays in the crisp screen-space layer (`web/track-layer.ts`), seconds, by
+ * preset — tuned by eye against the reference's own "roughly one to two seconds"
+ * (`docs`/the brief's own reference frames): `alpha` is the shortest, thickest burst ray; `muon`,
+ * a cosmic ray crossing the whole chamber, lingers longest. Independent of `MEDIUM_DEFAULTS.decay`,
+ * which times the SOFT gas-carried residue left behind in the grid, not this layer.
+ */
+export const MEDIUM_TRACK_LAYER_LIFE_SECONDS: Readonly<Record<keyof typeof MEDIUM_TRACK_PRESETS, number>> = {
+  alpha: 1.8,
+  electron: 1.4,
+  muon: 2.2,
+};
+
+/** Oldest-out cap on the live-track list (`web/track-layer.ts`) — a burst of a dozen-plus alpha
+ *  rays every few seconds would otherwise grow the instanced draw without bound over a long
+ *  session; 64 is comfortably above what a few overlapping bursts plus background radiation ever
+ *  need alive at once. */
+export const MEDIUM_TRACK_LAYER_MAX_TRACKS = 64;
+
+/**
+ * How a track looks in the crisp layer, per kind. Lengths are fractions of
+ * `min(contentWidth, contentHeight)`: the grid presets' widths are sized for a 26 px cell and
+ * would be tens of pixels wide here.
+ */
+export type VireUIKitTrackLayerLook = {
+  /** Core Gaussian sigma at birth, at the source end. */
+  sigmaFrac: number;
+  /** Sigma multiplier at the far end: an alpha thickens toward the end of its range. */
+  endSigmaMul: number;
+  /** Diffusion: sigma(age) = sigma * sqrt(1 + broaden * age). */
+  broaden: number;
+  /** Sideways wiggle amplitude, for kinds whose preset has a ragged path. */
+  wiggleFrac: number;
+  /** Period of the brightness beads along the track. */
+  beadFrac: number;
+  /** Mean spacing of stray droplets along the track, and the share of slots that hold one. */
+  dropletFrac: number;
+  dropletChance: number;
+  /** Gap between the source point and where the track starts. */
+  startFrac: number;
+  /** Brightness at birth, before depth and fade. */
+  gain: number;
+};
+
+export const MEDIUM_TRACK_LAYER_LOOK: Readonly<Record<keyof typeof MEDIUM_TRACK_PRESETS, VireUIKitTrackLayerLook>> = {
+  alpha: {
+    sigmaFrac: 0.0022,
+    endSigmaMul: 1.9,
+    broaden: 3.2,
+    wiggleFrac: 0,
+    beadFrac: 0.006,
+    dropletFrac: 0.0035,
+    dropletChance: 0.5,
+    startFrac: 0.035,
+    gain: 1.8,
+  },
+  electron: {
+    sigmaFrac: 0.0009,
+    endSigmaMul: 1.3,
+    broaden: 6,
+    wiggleFrac: 0.012,
+    beadFrac: 0.008,
+    dropletFrac: 0.006,
+    dropletChance: 0.55,
+    startFrac: 0,
+    gain: 2.2,
+  },
+  muon: {
+    sigmaFrac: 0.0008,
+    endSigmaMul: 1,
+    broaden: 5,
+    wiggleFrac: 0,
+    beadFrac: 0.007,
+    dropletFrac: 0.005,
+    dropletChance: 0.5,
+    startFrac: 0,
+    gain: 2.2,
+  },
+};
+
+/** Seconds over which one alpha burst's rays are born: a strong source sprays rays one after
+ *  another, not all at the same instant. The first `MEDIUM_TRACK_LAYER_BURST_ACCENT` rays land on
+ *  the beat itself. */
+export const MEDIUM_TRACK_LAYER_BURST_SPREAD = 1.6;
+export const MEDIUM_TRACK_LAYER_BURST_ACCENT = 3;
+
+/** Shapes the brightness-vs-age curve as `(1 - age/life) ** gamma`: reaches exactly 0 at removal
+ *  (no pop when a track leaves the list) while staying close to full brightness for the first part
+ *  of its life (>1 skews the fade toward the end rather than a flat linear ramp down). */
+export const MEDIUM_TRACK_LAYER_FADE_GAMMA = 1.6;
+
+/** Downward drift, as a fraction of `min(contentWidth, contentHeight)` per second — droplets that
+ *  formed along a track keep settling after the stamp itself, the same physical idea as
+ *  `MEDIUM_DEFAULTS.condensateSettleSpeed` but for this layer's own screen-space geometry rather
+ *  than the simulation grid. Small: over a track's longest life (muon, 2.2s) this alone moves it
+ *  well under a tenth of the frame. */
+export const MEDIUM_TRACK_LAYER_GRAVITY_SAG = 0.018;
+
+/** Scales the curl field's push on a live track (see `web/track-layer.ts`'s `curlVelocityJS`),
+ *  units of `min(contentWidth, contentHeight)` per second per unit of curl velocity — small enough
+ *  to read as "nudged", not carried the way the gas itself is by `MEDIUM_DEFAULTS.advectSpeed`. */
+export const MEDIUM_TRACK_LAYER_CURL_PUSH = 0.05;
