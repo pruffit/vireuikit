@@ -50,25 +50,25 @@ const frame = growthFrame(sourceShape, targetShape, anchorPoint, growthPhase(sta
 simulation (curl-noise vapor, condensing droplets, decaying condensation tracks) that composites
 straight into the texture VireGlass's lens samples — no offscreen canvas, no readback.
 
-The chamber itself is dark; what's visible is light scattered by mist and tracks inside a light's
-reach, not the gas's own color. `lights` (`VireUIKitMediumParams`, up to `MEDIUM_MAX_LIGHTS`) are
-static point sources — position, direction, cone half-angle, falloff, color, intensity — defaulting
-to a wide edge strip near the chamber floor plus two angled spotlights from opposite top corners
-(angled off the vertical/horizontal axes on purpose: an on-axis beam edge is itself axis-aligned).
-Vapor species (`channelColors`) fold into a near-neutral ambient base by default; `channelScatter`
-is how strongly each species scatters a light's color, now that hue lives on the lights rather than
-the gas — a caller deriving a light rig from cover art applies `characterOf`/`speciesFamily`
-(`species.ts`) to the lights' colors, not to `channelColors`. A stateless, per-pixel grain
-(`mistGrainAmount`/`mistGrainCellPx`/`mistGrainFallSpeed`) reads as fine droplets rather than a
-smooth field, visible only where both lit and where there's mist to scatter — no fourth simulated
-buffer, one extra pass of cheap hashing.
+The chamber itself is dark; what's visible is light scattered by vapor, droplets and tracks, not
+the gas's own color. `lights` (`VireUIKitMediumParams`, up to `MEDIUM_MAX_LIGHTS`) are static
+sources — position, direction, cone half-angle, falloff, color, intensity. The defaults are an edge
+strip along the chamber floor and two spotlights placed above the frame, aimed down across it. A
+spotlight has no drawn edge: its beam is a soft lobe with static shafts fanning out from the lamp,
+dimmed by the gas between the lamp and each point (a grid-resolution shadow pass,
+`shadowExtinction`), so beams show where there is vapor to scatter them. `lightRigForCover`/
+`lightRigForCharacter` tint the spotlights toward a cover's hue like colored gels and leave the
+strip near neutral. Vapor species (`channelColors`) fold into a near-neutral ambient base;
+`channelScatter` is how strongly each species scatters light.
 
-Tracks come in three kinds (`MEDIUM_TRACK_PRESETS`): `alpha` (short, thick, round-ended — the
-playing source stamps a dozen or so of these at once, radiating from the cover's position, a
-starburst rather than a lone ray), `electron` (thin, wiggly) and `muon` (long, straight, thin). The
-calm state schedules rare electron/muon background radiation from no source at all; `alpha` only
-ever comes from a driven source. A track is lit the same way as the mist, plus `trackLightFloor` so
-one already on screen doesn't vanish just because it drifted out of a cone.
+Tracks come in three kinds (`MEDIUM_TRACK_PRESETS`): `alpha` (short, thick, thickening toward its
+end — the playing source sprays a burst of them from the cover's position, a few on the beat and
+the rest over the next second and a half), `electron` (thin, wiggly) and `muon` (long, straight,
+thin). The calm state schedules electron/muon background radiation every few seconds from no
+source at all. Each track is drawn twice: as a soft residue stamped into the simulation grid, and
+as a crisp droplet chain in content pixels (`trackLayerAmount`, `MEDIUM_TRACK_LAYER_LOOK`) that
+appears at full length, then broadens, sags and fades over one to two seconds. Tracks are lit by
+the same lights, plus `trackLightFloor` so one is never fully dark.
 
 ```ts
 import { createMediumBackdrop } from 'vireuikit/web';

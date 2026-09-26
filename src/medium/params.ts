@@ -184,25 +184,8 @@ export type VireUIKitMediumParams = {
   /** Static lights — the chamber's illumination, entirely separate from the gas (see
    *  `VireUIKitMediumLight`). Padded/truncated to `MEDIUM_MAX_LIGHTS` by the web runtime. */
   lights: readonly VireUIKitMediumLight[];
-  /** ≥0 — master strength of the procedural mist grain (`MEDIUM_COMPOSITE_SHADER`'s `vgGrain`): the
-   *  countless fine droplets the reference shows, stateless and per-pixel rather than simulated, so
-   *  it costs one extra pass of cheap hashing, not a fourth buffer. 0 disables it outright. */
-  mistGrainAmount: number;
-  /** Content-px per grain cell — the brief's "1–2 px" droplets, independent of the simulation grid
-   *  (the grain is evaluated once per screen pixel in the composite, not per simulation cell). */
-  mistGrainCellPx: number;
-  /** Content-px/s the grain drifts downward — sedimentation, on top of the cheap per-cell wobble
-   *  `mistGrainJitterPx`/`mistGrainJitterFreq` stand in for curl-field nudging (see the comment on
-   *  `vgGrain` in `composite-shader.ts` for why a full curl-noise sample per screen pixel was too
-   *  costly for a one-pass, stateless effect). */
-  mistGrainFallSpeed: number;
-  /** Content-px amplitude of the per-cell wobble that reads as the mist being nudged by turbulence,
-   *  without sampling the actual curl field per screen pixel. */
-  mistGrainJitterPx: number;
-  /** Multiplies the fall distance to get each cell's wobble phase — a cheap substitute for a real
-   *  clock uniform: the grain already has a monotonic, wrapped fall offset to reuse (see
-   *  `MEDIUM_GRAIN_FALL_WRAP_PX`), so no second time uniform is needed just for the wobble. */
-  mistGrainJitterFreq: number;
+  /** How strongly the gas between a spotlight and a point dims it, per frame height of dense gas. */
+  shadowExtinction: number;
   /** 0…1 — a track's minimum visibility regardless of local illumination, added to the light
    *  reaching it. Tracks are lit the same way as mist, but a fresh ionization trail is bright enough
    *  in a real chamber to read even where the ambient light is weak — this is that floor, not a
@@ -228,45 +211,36 @@ const normalize2 = (v: readonly [number, number]): readonly [number, number] => 
 const MEDIUM_DEFAULT_LIGHT_COLOR: VireUIKitMediumChannel = [0.78, 0.85, 0.94];
 
 /**
- * Defaults that echo the reference: a wide edge strip near the chamber floor (shaped almost
- * entirely by distance falloff, not its cone edge — see `VireUIKitMediumLight.coneAngle`) plus two
- * angled spotlights from opposite top corners. Both spotlight directions sit ~25-30° off vertical
- * AND off each other's mirror angle (19°/22° cones, not identical) — an exact mirror or an on-axis
- * beam reads as staged; a small asymmetry reads as a room with two lamps in it.
+ * An edge strip along the chamber floor plus two spotlights above the frame, aimed down across it
+ * toward the source point. The lamps stay off screen, so a beam never shows its apex, and the two
+ * differ slightly in position, angle and strength: an exact mirror reads as staged.
  */
 export const MEDIUM_DEFAULT_LIGHTS: readonly VireUIKitMediumLight[] = [
   {
     position: [0.5, 0.0],
     direction: [0, 1],
     coneAngle: Math.PI,
-    falloff: 6,
+    falloff: 16,
     color: MEDIUM_DEFAULT_LIGHT_COLOR,
-    intensity: 1.2,
+    intensity: 0.28,
   },
   {
-    position: [0.14, 0.9],
-    direction: normalize2([0.5, -0.86]),
-    coneAngle: (22 * Math.PI) / 180,
-    falloff: 1.0,
+    position: [0.12, 1.45],
+    direction: normalize2([0.38, -1.03]),
+    coneAngle: (9 * Math.PI) / 180,
+    falloff: 0.7,
+    color: MEDIUM_DEFAULT_LIGHT_COLOR,
+    intensity: 1.1,
+  },
+  {
+    position: [0.9, 1.4],
+    direction: normalize2([-0.4, -0.98]),
+    coneAngle: (8 * Math.PI) / 180,
+    falloff: 0.75,
     color: MEDIUM_DEFAULT_LIGHT_COLOR,
     intensity: 0.9,
   },
-  {
-    position: [0.86, 0.86],
-    direction: normalize2([-0.42, -0.9]),
-    coneAngle: (19 * Math.PI) / 180,
-    falloff: 1.05,
-    color: MEDIUM_DEFAULT_LIGHT_COLOR,
-    intensity: 0.7,
-  },
 ];
-
-/** The grain's fall accumulator (`web/medium.ts`) wraps at this many content-px — see the
- *  accumulator's own comment for why an exact periodic hash (the way `MEDIUM_TIME_PERIOD` wraps the
- *  curl field) isn't needed here: at the shipped `mistGrainFallSpeed` this is days of continuous
- *  playback between wraps, and the wrap itself only relabels which cell's hash renders where, not a
- *  visible jump in an already-sparse, already-random field. */
-export const MEDIUM_GRAIN_FALL_WRAP_PX = 1_000_000;
 
 export const MEDIUM_DEFAULTS: VireUIKitMediumParams = {
   // A stamped track has to visibly broaden and fade within the reference's "roughly one to two
@@ -300,15 +274,8 @@ export const MEDIUM_DEFAULTS: VireUIKitMediumParams = {
   gravityBottomBoost: 2,
   gravityBottomBoostStart: 0.75,
   lights: MEDIUM_DEFAULT_LIGHTS,
-  // 1.6px cells read as fine grain at the product's own content resolution without collapsing into
-  // a texture at typical DPR; a slow fall plus a small wobble is "settling", not "raining" — see
-  // check-medium.mjs's grain gate for the measured high-frequency energy this produces.
-  mistGrainAmount: 1,
-  mistGrainCellPx: 1.6,
-  mistGrainFallSpeed: 5,
-  mistGrainJitterPx: 2.2,
-  mistGrainJitterFreq: 0.9,
-  trackLightFloor: 0.32,
+  shadowExtinction: 3,
+  trackLightFloor: 0.8,
   trackLayerAmount: 1,
 };
 
@@ -433,8 +400,8 @@ export const MEDIUM_MIN_EMISSION_INTERVAL = 1.2;
 
 /** Average interval between solitary "background emission" tracks at rest, seconds, plus a random
  *  `MEDIUM_NATURAL_JITTER` on top — rare, with no discernible rhythm. */
-export const MEDIUM_NATURAL_INTERVAL = 25;
-export const MEDIUM_NATURAL_JITTER = 35;
+export const MEDIUM_NATURAL_INTERVAL = 4;
+export const MEDIUM_NATURAL_JITTER = 6;
 
 /** The sensitive layer — fractions of height, top to bottom. Above it there isn't enough
  *  supersaturation for a track to appear at all, so background emission is only ever visible here. */
@@ -487,10 +454,72 @@ export const MEDIUM_TRACK_LAYER_LIFE_SECONDS: Readonly<Record<keyof typeof MEDIU
  *  need alive at once. */
 export const MEDIUM_TRACK_LAYER_MAX_TRACKS = 64;
 
-/** How much a live track's own width grows over its life, as a fraction of its birth width (0 = no
- *  growth, 1 = doubled by the time it's removed) — "wider ... at ~1.5s", the same broadening the
- *  grid residue already shows, but on the crisp layer's own geometry. */
-export const MEDIUM_TRACK_LAYER_WIDEN_GAIN = 0.9;
+/**
+ * How a track looks in the crisp layer, per kind. Lengths are fractions of
+ * `min(contentWidth, contentHeight)`: the grid presets' widths are sized for a 26 px cell and
+ * would be tens of pixels wide here.
+ */
+export type VireUIKitTrackLayerLook = {
+  /** Core Gaussian sigma at birth, at the source end. */
+  sigmaFrac: number;
+  /** Sigma multiplier at the far end: an alpha thickens toward the end of its range. */
+  endSigmaMul: number;
+  /** Diffusion: sigma(age) = sigma * sqrt(1 + broaden * age). */
+  broaden: number;
+  /** Sideways wiggle amplitude, for kinds whose preset has a ragged path. */
+  wiggleFrac: number;
+  /** Period of the brightness beads along the track. */
+  beadFrac: number;
+  /** Mean spacing of stray droplets along the track, and the share of slots that hold one. */
+  dropletFrac: number;
+  dropletChance: number;
+  /** Gap between the source point and where the track starts. */
+  startFrac: number;
+  /** Brightness at birth, before depth and fade. */
+  gain: number;
+};
+
+export const MEDIUM_TRACK_LAYER_LOOK: Readonly<Record<keyof typeof MEDIUM_TRACK_PRESETS, VireUIKitTrackLayerLook>> = {
+  alpha: {
+    sigmaFrac: 0.0022,
+    endSigmaMul: 1.9,
+    broaden: 3.2,
+    wiggleFrac: 0,
+    beadFrac: 0.006,
+    dropletFrac: 0.0035,
+    dropletChance: 0.5,
+    startFrac: 0.035,
+    gain: 1.8,
+  },
+  electron: {
+    sigmaFrac: 0.0009,
+    endSigmaMul: 1.3,
+    broaden: 6,
+    wiggleFrac: 0.012,
+    beadFrac: 0.008,
+    dropletFrac: 0.006,
+    dropletChance: 0.55,
+    startFrac: 0,
+    gain: 2.2,
+  },
+  muon: {
+    sigmaFrac: 0.0008,
+    endSigmaMul: 1,
+    broaden: 5,
+    wiggleFrac: 0,
+    beadFrac: 0.007,
+    dropletFrac: 0.005,
+    dropletChance: 0.5,
+    startFrac: 0,
+    gain: 2.2,
+  },
+};
+
+/** Seconds over which one alpha burst's rays are born: a strong source sprays rays one after
+ *  another, not all at the same instant. The first `MEDIUM_TRACK_LAYER_BURST_ACCENT` rays land on
+ *  the beat itself. */
+export const MEDIUM_TRACK_LAYER_BURST_SPREAD = 1.6;
+export const MEDIUM_TRACK_LAYER_BURST_ACCENT = 3;
 
 /** Shapes the brightness-vs-age curve as `(1 - age/life) ** gamma`: reaches exactly 0 at removal
  *  (no pop when a track leaves the list) while staying close to full brightness for the first part

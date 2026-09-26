@@ -1,96 +1,20 @@
-// The crisp track layer's GPU half: an instanced, additive geometry pass — one oriented quad per
-// live track (`track-layer.ts`), drawn straight into the backdrop's target framebuffer after the
-// fullscreen composite. RAW WebGL2 GLSL ES 3.0, not the vireglass AGSL-style shader DSL the rest of
-// `medium/` is written in (`MEDIUM_COMPOSITE_SHADER` et al., transpiled by `toGLSL`): that pipeline
-// only ever draws a single fullscreen triangle, and has no instancing story of its own. Compiled
-// with the SAME `createProgram` vireglass/web already exports — it just links whatever GLSL text
-// it's given, transpiled or not. The Android port will need its OWN path for this layer (a
-// Canvas/AGSL geometry draw, or a dot compute) — this file is web-only.
+// The crisp track layer's GPU half: one instanced, additive quad per live track, drawn into the
+// backdrop's target right after the fullscreen composite. Raw GLSL ES 3.0 rather than the
+// transpiled shader dialect, which only draws fullscreen passes; the Android port needs its own path.
 import { locationCache, setUniform } from 'vireglass/web';
 import {
   MEDIUM_TRACK_LAYER_LIFE_SECONDS,
+  MEDIUM_TRACK_LAYER_LOOK,
   type VireUIKitMediumLight,
 } from '../medium';
-import { trackLayerFade, trackLayerWidthMul, type VireUIKitLiveTrack } from './track-layer';
+import { trackLayerFade, trackLayerSigmaMul, type VireUIKitLiveTrack } from './track-layer';
 
 const TRACK_LAYER_VERTEX_SOURCE = `#version 300 es
 layout(location = 0) in vec2 a_corner;
-layout(location = 1) in vec2 a_source;
-layout(location = 2) in vec2 a_head;
-layout(location = 3) in float a_headWidth;
-layout(location = 4) in float a_tailWidth;
-layout(location = 5) in float a_raggedAmp;
-layout(location = 6) in float a_raggedFreq;
-layout(location = 7) in float a_tailDim;
-layout(location = 8) in float a_intensity;
-layout(location = 9) in float a_depth;
-layout(location = 10) in float a_kind;
-layout(location = 11) in float a_seed;
-
-uniform vec2 u_resolution;
-
-out float v_t;
-out float v_sPx;
-out float v_lenPx;
-out float v_headWidth;
-out float v_tailWidth;
-out float v_raggedAmp;
-out float v_raggedFreq;
-out float v_tailDim;
-out float v_intensity;
-out float v_depth;
-out float v_kind;
-out float v_seed;
-
-void main() {
-  vec2 dir = a_head - a_source;
-  float len = max(length(dir), 1.0);
-  vec2 dirN = dir / len;
-  vec2 side = vec2(-dirN.y, dirN.x);
-  // Margin beyond the nominal half-width: room for the soft core and the droplets' own jitter to
-  // extend past the hard preset edge, plus a depth-dependent allowance for the far/near defocus the
-  // fragment shader applies (see its own u_depth use) — a near, wide track needs more headroom than
-  // a far, thin one, or its own glow would clip against the quad's edge.
-  float maxWidth = max(a_headWidth, a_tailWidth);
-  float margin = maxWidth * 0.7 + mix(2.0, 6.0, a_depth);
-  float halfSpan = maxWidth * 0.5 + margin;
-  vec2 pos = a_source + dirN * (a_corner.y * len) + side * (a_corner.x * halfSpan);
-  v_t = a_corner.y;
-  v_sPx = a_corner.x * halfSpan;
-  v_lenPx = len;
-  v_headWidth = a_headWidth;
-  v_tailWidth = a_tailWidth;
-  v_raggedAmp = a_raggedAmp;
-  v_raggedFreq = a_raggedFreq;
-  v_tailDim = a_tailDim;
-  v_intensity = a_intensity;
-  v_depth = a_depth;
-  v_kind = a_kind;
-  v_seed = a_seed;
-  vec2 ndc = (pos / u_resolution) * 2.0 - 1.0;
-  gl_Position = vec4(ndc, 0.0, 1.0);
-}
-`;
-
-// FRAGMENT: track-local coordinates are (v_t: 0 tail…1 head, v_sPx: signed px across the track).
-// `gl_FragCoord.xy` is already the SAME window-pixel, y=0-at-bottom frame `MEDIUM_COMPOSITE_SHADER`
-// calls `xy` (see that shader's own file header on the orientation contract) — no flip needed here
-// either, and no plumbing to get it: a geometry pass reads it directly off the fragment itself.
-const TRACK_LAYER_FRAGMENT_SOURCE = `#version 300 es
-precision highp float;
-
-in float v_t;
-in float v_sPx;
-in float v_lenPx;
-in float v_headWidth;
-in float v_tailWidth;
-in float v_raggedAmp;
-in float v_raggedFreq;
-in float v_tailDim;
-in float v_intensity;
-in float v_depth;
-in float v_kind;
-in float v_seed;
+layout(location = 1) in vec4 a_geom;
+layout(location = 2) in vec4 a_span;
+layout(location = 3) in vec4 a_path;
+layout(location = 4) in vec4 a_grain;
 
 uniform vec2 u_resolution;
 uniform float u_trackLightFloor;
@@ -113,7 +37,12 @@ uniform float u_light2Falloff;
 uniform vec3 u_light2Color;
 uniform float u_light2Intensity;
 
-out vec4 fragColor;
+out vec2 v_local;
+flat out vec4 v_span;
+flat out vec4 v_path;
+flat out vec4 v_grain;
+flat out float v_reach;
+out vec3 v_illum;
 
 float vgHash21(vec2 p) {
   float h = dot(p, vec2(127.1, 311.7));
@@ -131,11 +60,8 @@ float vgValueNoise(vec2 p) {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y) * 2.0 - 1.0;
 }
 
-// Same cone/edge-strip math as MEDIUM_COMPOSITE_SHADER's vgLightAmount, ported to plain vec2/float
-// (that one is written in the vireglass DSL's float2 dialect) — duplicated rather than shared
-// because the two live on opposite sides of the raw-GLSL/transpiled-DSL boundary this file's header
-// describes; keep them in step by eye if the lighting model itself changes.
-float vgLightAmount(vec2 xy, vec2 lightPosFrac, vec2 lightDir, float cosCone, float falloff, vec2 resolution) {
+// Keep in step with vgLightAmount in composite-shader.ts.
+float vgLightAmount(vec2 xy, vec2 lightPosFrac, vec2 lightDir, float cosCone, float falloff, vec2 resolution, float seed) {
   vec2 rel = xy - lightPosFrac * resolution;
   if (cosCone <= -0.999) {
     float depth = max(dot(rel, lightDir), 0.0);
@@ -144,91 +70,139 @@ float vgLightAmount(vec2 xy, vec2 lightPosFrac, vec2 lightDir, float cosCone, fl
   float dist = length(rel);
   vec2 dirN = dist > 1e-4 ? rel / dist : lightDir;
   float cosAngle = dot(dirN, lightDir);
-  float edge = smoothstep(cosCone, mix(cosCone, 1.0, 0.85), cosAngle);
-  edge *= edge;
+  float lobe = log(0.5) / log(clamp(cosCone, 0.05, 0.999));
+  float edge = pow(max(cosAngle, 0.0), lobe);
   float atten = exp(-(dist / max(resolution.y, 1.0)) * falloff);
-  return edge * atten;
+  if (edge * atten < 0.001) return 0.0;
+  float angle = atan(dirN.x * lightDir.y - dirN.y * lightDir.x, cosAngle);
+  float shafts = 0.6 + 0.32 * vgValueNoise(vec2(angle * 14.0, seed)) + 0.18 * vgValueNoise(vec2(angle * 33.0, seed + 5.3));
+  return edge * atten * clamp(shafts, 0.0, 1.0);
 }
 
 void main() {
-  float t = clamp(v_t, 0.0, 1.0);
-  float halfWidth = mix(v_tailWidth, v_headWidth, t) * 0.5;
-
-  // Path: straight for alpha/muon (v_kind 0/2); electrons (v_kind 1) get a sideways ragged offset
-  // growing toward the tail — the same shape emit-shader.ts stamps into the grid, so the crisp
-  // layer agrees with the soft residue underneath it.
-  float tailness = 1.0 - t;
-  float isElectron = step(0.5, v_kind) * step(v_kind, 1.5);
-  float ragged = isElectron * v_raggedAmp * tailness *
-    vgValueNoise(vec2(t * v_raggedFreq + v_seed, v_seed * 3.7));
-  float s = v_sPx - ragged;
-
-  // Depth softens the edge: a near track (depth→1) defocuses into a bigger, softer shape; a far one
-  // (depth→0) stays a crisp thin thread — one knob for both, the same idea
-  // MEDIUM_TRACK_DEPTH_WIDTH_RANGE already uses for the grid stamp's own width/softness link. A
-  // Gaussian, not a smoothstep band: a hard-edged core at nearly the full nominal width is what
-  // made many overlapping alpha rays read as a straight-edged wireframe instead of an organic haze
-  // (measured against an early render of this layer) — a low-amplitude Gaussian glow contributes a
-  // soft unifying haze without itself reading as a solid shape.
-  float sigma = halfWidth * 0.5 + mix(1.0, 3.0, v_depth);
-  float core = exp(-(s * s) / (2.0 * sigma * sigma));
-
-  // Droplet chain: hashed dots on a 2D track-local grid — spacing ALONG the track is a fixed PX
-  // constant per kind (so droplets are the same physical size on a short alpha ray as on a long
-  // muon), spacing ACROSS it instead ties to a small fixed ROW COUNT so the cross-section reads as
-  // a handful of coherent, slightly overlapping grains rather than a fine, isotropic dust — the
-  // reference's rays read as fibrous streaks, not scattered sand.
-  float isAlpha = step(v_kind, 0.5);
-  float alongSpacingPx = isAlpha > 0.5 ? 6.0 : (isElectron > 0.5 ? 11.0 : 8.0);
-  float rowsAcross = isAlpha > 0.5 ? 3.0 : 2.0;
-  float acrossSpacingPx = max((halfWidth * 2.0) / rowsAcross, 2.0);
-  float dotChance = isAlpha > 0.5 ? 0.78 : (isElectron > 0.5 ? 0.42 : 0.6);
-  float dotRadius = isAlpha > 0.5 ? 0.62 : (isElectron > 0.5 ? 0.42 : 0.48);
-
-  vec2 cellSpace = vec2((t * v_lenPx) / alongSpacingPx, s / acrossSpacingPx);
-  vec2 cell = floor(cellSpace);
-  vec2 cellF = fract(cellSpace) - 0.5;
-  float cellSeed = vgHash21(cell + vec2(v_seed * 13.1, v_seed * 5.3));
-  float dotOn = step(1.0 - dotChance, cellSeed);
-  vec2 jitter = (vec2(vgHash21(cell + vec2(3.1, 7.7)), vgHash21(cell + vec2(9.3, 2.1))) - 0.5) * 0.5;
-  float dot = dotOn * smoothstep(dotRadius, dotRadius * 0.25, length(cellF - jitter));
-
-  // The core stays a faint haze (well under 1 on its own); the droplets carry almost all of the
-  // brightness, so the track reads as a chain of grains with a soft glow around it, not a filled
-  // band.
-  float shape = clamp(core * 0.22 + dot, 0.0, 1.0);
-  if (shape <= 0.01) discard;
-
-  float brightness = v_intensity * mix(v_tailDim, 1.0, t) * shape;
-
-  float light0 = vgLightAmount(gl_FragCoord.xy, u_light0Pos, u_light0Dir, u_light0CosCone, u_light0Falloff, u_resolution) * u_light0Intensity;
-  float light1 = vgLightAmount(gl_FragCoord.xy, u_light1Pos, u_light1Dir, u_light1CosCone, u_light1Falloff, u_resolution) * u_light1Intensity;
-  float light2 = vgLightAmount(gl_FragCoord.xy, u_light2Pos, u_light2Dir, u_light2CosCone, u_light2Falloff, u_resolution) * u_light2Intensity;
-  vec3 illum = u_light0Color * light0 + u_light1Color * light1 + u_light2Color * light2;
-
-  vec3 glow = brightness * (illum + vec3(u_trackLightFloor));
-  // A mild tonemap of the layer's OWN contribution before it lands, additively, on the already
-  // tonemapped composite underneath (MEDIUM_COMPOSITE_SHADER's own 1 - exp(-x * 0.9)) — not
-  // colorimetrically exact (the composite's tonemap already happened once), but it keeps a bright,
-  // overlapping cluster of near tracks from blowing straight to flat white.
-  glow = vec3(1.0) - exp(-glow * 1.1);
-  fragColor = vec4(glow, 1.0);
+  vec2 dir = a_geom.zw;
+  vec2 side = vec2(-dir.y, dir.x);
+  // Beads widen sigma by up to 20%; 3.5 sigma leaves under 1% of the core outside the quad.
+  float reach = max(a_span.z, a_span.w) * 1.2 * 3.5 + 1.5;
+  float margin = reach + a_path.x * 1.7;
+  float u = mix(a_span.y - reach, a_span.x + reach, a_corner.y);
+  float s = a_corner.x * margin;
+  vec2 pos = a_geom.xy + dir * u + side * s;
+  v_local = vec2(u, s);
+  v_span = a_span;
+  v_path = a_path;
+  v_grain = a_grain;
+  v_reach = reach;
+  // Lit per corner: light varies over hundreds of px, a track is a few px wide. The backdrop
+  // target stores the scene top row at y = 0; lights use y up.
+  vec2 xy = vec2(pos.x, u_resolution.y - pos.y);
+  float light0 = vgLightAmount(xy, u_light0Pos, u_light0Dir, u_light0CosCone, u_light0Falloff, u_resolution, 1.7) * u_light0Intensity;
+  float light1 = vgLightAmount(xy, u_light1Pos, u_light1Dir, u_light1CosCone, u_light1Falloff, u_resolution, 4.1) * u_light1Intensity;
+  float light2 = vgLightAmount(xy, u_light2Pos, u_light2Dir, u_light2CosCone, u_light2Falloff, u_resolution, 8.3) * u_light2Intensity;
+  v_illum = u_light0Color * light0 + u_light1Color * light1 + u_light2Color * light2 + vec3(u_trackLightFloor);
+  gl_Position = vec4((pos / u_resolution) * 2.0 - 1.0, 0.0, 1.0);
 }
 `;
 
-const FLOATS_PER_INSTANCE = 13;
+// Track-local coordinates: x along the track from its source in px, y across it in px. A track
+// is a Gaussian core whose width and brightness bead along its length, plus stray droplets
+// scattered around it; all noise is 1D along the track, so nothing lines up on a screen grid.
+const TRACK_LAYER_FRAGMENT_SOURCE = `#version 300 es
+precision highp float;
 
-const KIND_ID: Readonly<Record<keyof typeof MEDIUM_TRACK_LAYER_LIFE_SECONDS, number>> = {
-  alpha: 0,
-  electron: 1,
-  muon: 2,
-};
+in vec2 v_local;
+flat in vec4 v_span;
+flat in vec4 v_path;
+flat in vec4 v_grain;
+flat in float v_reach;
+in vec3 v_illum;
 
-/** Fraction-space live tracks → a flat per-instance float buffer in CONTENT PIXELS, resolved
- *  against the frame's own `contentWidth`/`contentHeight` — the one place resolution enters this
- *  layer (see `track-layer.ts`'s file header: everything upstream of this is resolution-free).
- *  Skips anything already fully faded (or `amount<=0`, the canary `check:medium` uses) rather than
- *  uploading dead weight. Exported for direct testing without a GPU. */
+out vec4 fragColor;
+
+float vgHash(float a, float b) {
+  uint x = floatBitsToUint(a) * 0x9E3779B1u ^ (floatBitsToUint(b) + 0x7F4A7C15u);
+  x ^= x >> 16;
+  x *= 0x7FEB352Du;
+  x ^= x >> 15;
+  x *= 0x846CA68Bu;
+  x ^= x >> 16;
+  return float(x) * (1.0 / 4294967295.0);
+}
+
+float vgNoise1(float x, float salt) {
+  float i = floor(x);
+  float f = fract(x);
+  float u = f * f * (3.0 - 2.0 * f);
+  return mix(vgHash(i, salt), vgHash(i + 1.0, salt), u);
+}
+
+void main() {
+  float len = v_span.x;
+  float start = v_span.y;
+  float sigma0 = v_span.z;
+  float sigma1 = v_span.w;
+  float wiggleAmp = v_path.x;
+  float wiggleFreq = v_path.y;
+  float amp = v_path.z;
+  float seed = v_path.w;
+  float beadPx = v_grain.x;
+  float dropPx = v_grain.y;
+  float dropChance = v_grain.z;
+  float blur = v_grain.w;
+
+  float u = v_local.x;
+  float s = v_local.y;
+  float t = clamp((u - start) / max(len - start, 1.0), 0.0, 1.0);
+
+  float wiggle = 0.0;
+  if (wiggleAmp > 0.0) {
+    float x = u * wiggleFreq;
+    wiggle = wiggleAmp * smoothstep(0.0, 0.2, t) *
+      ((vgNoise1(x, seed) - 0.5) * 2.0 + (vgNoise1(x * 3.1, seed + 1.0) - 0.5) * 0.7);
+  }
+  float across = s - wiggle;
+  if (abs(across) > v_reach) discard;
+
+  float bead = vgNoise1(u / beadPx, seed + 2.0);
+  // Blur (age, defocus) washes the beads out rather than stretching them into ribs.
+  float sigma = mix(sigma0, sigma1, t * t) * (1.0 + (bead - 0.5) * 0.4 / blur);
+  float beyond = u < start ? start - u : max(u - len, 0.0);
+  float core = exp(-0.5 * (across * across + beyond * beyond) / (sigma * sigma));
+  float along = 1.0 - 0.35 / blur * vgNoise1(u / (beadPx * 2.3), seed + 3.0);
+
+  float drops = 0.0;
+  float cell0 = floor(u / dropPx);
+  for (int k = -1; k <= 1; k++) {
+    float c = cell0 + float(k);
+    if (vgHash(c, seed + 4.0) > dropChance) continue;
+    float cu = (c + vgHash(c, seed + 5.0)) * dropPx;
+    if (cu < start || cu > len) continue;
+    float cs = (vgHash(c, seed + 6.0) + vgHash(c, seed + 7.0) - 1.0) * 1.7 * sigma + wiggle;
+    float r = max(0.7, sigma * mix(0.35, 0.8, vgHash(c, seed + 8.0)));
+    float dx = u - cu;
+    float dy = s - cs;
+    drops += mix(0.35, 1.0, vgHash(c, seed + 9.0)) * exp(-0.5 * (dx * dx + dy * dy) / (r * r));
+  }
+
+  float lum = amp * (core * along + drops * 0.7 / (blur * blur));
+  if (lum < 0.002) discard;
+
+  vec3 glow = lum * v_illum;
+  fragColor = vec4(vec3(1.0) - exp(-glow), 1.0);
+}
+`;
+
+const FLOATS_PER_INSTANCE = 16;
+
+/** Where near tracks start to defocus, on the emission's 0 (far) … 1 (near) depth. */
+const DEFOCUS_FROM_DEPTH = 0.7;
+/** Sigma multiplier of the nearest track: large and soft, like an out-of-focus droplet line. */
+const DEFOCUS_MAX = 2.4;
+
+/** Fraction-space live tracks → per-instance floats in content px, y down like the emission
+ *  fractions and the backdrop target (drift is y-up, hence its sign flip). Skips tracks not yet born,
+ *  fully faded, or everything when `amount <= 0` (the canary `check:medium` uses). Exported for
+ *  testing without a GPU. */
 export function buildTrackLayerInstances(
   tracks: readonly VireUIKitLiveTrack[],
   contentWidth: number,
@@ -241,42 +215,43 @@ export function buildTrackLayerInstances(
   if (amount <= 0) return { data, count };
 
   for (const track of tracks) {
-    const life = MEDIUM_TRACK_LAYER_LIFE_SECONDS[track.emission.kind];
-    const fade = trackLayerFade(track.age, life);
+    if (track.age < 0) continue;
+    const e = track.emission;
+    const fade = trackLayerFade(track.age, MEDIUM_TRACK_LAYER_LIFE_SECONDS[e.kind]);
     if (fade <= 1e-4) continue;
+    const look = MEDIUM_TRACK_LAYER_LOOK[e.kind];
 
-    const widthMul = trackLayerWidthMul(track.age, life);
-    const sourceX = track.emission.source[0] * contentWidth + track.driftX * minDim;
-    const sourceY = track.emission.source[1] * contentHeight + track.driftY * minDim;
-    const lengthPx = track.emission.lengthFrac * minDim;
-    const headX = sourceX + Math.cos(track.emission.angle) * lengthPx;
-    const headY = sourceY + Math.sin(track.emission.angle) * lengthPx;
+    const sigmaMul = trackLayerSigmaMul(track.age, look.broaden);
+    const near = Math.max(0, (e.depth - DEFOCUS_FROM_DEPTH) / (1 - DEFOCUS_FROM_DEPTH));
+    const defocus = 1 + (DEFOCUS_MAX - 1) * near * near;
+    const sigma0 = Math.max(look.sigmaFrac * minDim, 0.6) * sigmaMul * defocus;
 
     const o = count * FLOATS_PER_INSTANCE;
-    data[o + 0] = sourceX;
-    data[o + 1] = sourceY;
-    data[o + 2] = headX;
-    data[o + 3] = headY;
-    data[o + 4] = track.emission.headWidthFrac * minDim * widthMul;
-    data[o + 5] = track.emission.tailWidthFrac * minDim * widthMul;
-    data[o + 6] = track.emission.raggedFrac * minDim;
-    data[o + 7] = track.emission.raggedFreq;
-    data[o + 8] = track.emission.tailDim;
-    data[o + 9] = track.emission.intensity * fade * amount;
-    data[o + 10] = track.emission.depth;
-    data[o + 11] = KIND_ID[track.emission.kind];
-    data[o + 12] = track.emission.seed;
+    data[o + 0] = e.source[0] * contentWidth + track.driftX * minDim;
+    data[o + 1] = e.source[1] * contentHeight - track.driftY * minDim;
+    data[o + 2] = Math.cos(e.angle);
+    data[o + 3] = Math.sin(e.angle);
+    const len = e.lengthFrac * minDim;
+    data[o + 4] = len;
+    data[o + 5] = Math.min(look.startFrac * minDim, len * 0.5);
+    data[o + 6] = sigma0;
+    data[o + 7] = sigma0 * look.endSigmaMul;
+    data[o + 8] = e.raggedFrac > 0 ? look.wiggleFrac * minDim : 0;
+    data[o + 9] = e.raggedFreq / Math.max(len, 1);
+    data[o + 10] = (e.intensity * look.gain * fade * amount) / (sigmaMul ** 0.7 * defocus);
+    data[o + 11] = e.seed;
+    data[o + 12] = look.beadFrac * minDim;
+    data[o + 13] = look.dropletFrac * minDim;
+    data[o + 14] = look.dropletChance;
+    data[o + 15] = sigmaMul * defocus;
     count += 1;
   }
   return { data, count };
 }
 
 export type TrackLayerProgram = {
-  /** Draws every instance in `data`/`count` (as built by `buildTrackLayerInstances`) additively
-   *  into whatever framebuffer is currently bound — the caller (`web/medium.ts`'s `composite`) has
-   *  already bound the backdrop's target and drawn the fullscreen composite into it. Leaves blend
-   *  state enabled on return; the renderer's own contract puts it back (see
-   *  `VireGlassBackdropPass`'s doc comment in vireglass/web). */
+  /** Draws the instances additively into the currently bound framebuffer. Leaves blending enabled;
+   *  the renderer restores its own state after the backdrop pass. */
   draw(
     contentWidth: number,
     contentHeight: number,
@@ -288,20 +263,20 @@ export type TrackLayerProgram = {
   destroy(): void;
 };
 
+function compile(gl: WebGL2RenderingContext, type: number, source: string, label: string): WebGLShader {
+  const shader = gl.createShader(type);
+  if (!shader) throw new Error(`vireuikit: track layer ${label} shader creation failed`);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    throw new Error(`vireuikit: track layer ${label} shader failed:\n${gl.getShaderInfoLog(shader) ?? ''}`);
+  }
+  return shader;
+}
+
 export function createTrackLayerProgram(gl: WebGL2RenderingContext): TrackLayerProgram {
-  const vertex = gl.createShader(gl.VERTEX_SHADER);
-  const fragment = gl.createShader(gl.FRAGMENT_SHADER);
-  if (!vertex || !fragment) throw new Error('vireuikit: track layer shader creation failed');
-  gl.shaderSource(vertex, TRACK_LAYER_VERTEX_SOURCE);
-  gl.compileShader(vertex);
-  if (!gl.getShaderParameter(vertex, gl.COMPILE_STATUS)) {
-    throw new Error(`vireuikit: track layer vertex shader failed:\n${gl.getShaderInfoLog(vertex) ?? ''}`);
-  }
-  gl.shaderSource(fragment, TRACK_LAYER_FRAGMENT_SOURCE);
-  gl.compileShader(fragment);
-  if (!gl.getShaderParameter(fragment, gl.COMPILE_STATUS)) {
-    throw new Error(`vireuikit: track layer fragment shader failed:\n${gl.getShaderInfoLog(fragment) ?? ''}`);
-  }
+  const vertex = compile(gl, gl.VERTEX_SHADER, TRACK_LAYER_VERTEX_SOURCE, 'vertex');
+  const fragment = compile(gl, gl.FRAGMENT_SHADER, TRACK_LAYER_FRAGMENT_SOURCE, 'fragment');
   const program = gl.createProgram();
   if (!program) throw new Error('vireuikit: track layer program creation failed');
   gl.attachShader(program, vertex);
@@ -315,8 +290,7 @@ export function createTrackLayerProgram(gl: WebGL2RenderingContext): TrackLayerP
 
   const loc = locationCache(gl, program);
 
-  // A static unit quad (s ∈ [-1,1] across the track, t ∈ [0,1] tail→head) — TRIANGLE_STRIP order
-  // BL, BR, TL, TR. Every instance's own width/length is applied in the vertex shader, not here.
+  // Unit quad as a triangle strip: x across (-1…1), y along (0…1).
   const quadBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, 0, 1, 0, -1, 1, 1, 1]), gl.STATIC_DRAW);
@@ -331,22 +305,9 @@ export function createTrackLayerProgram(gl: WebGL2RenderingContext): TrackLayerP
 
   const stride = FLOATS_PER_INSTANCE * 4;
   gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
-  const layout: readonly [number, number, number][] = [
-    [1, 2, 0], // a_source
-    [2, 2, 8], // a_head
-    [3, 1, 16], // a_headWidth
-    [4, 1, 20], // a_tailWidth
-    [5, 1, 24], // a_raggedAmp
-    [6, 1, 28], // a_raggedFreq
-    [7, 1, 32], // a_tailDim
-    [8, 1, 36], // a_intensity
-    [9, 1, 40], // a_depth
-    [10, 1, 44], // a_kind
-    [11, 1, 48], // a_seed
-  ];
-  for (const [location, size, offset] of layout) {
+  for (let location = 1; location <= 4; location += 1) {
     gl.enableVertexAttribArray(location);
-    gl.vertexAttribPointer(location, size, gl.FLOAT, false, stride, offset);
+    gl.vertexAttribPointer(location, 4, gl.FLOAT, false, stride, (location - 1) * 16);
     gl.vertexAttribDivisor(location, 1);
   }
   gl.bindVertexArray(null);

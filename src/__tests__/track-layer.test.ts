@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { VireUIKitMediumEmission } from '../medium';
-import { MEDIUM_TRACK_LAYER_LIFE_SECONDS, MEDIUM_TRACK_LAYER_MAX_TRACKS, MEDIUM_TRACK_PRESETS } from '../medium';
-import { createTrackLayer, trackLayerFade, trackLayerWidthMul } from '../web/track-layer';
+import {
+  MEDIUM_TRACK_LAYER_BURST_ACCENT,
+  MEDIUM_TRACK_LAYER_BURST_SPREAD,
+  MEDIUM_TRACK_LAYER_LIFE_SECONDS,
+  MEDIUM_TRACK_LAYER_MAX_TRACKS,
+  MEDIUM_TRACK_PRESETS,
+} from '../medium';
+import { createTrackLayer, trackLayerFade, trackLayerSigmaMul } from '../web/track-layer';
 import { buildTrackLayerInstances } from '../web/track-layer-gl';
 
 function emission(overrides: Partial<VireUIKitMediumEmission> = {}): VireUIKitMediumEmission {
@@ -34,17 +40,17 @@ describe('trackLayerFade', () => {
   });
 });
 
-describe('trackLayerWidthMul', () => {
-  it('starts at 1 (birth width) and grows over life', () => {
-    expect(trackLayerWidthMul(0, 2)).toBe(1);
-    expect(trackLayerWidthMul(2, 2)).toBeGreaterThan(1);
+describe('trackLayerSigmaMul', () => {
+  it('starts at 1 and grows as sqrt(age), the way a diffusing line blurs', () => {
+    expect(trackLayerSigmaMul(0, 4)).toBe(1);
+    expect(trackLayerSigmaMul(1, 3)).toBeCloseTo(2, 10);
+    expect(trackLayerSigmaMul(-0.5, 4)).toBe(1);
   });
 
-  it('is monotonically non-decreasing over the track\'s life', () => {
-    const life = 1.4;
-    let previous = trackLayerWidthMul(0, life);
-    for (let age = 0.1; age <= life; age += 0.1) {
-      const value = trackLayerWidthMul(age, life);
+  it('is monotonically non-decreasing with age', () => {
+    let previous = trackLayerSigmaMul(0, 5);
+    for (let age = 0.1; age <= 2; age += 0.1) {
+      const value = trackLayerSigmaMul(age, 5);
       expect(value).toBeGreaterThanOrEqual(previous);
       previous = value;
     }
@@ -95,8 +101,7 @@ describe('createTrackLayer: aging, drift and the cap', () => {
     layer.step(1 / 60, [emission()]);
     let tracks: ReturnType<typeof layer.step> = [];
     for (let i = 0; i < 5; i += 1) tracks = layer.step(0.3, []);
-    // Sag alone pulls driftY negative (down, in the up-is-positive-y convention every fraction here
-    // shares with MEDIUM_DEFAULT_LIGHTS) — the curl push is small relative to a second and a half of sag.
+    // Sag alone pulls driftY negative (down, y up); the curl push is small next to 1.5 s of sag.
     expect(tracks[0].driftY).toBeLessThan(0);
   });
 
@@ -109,6 +114,19 @@ describe('createTrackLayer: aging, drift and the cap', () => {
     expect(tracks.length).toBeLessThanOrEqual(MEDIUM_TRACK_LAYER_MAX_TRACKS);
     // The oldest seeds (0, 1, 2, …) are the ones dropped first.
     expect(tracks.some((t) => t.emission.seed === 0)).toBe(false);
+  });
+
+  it('staggers one alpha burst: the accent rays appear at once, the rest wait their turn', () => {
+    const layer = createTrackLayer();
+    const burst = Array.from({ length: 12 }, (_, i) => emission({ kind: 'alpha', seed: 7 + i * 0.0137, angle: i }));
+    const tracks = layer.step(1 / 60, burst);
+    const born = tracks.filter((t) => t.age >= 0);
+    const waiting = tracks.filter((t) => t.age < 0);
+    expect(born).toHaveLength(MEDIUM_TRACK_LAYER_BURST_ACCENT);
+    expect(waiting.length).toBeGreaterThan(0);
+    for (const t of waiting) expect(t.age).toBeGreaterThanOrEqual(-MEDIUM_TRACK_LAYER_BURST_SPREAD);
+    const { count } = buildTrackLayerInstances(tracks, 1000, 500, 1);
+    expect(count).toBe(MEDIUM_TRACK_LAYER_BURST_ACCENT);
   });
 
   it('is deterministic: two independent runs with the same emissions drift identically', () => {
@@ -134,7 +152,9 @@ describe('buildTrackLayerInstances', () => {
     expect(count).toBe(1);
     expect(data[0]).toBeCloseTo(250, 5); // source.x fraction * contentWidth
     expect(data[1]).toBeCloseTo(250, 5); // source.y fraction * contentHeight
-    expect(data[2]).toBeGreaterThan(data[0]); // head.x is further along +x (angle 0)
+    expect(data[2]).toBeCloseTo(1, 5); // direction (angle 0)
+    expect(data[3]).toBeCloseTo(0, 5);
+    expect(data[4]).toBeCloseTo(MEDIUM_TRACK_PRESETS.muon.lengthFrac * 500, 3); // length, px of min(w, h)
   });
 
   it('amount=0 (the canary check:medium uses) produces no instances at all', () => {

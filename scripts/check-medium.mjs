@@ -389,28 +389,14 @@ const BEAM_DT = 1 / 30;
 /** Same 20s condensation-ramp warmup as WATER_WARMUP_S, through the same real full-medium API —
  *  fogDensity (vapor+condensate) needs both phases developed before a light has anything to light. */
 const BEAM_WARMUP_STEPS = 600;
-/** Inner/outer radius of the sampled annulus around the light, as a fraction of min(canvas dims) —
- *  close enough to read the beam's own falloff, far enough that the light's own bright core (where
- *  every angle reads similarly lit regardless of the cone) doesn't dilute the comparison. */
-const BEAM_MIN_RADIUS_FRAC = 0.12;
-const BEAM_MAX_RADIUS_FRAC = 0.32;
+/** Inner/outer radius of the sampled annulus, as a fraction of min(canvas dims) past the canvas
+ *  edge nearest the light. */
+const BEAM_MIN_RADIUS_FRAC = 0.1;
+const BEAM_MAX_RADIUS_FRAC = 0.6;
 /** Ratio of mean luma well inside the light's cone to well outside it, at the same distance band.
  *  Thresholds set from a measured run — see the report printed by this gate. */
 const MIN_BEAM_RATIO = 1.5;
 const MAX_CANARY_BEAM_RATIO = 1.15;
-
-// --- Chamber look: mist grain reads as fine droplet texture, not a smooth field -------------------
-
-const GRAIN_GRID_W = 96;
-const GRAIN_GRID_H = 48;
-const GRAIN_CANVAS_W = 480;
-const GRAIN_CANVAS_H = 240;
-const GRAIN_DT = 1 / 30;
-const GRAIN_WARMUP_STEPS = 600;
-/** Mean absolute luma step between adjacent pixels (0-255 scale) — a smooth bicubic-filtered field
- *  reads near 0 here; per-pixel grain reads much higher. Thresholds from a measured run. */
-const MIN_GRAIN_ENERGY = 1.2;
-const MAX_CANARY_GRAIN_ENERGY = 0.5;
 
 // --- Chamber look: a track is sharp at birth, then broadens, sags and fades ----------------------
 //
@@ -440,8 +426,8 @@ const MIN_CANARY_TRACK_FADE_RATIO = 0.95;
 //
 // The gate above measures the SOFT grid residue via readTrackGrid(); this one measures the layer
 // drawn OVER it (track-layer.ts/track-layer-gl.ts), which has no grid buffer of its own — read back
-// from the FINAL composited canvas instead (readCanvas, the same technique the beam/grain gates
-// already use), at the product's own content resolution so a preset's width FRACTION lands on the
+// from the FINAL composited canvas instead (readCanvas, the same technique the beam gate
+// uses), at the product's own content resolution so a preset's width FRACTION lands on the
 // same content-px the real product shows. A single straight `muon` emission (angle=0 — a clean
 // perpendicular scanline at its own midpoint column), stamped once through the real medium.pass()
 // API and read immediately (birth) and again TRACK_LAYER_LATER_S later with no further emissions:
@@ -456,12 +442,12 @@ const TRACK_LAYER_GRID_H = 37;
 const TRACK_LAYER_DT = 1 / 30;
 const TRACK_LAYER_WARMUP_STEPS = 40;
 const TRACK_LAYER_LATER_S = 1.4;
-/** Birth cross-section sigma, content-px — has to read SHARP: a few px of the muon preset's own
- *  half-width (`headWidthFrac`/`tailWidthFrac` × min(1920,952) ≈ 5.7…9.5px), not a ~26px grid-cell
- *  blur. Threshold from a measured run. */
+/** Birth cross-section sigma, content-px — has to read SHARP (the muon look's core is under 1px at
+ *  this size, see MEDIUM_TRACK_LAYER_LOOK), not a ~26px grid-cell blur. The emission sits at mid
+ *  depth, so no defocus. Threshold from a measured run. */
 const MAX_TRACK_LAYER_BIRTH_SIGMA_PX = 8;
 /** Ratio of the cross-section's sigma at +1.4s vs at birth — how much the layer's own geometry
- *  broadened (see MEDIUM_TRACK_LAYER_WIDEN_GAIN). Threshold from a measured run. */
+ *  broadened (see MEDIUM_TRACK_LAYER_LOOK.broaden). Threshold from a measured run. */
 const MIN_TRACK_LAYER_BROADEN_RATIO = 1.15;
 /** Ratio of total track brightness (background-subtracted) at +1.4s vs at birth — how much it
  *  dimmed (see MEDIUM_TRACK_LAYER_FADE_GAMMA/LIFE_SECONDS). Threshold from a measured run. */
@@ -2056,15 +2042,17 @@ globalThis.vgIsotropySeries = async ({ canary }) => {
 // --- Chamber look: lights are a separate, visible entity -----------------------------------------
 //
 // Mean luma well inside the light's cone vs well outside it, at the SAME distance band — a ring
-// sample (many pixels averaged), not a single point, so per-pixel grain noise cancels out rather
+// sample (many pixels averaged), not a single point, so per-pixel noise cancels out rather
 // than dominating either bucket. lightPosFrac/lightDir arrive in the SAME up-is-positive-y fraction
 // space MEDIUM_COMPOSITE_SHADER's lights use; luma is row 0 = the canvas's own visual BOTTOM (see
 // readCanvas's comment) — the SAME sense as that fraction space, so no flip is needed here either.
 function vgBeamRatio(luma, cw, ch, lightPosFrac, lightDir, coneAngle) {
   const lightPx = [lightPosFrac[0] * cw, lightPosFrac[1] * ch];
   const cosCone = Math.cos(coneAngle);
-  const minR = Math.min(cw, ch) * ${BEAM_MIN_RADIUS_FRAC};
-  const maxR = Math.min(cw, ch) * ${BEAM_MAX_RADIUS_FRAC};
+  // Lamps sit off-canvas: the distance band starts where the canvas does.
+  const edge = Math.hypot(Math.max(0, -lightPx[0], lightPx[0] - cw), Math.max(0, -lightPx[1], lightPx[1] - ch));
+  const minR = edge + Math.min(cw, ch) * ${BEAM_MIN_RADIUS_FRAC};
+  const maxR = edge + Math.min(cw, ch) * ${BEAM_MAX_RADIUS_FRAC};
   let insideSum = 0;
   let insideN = 0;
   let outsideSum = 0;
@@ -2125,61 +2113,6 @@ globalThis.vgBeamSeries = async ({ lightOn }) => {
     luma[i] = 0.2126 * buf[i * 4] + 0.7152 * buf[i * 4 + 1] + 0.0722 * buf[i * 4 + 2];
   }
   return vgBeamRatio(luma, cw, ch, baseLight.position, baseLight.direction, baseLight.coneAngle);
-};
-
-// --- Chamber look: mist grain reads as fine droplet texture, not a smooth field -------------------
-//
-// Mean absolute luma step between horizontally/vertically adjacent pixels — the same "step" idea
-// vgSeamColumnRatio already uses for a single column, generalized to the whole frame: a smooth,
-// bicubic-filtered field (the pre-grain composite) has almost none of this; per-pixel grain has a
-// lot, by construction.
-function vgHighFrequencyEnergy(luma, w, h) {
-  let sum = 0;
-  let n = 0;
-  for (let row = 0; row < h; row += 1) {
-    for (let col = 0; col < w; col += 1) {
-      const v = luma[row * w + col];
-      if (col + 1 < w) {
-        sum += Math.abs(v - luma[row * w + col + 1]);
-        n += 1;
-      }
-      if (row + 1 < h) {
-        sum += Math.abs(v - luma[(row + 1) * w + col]);
-        n += 1;
-      }
-    }
-  }
-  return n > 0 ? sum / n : 0;
-}
-
-globalThis.vgGrainEnergySeries = async ({ grainOn }) => {
-  const gridW = ${GRAIN_GRID_W};
-  const gridH = ${GRAIN_GRID_H};
-  const cw = ${GRAIN_CANVAS_W};
-  const ch = ${GRAIN_CANVAS_H};
-  const canvas = makeCanvas(cw, ch);
-  const renderer = createVireGlassRenderer(canvas);
-  renderer.resize(cw, ch);
-  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
-  const medium = createMediumBackdrop();
-  const dt = ${GRAIN_DT};
-  const params = { mistGrainAmount: grainOn ? MEDIUM_DEFAULTS.mistGrainAmount : 0 };
-  function frame() {
-    renderer.render({
-      density: 1,
-      debug: 'normal',
-      pieces: [],
-      backdrop: medium.pass({ gridWidth: gridW, gridHeight: gridH, dt, params }),
-    });
-  }
-  for (let i = 0; i < ${GRAIN_WARMUP_STEPS}; i += 1) frame();
-  const buf = readCanvas(gl, cw, ch);
-  medium.destroy();
-  const luma = new Array(cw * ch);
-  for (let i = 0; i < cw * ch; i += 1) {
-    luma[i] = 0.2126 * buf[i * 4] + 0.7152 * buf[i * 4 + 1] + 0.0722 * buf[i * 4 + 2];
-  }
-  return { energy: vgHighFrequencyEnergy(luma, cw, ch) };
 };
 
 // --- Chamber look: a track is sharp at birth, then broadens, sags and fades ----------------------
@@ -2256,7 +2189,7 @@ globalThis.vgTrackLayerShapeSeries = async ({ trackLayerAmount }) => {
   const params = { trackLayerAmount };
   const muon = MEDIUM_TRACK_PRESETS.muon;
   const minDim = Math.min(cw, ch);
-  const emission = { ...muon, source: [0.5, 0.5], angle: 0, seed: 1, depth: 1, kind: 'muon' };
+  const emission = { ...muon, source: [0.5, 0.5], angle: 0, seed: 1, depth: 0.5, kind: 'muon' };
 
   function frame(emissions) {
     renderer.render({
@@ -2755,26 +2688,7 @@ async function main() {
     );
   }
 
-  // --- 14. Chamber look: mist grain reads as fine droplet texture. --------------------------------
-  console.log('--- grain: high-frequency energy of the calm-state composite is well above a smooth field\'s ---');
-  const grainCorrect = await page.evaluate((a) => globalThis.vgGrainEnergySeries(a), { grainOn: true });
-  console.log(`  high-frequency energy ${grainCorrect.energy.toFixed(3)}`);
-  if (!(grainCorrect.energy >= MIN_GRAIN_ENERGY)) {
-    failed.push(
-      `grain: high-frequency energy ${grainCorrect.energy.toFixed(3)} is below the required ${MIN_GRAIN_ENERGY} — the mist does not read as fine grain`,
-    );
-  }
-
-  console.log('--- canary: grain amount 0 must read close to smooth ---');
-  const grainCanary = await page.evaluate((a) => globalThis.vgGrainEnergySeries(a), { grainOn: false });
-  console.log(`  high-frequency energy ${grainCanary.energy.toFixed(3)}`);
-  if (!(grainCanary.energy <= MAX_CANARY_GRAIN_ENERGY)) {
-    failed.push(
-      `grain canary did not fail (energy ${grainCanary.energy.toFixed(3)} with grain off) — this gate is not actually sensitive to the grain mechanism`,
-    );
-  }
-
-  // --- 15. Chamber look: a track is sharp at birth, then broadens, sags and fades. ----------------
+  // --- 14. Chamber look: a track is sharp at birth, then broadens, sags and fades. ----------------
   console.log('--- track shape: a stamped track broadens and fades over +1.5s -------------------------------');
   const trackCorrect = await page.evaluate((a) => globalThis.vgTrackShapeSeries(a), { canary: false });
   const broadenRatio = trackCorrect.birth.sigma > 1e-6 ? trackCorrect.later.sigma / trackCorrect.birth.sigma : Infinity;
@@ -2809,7 +2723,7 @@ async function main() {
     );
   }
 
-  // --- 16. Chamber look: the crisp screen-space track layer is sharp at birth. --------------------
+  // --- 15. Chamber look: the crisp screen-space track layer is sharp at birth. --------------------
   console.log('--- track layer: sharp at birth, broadens and dims by +1.4s -----------------------------------');
   const layerCorrect = await page.evaluate((a) => globalThis.vgTrackLayerShapeSeries(a), { trackLayerAmount: 1 });
   const layerBroadenRatio =
@@ -2855,7 +2769,7 @@ async function main() {
     return;
   }
   console.log(
-    "check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), the phase wrap is seamless (canary caught), the far depth plane reads slower and lower-contrast than the near one (both canaries caught), the far plane decorrelates from the near one at 128x72 (canary caught), the bottom boost is a steady-state property and vapor drift is a valid motion cue (both canaries caught), the depth composite's cost over the pre-depth one is reported, the composited backdrop at the product's own default size reads as isotropic gas, not a lattice of straight lines (canary caught), a light's cone reads as a visible beam (canary caught), the calm state reads as fine mist grain (canary caught), a stamped track broadens and fades within +1.5s (canary caught), and the crisp screen-space track layer reads sharp at birth and broadens/dims by +1.4s (canary caught)",
+    "check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), the phase wrap is seamless (canary caught), the far depth plane reads slower and lower-contrast than the near one (both canaries caught), the far plane decorrelates from the near one at 128x72 (canary caught), the bottom boost is a steady-state property and vapor drift is a valid motion cue (both canaries caught), the depth composite's cost over the pre-depth one is reported, the composited backdrop at the product's own default size reads as isotropic gas, not a lattice of straight lines (canary caught), a light's cone reads as a visible beam (canary caught), a stamped track broadens and fades within +1.5s (canary caught), and the crisp screen-space track layer reads sharp at birth and broadens/dims by +1.4s (canary caught)",
   );
 }
 

@@ -23,19 +23,44 @@ const EDGE_STRIP_CONE_ANGLE = Math.PI - 1e-6;
  *  slight tint", not a family member: it keeps most of its own low-chroma platform tone. */
 const EDGE_STRIP_TINT_MIX = 0.22;
 
+/** Hue offset of each spotlight from the cover, degrees: half the vapor species arc, so two lamps
+ *  read as one family rather than two unrelated colors. */
+const GEL_LIGHTNESS = 0.7;
+
+const LIGHT_HUE_SPREAD = MEDIUM_SPECIES_HUE_SPREAD / 2;
+
 /** Rotates `base`'s Oklab hue/chroma toward `(hueDeg, chroma)` by `mix` (0 = untouched, 1 = fully
  *  retinted), keeping `base`'s own LIGHTNESS — a light's brightness shouldn't change just because
  *  its color did. A gray cover (`chroma=0`) fully retinted (`mix=1`) therefore turns a light
  *  neutral, the same "the arc collapses on its own" reading `species.ts` already gives a gray
  *  cover — no special case, the formula does this on its own. */
 function retint(base: VireUIKitMediumChannel, hueDeg: number, chroma: number, mix: number): VireUIKitMediumChannel {
-  const [l, a, b] = srgbToOklab(base);
+  const [baseL, a, b] = srgbToOklab(base);
+  // A tinted lamp is a gel: tint at a lower lightness, where the gamut has room for chroma, then
+  // scale back up to the lamp's own peak channel.
+  const l = baseL + (Math.min(baseL, GEL_LIGHTNESS) - baseL) * mix;
   const rad = (hueDeg * Math.PI) / 180;
   const targetA = chroma * Math.cos(rad);
   const targetB = chroma * Math.sin(rad);
-  const mixed = oklabToSrgb([l, a + (targetA - a) * mix, b + (targetB - b) * mix]);
-  return mixed.map(clamp01) as unknown as VireUIKitMediumChannel;
+  const mixedA = a + (targetA - a) * mix;
+  const mixedB = b + (targetB - b) * mix;
+  // Gamut-map by chroma, not by clamping channels: a clamp at this lightness turns blue into cyan.
+  let lo = 0;
+  let hi = 1;
+  if (inGamut(oklabToSrgb([l, mixedA, mixedB]))) lo = 1;
+  else {
+    for (let i = 0; i < 12; i += 1) {
+      const mid = (lo + hi) / 2;
+      if (inGamut(oklabToSrgb([l, mixedA * mid, mixedB * mid]))) lo = mid;
+      else hi = mid;
+    }
+  }
+  const rgb = oklabToSrgb([l, mixedA * lo, mixedB * lo]).map(clamp01);
+  const gain = Math.max(...base) / Math.max(...rgb, 1e-6);
+  return rgb.map((v) => clamp01(v * gain)) as unknown as VireUIKitMediumChannel;
 }
+
+const inGamut = (rgb: readonly number[]): boolean => rgb.every((v) => v >= -1e-4 && v <= 1 + 1e-4);
 
 /**
  * Builds a light rig from a cover's character: spotlights take one tone each off the family spread
@@ -60,7 +85,7 @@ export function lightRigForCharacter(
     }
     const slot = spotlightIndices.indexOf(i);
     const hueOffset =
-      spotlightCount > 1 ? MEDIUM_SPECIES_HUE_SPREAD * ((2 * slot) / (spotlightCount - 1) - 1) : 0;
+      spotlightCount > 1 ? LIGHT_HUE_SPREAD * ((2 * slot) / (spotlightCount - 1) - 1) : 0;
     return { ...light, color: retint(light.color, character.hue + hueOffset, character.chroma, 1) };
   });
 }

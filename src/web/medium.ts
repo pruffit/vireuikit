@@ -14,10 +14,10 @@ import {
   MEDIUM_CONDENSATE_REACT_SHADER,
   MEDIUM_DEFAULTS,
   MEDIUM_EMIT_SHADER,
-  MEDIUM_GRAIN_FALL_WRAP_PX,
   MEDIUM_MAX_LIGHTS,
   MEDIUM_RESAMPLE_SHADER,
   MEDIUM_SEED_SHADER,
+  MEDIUM_SHADOW_SHADER,
   MEDIUM_TIME_PERIOD,
   MEDIUM_TRACK_ADVECT_SHADER,
   MEDIUM_VAPOR_CORRECT_SHADER,
@@ -116,6 +116,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   const seedProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_SEED_SHADER));
   const emitProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_EMIT_SHADER));
   const resampleProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_RESAMPLE_SHADER));
+  const shadowProgram = createProgram(gl, vertexSource, toGLSL(MEDIUM_SHADOW_SHADER));
   const trackLayerProgram = createTrackLayerProgram(gl);
   const trackLayer = createTrackLayer();
   let liveTracks: readonly VireUIKitLiveTrack[] = [];
@@ -131,6 +132,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   const seedLoc = locationCache(gl, seedProgram);
   const emitLoc = locationCache(gl, emitProgram);
   const resampleLoc = locationCache(gl, resampleProgram);
+  const shadowLoc = locationCache(gl, shadowProgram);
 
   let gridW = 0;
   let gridH = 0;
@@ -143,6 +145,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
   let vaporCorrected: DyeTarget | null = null;
   let condensateForward: DyeTarget | null = null;
   let condensateCorrected: DyeTarget | null = null;
+  let shadow: DyeTarget | null = null;
   let front = 0;
 
   function makeTarget(w: number, h: number): DyeTarget {
@@ -191,6 +194,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     destroyTarget(vaporCorrected);
     destroyTarget(condensateForward);
     destroyTarget(condensateCorrected);
+    destroyTarget(shadow);
     vapor = null;
     condensate = null;
     track = null;
@@ -198,6 +202,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     vaporCorrected = null;
     condensateForward = null;
     condensateCorrected = null;
+    shadow = null;
   }
 
   // Three spots at fixed, spread-out grid points — the "initial spots", and the entire water
@@ -266,6 +271,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     vaporCorrected = makeTarget(w, h);
     condensateForward = makeTarget(w, h);
     condensateCorrected = makeTarget(w, h);
+    shadow = makeTarget(w, h);
     front = 0;
 
     // Total water scales with cell count, not just density: a bilinear resample roughly preserves
@@ -295,6 +301,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
       vaporCorrected = makeTarget(w, h);
       condensateForward = makeTarget(w, h);
       condensateCorrected = makeTarget(w, h);
+      shadow = makeTarget(w, h);
       front = 0;
       seed(w, h);
       // The target water total — right after seeding, before the first step: this is "the entire
@@ -370,12 +377,6 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     return wrapped < 0 ? wrapped + MEDIUM_TIME_PERIOD : wrapped;
   }
 
-  // The mist grain's fall offset (content-px, see MEDIUM_COMPOSITE_SHADER's `vgGrain`) — a second,
-  // much coarser accumulator than `phase`: it only needs to stay within float32 precision, not land
-  // on an exact periodic lattice node (see MEDIUM_GRAIN_FALL_WRAP_PX's own comment for why an exact
-  // wrap isn't needed for a stateless per-cell hash the way it is for the curl field).
-  let grainFallPx = 0;
-
   // A semi-Lagrangian gather over a non-uniform velocity has no obligation to conserve the sum by
   // itself, and neither does the vapor<->condensate exchange at non-integer rounding exponents
   // (not a boundary or step-size issue — at zero advection and zero exchange there's no loss at
@@ -409,7 +410,6 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     const clampedDt = Math.min(Math.max(dt, 0), 1 / 15);
     // Advance and wrap the phase BEFORE using it this frame — see the comment on `phase` above.
     phase = wrapPhase(phase + clampedDt * p.curlSpeed);
-    grainFallPx = (grainFallPx + clampedDt * p.mistGrainFallSpeed) % MEDIUM_GRAIN_FALL_WRAP_PX;
     const back = front === 0 ? 1 : 0;
     const gridSize: readonly [number, number] = [gridW, gridH];
 
@@ -499,6 +499,23 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     setUniform(gl, trackAdvectLoc('u_decay'), p.decay);
     drawFullscreenTriangle(gl);
 
+    if (shadow) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, shadow.fbo);
+      gl.useProgram(shadowProgram);
+      bindTextureAt(gl, 0, vapor[back].texture, shadowProgram, 'u_vapor');
+      bindTextureAt(gl, 1, condensate[back].texture, shadowProgram, 'u_condensate');
+      setUniform(gl, shadowLoc('u_vaporSize'), gridSize);
+      setUniform(gl, shadowLoc('u_condensateSize'), gridSize);
+      setUniform(gl, shadowLoc('u_resolution'), gridSize);
+      setUniform(gl, shadowLoc('u_condensateGain'), p.condensateGain);
+      setUniform(gl, shadowLoc('u_extinction'), p.shadowExtinction);
+      for (const slot of [1, 2]) {
+        const position = p.lights[slot]?.position ?? [0, 0];
+        setUniform(gl, shadowLoc(`u_light${slot}Grid`), [position[0] * gridW, position[1] * gridH]);
+      }
+      drawFullscreenTriangle(gl);
+    }
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     front = back;
     framesSinceRenorm += 1;
@@ -574,9 +591,11 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     bindTextureAt(gl, 0, vapor[front].texture, compositeProgram, 'u_vapor');
     bindTextureAt(gl, 1, condensate[front].texture, compositeProgram, 'u_condensate');
     bindTextureAt(gl, 2, track[front].texture, compositeProgram, 'u_track');
+    if (shadow) bindTextureAt(gl, 3, shadow.texture, compositeProgram, 'u_shadow');
     setUniform(gl, compositeLoc('u_vaporSize'), [gridW, gridH]);
     setUniform(gl, compositeLoc('u_condensateSize'), [gridW, gridH]);
     setUniform(gl, compositeLoc('u_trackSize'), [gridW, gridH]);
+    setUniform(gl, compositeLoc('u_shadowSize'), [gridW, gridH]);
     setUniform(gl, compositeLoc('u_resolution'), [contentWidth, contentHeight]);
     setUniform(gl, compositeLoc('u_dyeScale'), [gridW / contentWidth, gridH / contentHeight]);
     // The palette's forward direction (sRGB → Oklab) — here, once per frame (frame constants),
@@ -600,11 +619,6 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     setUniform(gl, compositeLoc('u_gravityBoostStart'), p.gravityBottomBoostStart);
     setUniform(gl, compositeLoc('u_channelScatter'), p.channelScatter);
     for (let slot = 0; slot < MEDIUM_MAX_LIGHTS; slot += 1) bindLightUniforms(slot, p.lights[slot]);
-    setUniform(gl, compositeLoc('u_grainAmount'), p.mistGrainAmount);
-    setUniform(gl, compositeLoc('u_grainCellPx'), p.mistGrainCellPx);
-    setUniform(gl, compositeLoc('u_grainFallPx'), grainFallPx);
-    setUniform(gl, compositeLoc('u_grainJitterPx'), p.mistGrainJitterPx);
-    setUniform(gl, compositeLoc('u_grainJitterFreq'), p.mistGrainJitterFreq);
     setUniform(gl, compositeLoc('u_trackLightFloor'), p.trackLightFloor);
     drawFullscreenTriangle(gl);
 
@@ -723,6 +737,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.deleteProgram(compositeProgram);
     gl.deleteProgram(seedProgram);
     gl.deleteProgram(emitProgram);
+    gl.deleteProgram(shadowProgram);
     gl.deleteProgram(resampleProgram);
     trackLayerProgram.destroy();
   }
