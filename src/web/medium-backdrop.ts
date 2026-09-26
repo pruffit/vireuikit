@@ -26,6 +26,7 @@ export type MediumBackdrop = {
   readTotals(): { vapor: number; condensate: number; track: number } | null;
   readVaporGrid(): { cols: number; rows: number; data: number[] } | null;
   readCondensateGrid(): { cols: number; rows: number; data: number[] } | null;
+  readTrackGrid(): { cols: number; rows: number; data: number[] } | null;
   destroy(): void;
 };
 
@@ -47,6 +48,7 @@ export function createMediumBackdrop(): MediumBackdrop {
     readTotals: () => runtime?.readTotals() ?? null,
     readVaporGrid: () => runtime?.readVaporGrid() ?? null,
     readCondensateGrid: () => runtime?.readCondensateGrid() ?? null,
+    readTrackGrid: () => runtime?.readTrackGrid() ?? null,
     destroy: () => {
       runtime?.destroy();
       runtime = null;

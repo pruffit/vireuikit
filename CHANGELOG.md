@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+The medium now reads as a real cloud chamber — a dark, mist-filled volume lit by static lights —
+instead of colored smoke clouds with no visible light source.
+
+- **Lights, as data.** `lights` (`VireUIKitMediumParams`, up to `MEDIUM_MAX_LIGHTS = 3`): static
+  point sources — position, direction, cone half-angle, falloff, color, intensity — composited
+  additively in linear light on top of the existing (now near-neutral by default) species mix, so a
+  rig that never binds a light uniform renders bit-for-bit as before. Defaults echo the reference: a
+  wide edge strip near the chamber floor plus two angled spotlights from opposite top corners, off
+  the vertical/horizontal axes on purpose (an on-axis beam edge is itself axis-aligned).
+- **Species become scattering strength, not hue.** `channelScatter` replaces `channelColors`' old
+  role in the lit layer — colour now lives on `lights`; a caller deriving a light rig from cover art
+  applies `characterOf`/`speciesFamily` (`species.ts`) to the lights' colors instead.
+- **Mist grain.** A stateless, per-pixel hashed speck (`mistGrainAmount`/`mistGrainCellPx`/
+  `mistGrainFallSpeed`/`mistGrainJitterPx`/`mistGrainJitterFreq`) reads as fine droplets rather than
+  a smooth field — one extra pass of cheap hashing, no fourth simulated buffer — visible only where
+  both lit and where there's mist to scatter.
+- **Three track kinds, not two plus a filler.** `MEDIUM_TRACK_PRESETS` is now `alpha`/`electron`/
+  `muon` (was `alpha`/`beta`/`natural`): `alpha` is a short, thick, round-ended ray — the playing
+  source now stamps a starburst of 8–16 of these at once from the cover's position, not a lone
+  track. `electron` (thin, wiggly) and `muon` (long, straight, thin) are rare calm-state background
+  radiation with no source; `alpha` never appears there. Tracks carry no color of their own any more
+  (the `channel`/`u_channelMask` per-track RGB tint is gone) — a track is lit the same way as the
+  mist around it, plus `trackLightFloor` so one doesn't vanish just because it drifted out of a
+  cone. `decay` moved from 0.06 to 1.1/s so a stamped track fades within the reference's own
+  "roughly one to two seconds" instead of an ~11s half-life. Depth of field now also widens the
+  NEAREST tracks slightly past the base preset (`MEDIUM_TRACK_DEPTH_WIDTH_RANGE`'s near end is 1.2,
+  not 1) — a Gaussian stamp's edge softness scales with its own width, so the same knob gives "large
+  and soft" for near tracks the way it already gave "thin and soft" for far ones.
+- `check:medium` adds three gates, each with a canary: a light's cone reads as a visibly brighter
+  luminance than the same distance outside it; the calm-state composite carries real high-frequency
+  (grain) energy, not a smooth field; a stamped track's cross-section broadens and its total density
+  fades within +1.5s.
+
 ## 0.3.0
 
 Fixes the backdrop reading as a lattice of straight lines at the product's own default size and

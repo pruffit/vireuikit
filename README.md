@@ -2,8 +2,8 @@
 
 A UI kit built on top of [VireGlass](https://github.com/pruffit/vireglass)'s physically-derived
 glass material: atom state and press/hover/selection behavior for controls, a capsule-to-target
-growth morph, and a live GPU backdrop — colored vapor, condensation and light tracks — that plugs
-into VireGlass's WebGL2 renderer as a backdrop pass.
+growth morph, and a live GPU backdrop — a lit cloud-chamber: dark mist, static lights, and
+condensation tracks — that plugs into VireGlass's WebGL2 renderer as a backdrop pass.
 
 **Status: 0.x.** The API can still change between minor versions.
 
@@ -44,11 +44,31 @@ const frame = growthFrame(sourceShape, targetShape, anchorPoint, growthPhase(sta
 // frame.body: the shape to draw as glass this frame.
 ```
 
-## GPU backdrop: colored vapor and condensation
+## GPU backdrop: a lit chamber, not colored smoke
 
 `createMediumBackdrop()` returns a `VireGlassBackdropPass` factory: a self-contained fluid
-simulation (curl-noise vapor, condensing droplets, decaying light tracks) that composites straight
-into the texture VireGlass's lens samples — no offscreen canvas, no readback.
+simulation (curl-noise vapor, condensing droplets, decaying condensation tracks) that composites
+straight into the texture VireGlass's lens samples — no offscreen canvas, no readback.
+
+The chamber itself is dark; what's visible is light scattered by mist and tracks inside a light's
+reach, not the gas's own color. `lights` (`VireUIKitMediumParams`, up to `MEDIUM_MAX_LIGHTS`) are
+static point sources — position, direction, cone half-angle, falloff, color, intensity — defaulting
+to a wide edge strip near the chamber floor plus two angled spotlights from opposite top corners
+(angled off the vertical/horizontal axes on purpose: an on-axis beam edge is itself axis-aligned).
+Vapor species (`channelColors`) fold into a near-neutral ambient base by default; `channelScatter`
+is how strongly each species scatters a light's color, now that hue lives on the lights rather than
+the gas — a caller deriving a light rig from cover art applies `characterOf`/`speciesFamily`
+(`species.ts`) to the lights' colors, not to `channelColors`. A stateless, per-pixel grain
+(`mistGrainAmount`/`mistGrainCellPx`/`mistGrainFallSpeed`) reads as fine droplets rather than a
+smooth field, visible only where both lit and where there's mist to scatter — no fourth simulated
+buffer, one extra pass of cheap hashing.
+
+Tracks come in three kinds (`MEDIUM_TRACK_PRESETS`): `alpha` (short, thick, round-ended — the
+playing source stamps a dozen or so of these at once, radiating from the cover's position, a
+starburst rather than a lone ray), `electron` (thin, wiggly) and `muon` (long, straight, thin). The
+calm state schedules rare electron/muon background radiation from no source at all; `alpha` only
+ever comes from a driven source. A track is lit the same way as the mist, plus `trackLightFloor` so
+one already on screen doesn't vanish just because it drifted out of a cone.
 
 ```ts
 import { createMediumBackdrop } from 'vireuikit/web';
@@ -92,8 +112,9 @@ cannot affect the conserved water total) that actually produces the "denser at t
 Condensate settling adds a second, always-on share of the ambient curl field's own sideways push
 (`condensateSettleWiggle`) so a droplet falling at a constant speed doesn't trace a dead-straight
 vertical line when turbulence is otherwise low. Each emitted track also carries a `depth` (0 far …
-1 near) that scales its own width and intensity, so a track reads thinner, dimmer and softer the
-farther back it lives.
+1 near) that scales its own width and intensity, so a far track reads thinner, dimmer and finer,
+while the nearest tracks read a little LARGER than the base preset, not merely full-size — a
+Gaussian stamp's edge softness scales with its own width, so the same knob gives depth of field too.
 
 The curl-noise potential itself is periodic over the simulation grid in space, the same way it
 already was in time: each octave's spatial frequency is adjusted, per grid size, to the nearest

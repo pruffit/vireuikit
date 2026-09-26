@@ -14,6 +14,8 @@ import {
   MEDIUM_CONDENSATE_REACT_SHADER,
   MEDIUM_DEFAULTS,
   MEDIUM_EMIT_SHADER,
+  MEDIUM_GRAIN_FALL_WRAP_PX,
+  MEDIUM_MAX_LIGHTS,
   MEDIUM_RESAMPLE_SHADER,
   MEDIUM_SEED_SHADER,
   MEDIUM_TIME_PERIOD,
@@ -23,6 +25,7 @@ import {
   MEDIUM_VAPOR_REACT_SHADER,
   srgbToOklab,
   type VireUIKitMediumEmission,
+  type VireUIKitMediumLight,
   type VireUIKitMediumParams,
 } from '../medium';
 import { toGLSL } from 'vireglass';
@@ -71,6 +74,10 @@ export type MediumRuntime = {
    *  cell (condensate has no color — see `readVaporGrid`'s r/g/b for the contrast). Used by the
    *  gravity gate to find the density-weighted row where the mass sits. */
   readCondensateGrid(): { cols: number; rows: number; data: number[] } | null;
+  /** The raw TRACK grid, at simulation-grid resolution, `data` as one density value per cell (a
+   *  track carries no color — see `readCondensateGrid`). Used by the "sharp at birth, soft later"
+   *  gate to measure a stamped track's cross-section directly. */
+  readTrackGrid(): { cols: number; rows: number; data: number[] } | null;
   destroy(): void;
 };
 
@@ -293,6 +300,21 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     resizeGrid(w, h);
   }
 
+  /** Binds one light slot (`u_light<slot>*`) of `MEDIUM_COMPOSITE_SHADER` — `undefined` (a `lights`
+   *  array shorter than `MEDIUM_MAX_LIGHTS`) binds intensity 0, same as simply never setting the
+   *  uniform (GL's own default), so an unused slot contributes nothing either way. */
+  function bindLightUniforms(slot: number, light: VireUIKitMediumLight | undefined): void {
+    const position = light?.position ?? [0, 0];
+    const direction = light?.direction ?? [0, 1];
+    const dirLen = Math.hypot(direction[0], direction[1]) || 1;
+    setUniform(gl, compositeLoc(`u_light${slot}Pos`), position);
+    setUniform(gl, compositeLoc(`u_light${slot}Dir`), [direction[0] / dirLen, direction[1] / dirLen]);
+    setUniform(gl, compositeLoc(`u_light${slot}CosCone`), Math.cos(light?.coneAngle ?? 0));
+    setUniform(gl, compositeLoc(`u_light${slot}Falloff`), light?.falloff ?? 0);
+    setUniform(gl, compositeLoc(`u_light${slot}Color`), light?.color ?? [0, 0, 0]);
+    setUniform(gl, compositeLoc(`u_light${slot}Intensity`), light?.intensity ?? 0);
+  }
+
   /** Shared velocity-field uniforms — one set for both phases' forward/correct passes and for
    *  tracks (condensate adds its own gravity on top — see `u_settleSpeed` where it's declared).
    *  The react passes don't mind them either: the extra `loc()` calls for curl uniforms that don't
@@ -336,6 +358,12 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     return wrapped < 0 ? wrapped + MEDIUM_TIME_PERIOD : wrapped;
   }
 
+  // The mist grain's fall offset (content-px, see MEDIUM_COMPOSITE_SHADER's `vgGrain`) — a second,
+  // much coarser accumulator than `phase`: it only needs to stay within float32 precision, not land
+  // on an exact periodic lattice node (see MEDIUM_GRAIN_FALL_WRAP_PX's own comment for why an exact
+  // wrap isn't needed for a stateless per-cell hash the way it is for the curl field).
+  let grainFallPx = 0;
+
   // A semi-Lagrangian gather over a non-uniform velocity has no obligation to conserve the sum by
   // itself, and neither does the vapor<->condensate exchange at non-integer rounding exponents
   // (not a boundary or step-size issue — at zero advection and zero exchange there's no loss at
@@ -369,6 +397,7 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     const clampedDt = Math.min(Math.max(dt, 0), 1 / 15);
     // Advance and wrap the phase BEFORE using it this frame — see the comment on `phase` above.
     phase = wrapPhase(phase + clampedDt * p.curlSpeed);
+    grainFallPx = (grainFallPx + clampedDt * p.mistGrainFallSpeed) % MEDIUM_GRAIN_FALL_WRAP_PX;
     const back = front === 0 ? 1 : 0;
     const gridSize: readonly [number, number] = [gridW, gridH];
 
@@ -510,7 +539,6 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
       setUniform(gl, emitLoc('u_tailDim'), e.tailDim);
       setUniform(gl, emitLoc('u_intensity'), e.intensity);
       setUniform(gl, emitLoc('u_seed'), e.seed);
-      setUniform(gl, emitLoc('u_channelMask'), e.channel);
       drawFullscreenTriangle(gl);
     }
     gl.disable(gl.BLEND);
@@ -554,6 +582,14 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     setUniform(gl, compositeLoc('u_farWeight'), p.depthFarWeight);
     setUniform(gl, compositeLoc('u_gravityBoost'), p.gravityBottomBoost);
     setUniform(gl, compositeLoc('u_gravityBoostStart'), p.gravityBottomBoostStart);
+    setUniform(gl, compositeLoc('u_channelScatter'), p.channelScatter);
+    for (let slot = 0; slot < MEDIUM_MAX_LIGHTS; slot += 1) bindLightUniforms(slot, p.lights[slot]);
+    setUniform(gl, compositeLoc('u_grainAmount'), p.mistGrainAmount);
+    setUniform(gl, compositeLoc('u_grainCellPx'), p.mistGrainCellPx);
+    setUniform(gl, compositeLoc('u_grainFallPx'), grainFallPx);
+    setUniform(gl, compositeLoc('u_grainJitterPx'), p.mistGrainJitterPx);
+    setUniform(gl, compositeLoc('u_grainJitterFreq'), p.mistGrainJitterFreq);
+    setUniform(gl, compositeLoc('u_trackLightFloor'), p.trackLightFloor);
     drawFullscreenTriangle(gl);
   }
 
@@ -631,6 +667,28 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     return { cols: gridW, rows: gridH, data };
   }
 
+  // One number per cell, same reasoning as readCondensateGrid: a track carries no color of its own
+  // (emit-shader.ts stamps r=g=b — see its own comment) since MEDIUM_COMPOSITE_SHADER now lights
+  // tracks rather than tinting them. Used by the "sharp at birth, soft later" gate to measure a
+  // stamped track's cross-section directly, without compositing/lighting in the way.
+  function readTrackGrid(): { cols: number; rows: number; data: number[] } | null {
+    if (!track) return null;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, track[front].fbo);
+    const cells = gridW * gridH;
+    const data = new Array(cells);
+    if (format.type === gl.HALF_FLOAT) {
+      const buf = new Float32Array(cells * 4);
+      gl.readPixels(0, 0, gridW, gridH, gl.RGBA, gl.FLOAT, buf);
+      for (let i = 0; i < cells; i += 1) data[i] = buf[i * 4];
+    } else {
+      const buf = new Uint8Array(cells * 4);
+      gl.readPixels(0, 0, gridW, gridH, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      for (let i = 0; i < cells; i += 1) data[i] = buf[i * 4] / 255;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { cols: gridW, rows: gridH, data };
+  }
+
   function destroy(): void {
     destroyTargets();
     gl.deleteProgram(vaporForwardProgram);
@@ -646,5 +704,15 @@ export function createMediumRuntime(gl: WebGL2RenderingContext, vertexSource: st
     gl.deleteProgram(resampleProgram);
   }
 
-  return { ensureGrid, step, emit, composite, readTotals, readVaporGrid, readCondensateGrid, destroy };
+  return {
+    ensureGrid,
+    step,
+    emit,
+    composite,
+    readTotals,
+    readVaporGrid,
+    readCondensateGrid,
+    readTrackGrid,
+    destroy,
+  };
 }

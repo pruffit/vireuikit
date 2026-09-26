@@ -1,4 +1,5 @@
 import { VG_OKLAB_TO_SRGB } from './oklab';
+import { VG_VALUE_NOISE } from './noise';
 
 // Composites vapor, condensate and track density into color — DIRECTLY into the buffer the lens
 // samples: this is not a separate pass drawn over the glass, it fills the same contentTexture an
@@ -89,6 +90,73 @@ half4 ${fnName}(float2 px) {
 `;
 }
 
+// LIGHT AND GRAIN: the gas above is the OLD "colored vapor" mechanism — kept exactly as it was
+// (still driving the isotropy/contrast/decorrelation/parallax/gravity gates in check-medium.mjs,
+// none of which know about lights) so it stays a valid, near-neutral ambient base by default
+// (`channelColors` defaults to a near-black family — see params.ts). What actually reads as the
+// reference does — a dark volume where light is a separate, visible thing — is ADDITIVE on top of
+// it, in linear light, so a rig that never binds the uniforms below (their GL default is 0) renders
+// bit-for-bit as before.
+//
+// A light is a cone from a fixed point (`vgLightAmount`): position/direction arrive already in the
+// SAME up-is-positive-y fraction space `gravityBottomBoost` above uses, converted to real content
+// pixels here so a circular pool of light stays circular regardless of the frame's aspect ratio
+// (distance is normalized by height alone, not by each axis separately, for the same reason).
+// `u_light0..2` are flat, fixed-slot uniforms, not an array — `setUniform` (vireglass/web) has no
+// array form, only scalars up to vec4 (the same reason species already use `u_lab0/1/2` instead of
+// one array uniform); an unused slot is simply intensity 0.
+//
+// `channelColors` used to be the species' hue; now `u_channelScatter` is how strongly each species
+// SCATTERS the lights' color instead — hue moved to the lights, species are what they scatter, not
+// what they tint (see params.ts's `channelScatter`).
+//
+// Mist grain (`vgGrain`) is stateless and per-pixel — a hashed cell, not a fourth simulated buffer
+// — so it costs one pass of cheap arithmetic. It nudges sideways with a per-cell sine wobble keyed
+// off the SAME fall accumulator that scrolls it downward, rather than sampling the real curl-noise
+// field per screen pixel: `vgCurlVelocitySeamless` is a 4-octave, multi-tap function, and this
+// composite already reads ~25 dependent texture taps for the gas alone (see the isotropy gate's own
+// comment on this shader's cost) — a full curl sample for every one of a 1920x952 frame's pixels,
+// just for a few-pixel wobble, measured as the dominant cost in an early draft. The wobble is a
+// cheap stand-in for "nudged by turbulence", not the turbulence itself.
+const VG_LIGHT_AND_GRAIN = `
+float vgLightAmount(float2 xy, float2 lightPosFrac, float2 lightDir, float cosCone, float falloff, float2 resolution) {
+  float2 rel = xy - lightPosFrac * resolution;
+  // A cone of 180° or more is an edge strip: light spreads from a line, not a point.
+  if (cosCone <= -0.999) {
+    float depth = max(dot(rel, lightDir), 0.0);
+    return exp(-(depth / max(resolution.y, 1.0)) * falloff);
+  }
+  float dist = length(rel);
+  float2 dirN = dist > 1e-4 ? rel / dist : lightDir;
+  float cosAngle = dot(dirN, lightDir);
+  float edge = smoothstep(cosCone, mix(cosCone, 1.0, 0.85), cosAngle);
+  edge *= edge;
+  float atten = exp(-(dist / max(resolution.y, 1.0)) * falloff);
+  return edge * atten;
+}
+
+// One hashed "mote" per cell rather than a filled cell: a random sub-cell position plus a soft
+// radius reads as a fine dust speck, where a filled cell would read as a pixel-grid texture. Only a
+// fraction of cells host a visible mote at any moment (\`lit\`) — full occupancy would read as haze,
+// not "countless individual droplets".
+float vgGrain(float2 xy, float cellPx, float fallPx, float jitterPx, float jitterFreq) {
+  float2 p = xy + float2(0.0, fallPx);
+  float2 cell0 = floor(p / max(cellPx, 0.5));
+  float cellSeed = vgHash21(cell0);
+  float wobblePhase = fallPx * jitterFreq + cellSeed * 6.2831853;
+  float2 wobble = float2(sin(wobblePhase), cos(wobblePhase * 1.3)) * jitterPx;
+  float2 pj = p + wobble;
+  float2 cell = floor(pj / max(cellPx, 0.5));
+  float2 f = fract(pj / max(cellPx, 0.5));
+  float h = vgHash21(cell);
+  float2 speckPos = float2(vgHash21(cell + float2(7.0, 3.0)), vgHash21(cell + float2(1.0, 9.0)));
+  float d = length(f - speckPos);
+  float speck = smoothstep(0.3, 0.0, d);
+  float lit = step(0.7, h);
+  return speck * lit;
+}
+`;
+
 export const MEDIUM_COMPOSITE_SHADER = `
 uniform shader u_vapor;
 uniform shader u_condensate;
@@ -108,11 +176,38 @@ uniform float  u_farBlurRadius;
 uniform float  u_farWeight;
 uniform float  u_gravityBoost;
 uniform float  u_gravityBoostStart;
+uniform float3 u_channelScatter;
+uniform float2 u_light0Pos;
+uniform float2 u_light0Dir;
+uniform float  u_light0CosCone;
+uniform float  u_light0Falloff;
+uniform float3 u_light0Color;
+uniform float  u_light0Intensity;
+uniform float2 u_light1Pos;
+uniform float2 u_light1Dir;
+uniform float  u_light1CosCone;
+uniform float  u_light1Falloff;
+uniform float3 u_light1Color;
+uniform float  u_light1Intensity;
+uniform float2 u_light2Pos;
+uniform float2 u_light2Dir;
+uniform float  u_light2CosCone;
+uniform float  u_light2Falloff;
+uniform float3 u_light2Color;
+uniform float  u_light2Intensity;
+uniform float  u_grainAmount;
+uniform float  u_grainCellPx;
+uniform float  u_grainFallPx;
+uniform float  u_grainJitterPx;
+uniform float  u_grainJitterFreq;
+uniform float  u_trackLightFloor;
 
 ${VG_OKLAB_TO_SRGB}
 ${VG_CUBIC_WEIGHTS}
 ${vgBicubicSampler('vgBicubicVapor', 'u_vapor')}
 ${vgBicubicSampler('vgBicubicCondensate', 'u_condensate')}
+${VG_VALUE_NOISE}
+${VG_LIGHT_AND_GRAIN}
 
 half4 main(float2 xy) {
   float2 baseSrc = xy * u_dyeScale;
@@ -180,7 +275,42 @@ half4 main(float2 xy) {
   float total = max(w0 + w1 + w2 + wBg + wCondensate, 1e-4);
   float3 mixLab =
     (u_labBg * wBg + u_lab0 * w0 + u_lab1 * w1 + u_lab2 * w2 + condensateLab * wCondensate) / total;
-  float3 rgbLinear = clamp(vgOklabToLinear(mixLab), float3(0.0), float3(1.0));
+  // The dark ambient base — this is where the OLD mechanism stops (see the file header on
+  // VG_LIGHT_AND_GRAIN): unclamped here, clamped once at the very end, after the lit layer adds in.
+  float3 rgbLinearBase = vgOklabToLinear(mixLab);
+
+  // LIGHTS: a separate entity from the gas, exactly as the reference shows — a cone from a fixed
+  // point, falling off with distance, scattered visible only where it reaches. Colored, additive.
+  float light0 = vgLightAmount(xy, u_light0Pos, u_light0Dir, u_light0CosCone, u_light0Falloff, u_resolution) * u_light0Intensity;
+  float light1 = vgLightAmount(xy, u_light1Pos, u_light1Dir, u_light1CosCone, u_light1Falloff, u_resolution) * u_light1Intensity;
+  float light2 = vgLightAmount(xy, u_light2Pos, u_light2Dir, u_light2CosCone, u_light2Falloff, u_resolution) * u_light2Intensity;
+  float3 illum = u_light0Color * light0 + u_light1Color * light1 + u_light2Color * light2;
+  float illumScalar = light0 + light1 + light2;
+
+  // SCATTERING: species are what they scatter now, not what they tint (u_channelScatter replaces
+  // channelColors' old hue role for the lit layer) — vapor only, not track (track gets its own
+  // trackLit term below, so it isn't counted twice).
+  float totalScatter = gasR * u_channelScatter.x + gasG * u_channelScatter.y + gasB * u_channelScatter.z;
+  float fogDensity = totalScatter + wCondensate;
+
+  // MIST GRAIN: fine droplets, visible only where lit and only where there is something to scatter
+  // ("the gas itself is invisible" — see the file header). A little smooth fog on top of the
+  // sparkle, from the same density, so the volume doesn't read as pure black between motes.
+  float grain = vgGrain(xy, u_grainCellPx, u_grainFallPx, u_grainJitterPx, u_grainJitterFreq) * u_grainAmount;
+  float densityGate = clamp(fogDensity * 3.0, 0.0, 1.0);
+  float mist = 0.02 + fogDensity * 0.15 + grain * densityGate * 0.8;
+
+  // TRACKS: lit the same way as the mist, plus a floor so a track already on screen never vanishes
+  // entirely just because it drifted out of a cone (a fresh ionization trail reads brighter than
+  // ambient mist in a real chamber). The floor is added to ITS OWN color, not multiplied into illum:
+  // illum is exactly [0,0,0] in a fully unlit spot (every light's amount is 0 there), so a floor
+  // multiplied by illum would vanish exactly where it exists to help — it needs a color of its own
+  // (a neutral, self-luminous glow) rather than borrowing whichever light happens to be nearby.
+  float trackDensity = max(float(track.r), max(float(track.g), float(track.b)));
+  float3 trackGlow = trackDensity * (illum + float3(u_trackLightFloor));
+
+  float3 rgbLinear = rgbLinearBase * 0.03 + illum * mist + trackGlow;
+  rgbLinear = float3(1.0) - exp(-rgbLinear * 0.9);
   float3 srgb = vgLinearToSrgb(rgbLinear);
   return half4(half3(srgb), half(1.0));
 }

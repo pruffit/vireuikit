@@ -376,6 +376,66 @@ const MAX_ISOTROPY_RATIO = 2.5;
 const MAX_SEAM_COLUMN_RATIO = 1.5;
 const MIN_CANARY_SEAM_COLUMN_RATIO = 2;
 
+// --- Chamber look: lights are a separate, visible entity ----------------------------------------
+//
+// The full production medium (createMediumBackdrop, real API — condensation needs its own ramp,
+// same reasoning as WATER_WARMUP_S), with every light but one forced to zero intensity so the
+// measurement isolates the cone mechanism itself rather than the sum of all three shipped lights.
+const BEAM_GRID_W = 96;
+const BEAM_GRID_H = 48;
+const BEAM_CANVAS_W = 480;
+const BEAM_CANVAS_H = 240;
+const BEAM_DT = 1 / 30;
+/** Same 20s condensation-ramp warmup as WATER_WARMUP_S, through the same real full-medium API —
+ *  fogDensity (vapor+condensate) needs both phases developed before a light has anything to light. */
+const BEAM_WARMUP_STEPS = 600;
+/** Inner/outer radius of the sampled annulus around the light, as a fraction of min(canvas dims) —
+ *  close enough to read the beam's own falloff, far enough that the light's own bright core (where
+ *  every angle reads similarly lit regardless of the cone) doesn't dilute the comparison. */
+const BEAM_MIN_RADIUS_FRAC = 0.12;
+const BEAM_MAX_RADIUS_FRAC = 0.32;
+/** Ratio of mean luma well inside the light's cone to well outside it, at the same distance band.
+ *  Thresholds set from a measured run — see the report printed by this gate. */
+const MIN_BEAM_RATIO = 1.5;
+const MAX_CANARY_BEAM_RATIO = 1.15;
+
+// --- Chamber look: mist grain reads as fine droplet texture, not a smooth field -------------------
+
+const GRAIN_GRID_W = 96;
+const GRAIN_GRID_H = 48;
+const GRAIN_CANVAS_W = 480;
+const GRAIN_CANVAS_H = 240;
+const GRAIN_DT = 1 / 30;
+const GRAIN_WARMUP_STEPS = 600;
+/** Mean absolute luma step between adjacent pixels (0-255 scale) — a smooth bicubic-filtered field
+ *  reads near 0 here; per-pixel grain reads much higher. Thresholds from a measured run. */
+const MIN_GRAIN_ENERGY = 1.2;
+const MAX_CANARY_GRAIN_ENERGY = 0.5;
+
+// --- Chamber look: a track is sharp at birth, then broadens, sags and fades ----------------------
+//
+// The real full-medium API again, but read through readTrackGrid() (raw density, no compositing or
+// lighting in the way) — a single manually-built `muon` emission (long, straight, thin: the easiest
+// shape to take a clean perpendicular cross-section of) stamped once, then left to advect and decay
+// on its own for TRACK_LATER_S with no further emissions.
+const TRACK_GRID_W = 96;
+const TRACK_GRID_H = 48;
+const TRACK_DT = 1 / 30;
+const TRACK_LATER_S = 1.5;
+/** Ratio of the cross-section's Gaussian sigma (a density-weighted standard deviation across a
+ *  scanline perpendicular to the track) at +1.5s vs at birth — how much it broadened. Thresholds
+ *  from a measured run. */
+const MIN_TRACK_BROADEN_RATIO = 1.2;
+/** Ratio of total track density at +1.5s vs at birth — how much of it faded. Below 1: some of the
+ *  stamp is gone, not merely spread thinner (broadening alone conserves the sum; decay is what
+ *  actually loses it). Thresholds from a measured run. */
+const MAX_TRACK_FADE_RATIO = 0.6;
+/** The canary (decay=0, turbulence=0 — no motion to broaden, no decay to fade) must show close to
+ *  NO change in either measure: at zero velocity the backtrace samples its own exact texel center
+ *  every frame, so bilinear resampling introduces essentially no diffusion on its own. */
+const MAX_CANARY_TRACK_BROADEN_RATIO = 1.05;
+const MIN_CANARY_TRACK_FADE_RATIO = 0.95;
+
 const ENTRY = `
 import { createVireGlassRenderer } from 'vireglass/web';
 import { toGLSL } from 'vireglass';
@@ -400,6 +460,7 @@ import {
   MEDIUM_DEFAULTS,
   MEDIUM_SEED_SHADER,
   MEDIUM_TIME_PERIOD,
+  MEDIUM_TRACK_PRESETS,
   MEDIUM_VAPOR_CORRECT_SHADER,
   MEDIUM_VAPOR_FORWARD_SHADER,
   MEDIUM_VAPOR_REACT_SHADER,
@@ -424,11 +485,21 @@ function bindSpatial(gl, loc, w, h, curlFreq) {
   setUniform(gl, loc('u_spatial3'), [spatial[3].freqX, spatial[3].freqY, spatial[3].periodX, spatial[3].periodY]);
 }
 
+// NOT attached to document.body: a WebGL2 context works fine on a detached canvas (every read here
+// goes through gl.readPixels/renderer.render, never layout or a visible paint), and Chromium caps
+// the number of SIMULTANEOUSLY LIVE WebGL contexts per page (observed here: adding this package's
+// own three new gates on top of the existing dozen tipped the running total over that cap mid-run —
+// "WARNING: Too many active WebGL contexts. Oldest context will be lost." — which silently evicts
+// whichever gate's context is oldest, not necessarily the one at fault, and reads back as a stall
+// or a hang, not a clean error). A canvas that was appended to document.body stays reachable from
+// the DOM tree for the rest of the page's life even after its own JS variable goes out of scope, so
+// its context never becomes eligible for GC-driven release; every earlier gate's canvas was still
+// pinned in memory by the time this file's later gates ran. A detached canvas is reclaimed (context
+// and all) the moment nothing references it any more — ordinary GC, no explicit cleanup needed here.
 function makeCanvas(w, h) {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
-  document.body.append(canvas);
   return canvas;
 }
 
@@ -1951,6 +2022,194 @@ globalThis.vgIsotropySeries = async ({ canary }) => {
   const seam = vgSeamColumnRatio(farProbe.luma, cw, ch, gridW, farProbe.dyeScaleX, MEDIUM_DEFAULTS.depthFarScale, farProbe.farOffsetX);
   return { isotropy, seam };
 };
+// --- Chamber look: lights are a separate, visible entity -----------------------------------------
+//
+// Mean luma well inside the light's cone vs well outside it, at the SAME distance band — a ring
+// sample (many pixels averaged), not a single point, so per-pixel grain noise cancels out rather
+// than dominating either bucket. lightPosFrac/lightDir arrive in the SAME up-is-positive-y fraction
+// space MEDIUM_COMPOSITE_SHADER's lights use; luma is row 0 = the canvas's own visual BOTTOM (see
+// readCanvas's comment) — the SAME sense as that fraction space, so no flip is needed here either.
+function vgBeamRatio(luma, cw, ch, lightPosFrac, lightDir, coneAngle) {
+  const lightPx = [lightPosFrac[0] * cw, lightPosFrac[1] * ch];
+  const cosCone = Math.cos(coneAngle);
+  const minR = Math.min(cw, ch) * ${BEAM_MIN_RADIUS_FRAC};
+  const maxR = Math.min(cw, ch) * ${BEAM_MAX_RADIUS_FRAC};
+  let insideSum = 0;
+  let insideN = 0;
+  let outsideSum = 0;
+  let outsideN = 0;
+  for (let row = 0; row < ch; row += 1) {
+    for (let col = 0; col < cw; col += 1) {
+      const dx = col - lightPx[0];
+      const dy = row - lightPx[1];
+      const dist = Math.hypot(dx, dy);
+      if (dist < minR || dist > maxR) continue;
+      const cosAngle = (dx * lightDir[0] + dy * lightDir[1]) / dist;
+      const v = luma[row * cw + col];
+      // Margins on both sides of the cone edge so the soft transition band itself doesn't dilute
+      // either bucket — "well inside" and "well outside", not "on either side of the edge".
+      if (cosAngle > cosCone + (1 - cosCone) * 0.3) {
+        insideSum += v;
+        insideN += 1;
+      } else if (cosAngle < cosCone - 0.15) {
+        outsideSum += v;
+        outsideN += 1;
+      }
+    }
+  }
+  const insideMean = insideN > 0 ? insideSum / insideN : 0;
+  const outsideMean = outsideN > 0 ? outsideSum / outsideN : 0;
+  return { insideMean, outsideMean, insideN, outsideN, ratio: outsideMean > 1e-6 ? insideMean / outsideMean : Infinity };
+}
+
+globalThis.vgBeamSeries = async ({ lightOn }) => {
+  const gridW = ${BEAM_GRID_W};
+  const gridH = ${BEAM_GRID_H};
+  const cw = ${BEAM_CANVAS_W};
+  const ch = ${BEAM_CANVAS_H};
+  const canvas = makeCanvas(cw, ch);
+  const renderer = createVireGlassRenderer(canvas);
+  renderer.resize(cw, ch);
+  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+  const medium = createMediumBackdrop();
+  const dt = ${BEAM_DT};
+  // One light only (a spotlight, MEDIUM_DEFAULTS.lights[1]) — isolates the cone mechanism from the
+  // sum of all three shipped lights, the same "zero the other mechanism" isolation the boost/
+  // contrast gates already use for their own one variable.
+  const baseLight = MEDIUM_DEFAULTS.lights[1];
+  const lights = [{ ...baseLight, intensity: lightOn ? baseLight.intensity : 0 }];
+  function frame() {
+    renderer.render({
+      density: 1,
+      debug: 'normal',
+      pieces: [],
+      backdrop: medium.pass({ gridWidth: gridW, gridHeight: gridH, dt, params: { lights } }),
+    });
+  }
+  for (let i = 0; i < ${BEAM_WARMUP_STEPS}; i += 1) frame();
+  const buf = readCanvas(gl, cw, ch);
+  medium.destroy();
+  const luma = new Array(cw * ch);
+  for (let i = 0; i < cw * ch; i += 1) {
+    luma[i] = 0.2126 * buf[i * 4] + 0.7152 * buf[i * 4 + 1] + 0.0722 * buf[i * 4 + 2];
+  }
+  return vgBeamRatio(luma, cw, ch, baseLight.position, baseLight.direction, baseLight.coneAngle);
+};
+
+// --- Chamber look: mist grain reads as fine droplet texture, not a smooth field -------------------
+//
+// Mean absolute luma step between horizontally/vertically adjacent pixels — the same "step" idea
+// vgSeamColumnRatio already uses for a single column, generalized to the whole frame: a smooth,
+// bicubic-filtered field (the pre-grain composite) has almost none of this; per-pixel grain has a
+// lot, by construction.
+function vgHighFrequencyEnergy(luma, w, h) {
+  let sum = 0;
+  let n = 0;
+  for (let row = 0; row < h; row += 1) {
+    for (let col = 0; col < w; col += 1) {
+      const v = luma[row * w + col];
+      if (col + 1 < w) {
+        sum += Math.abs(v - luma[row * w + col + 1]);
+        n += 1;
+      }
+      if (row + 1 < h) {
+        sum += Math.abs(v - luma[(row + 1) * w + col]);
+        n += 1;
+      }
+    }
+  }
+  return n > 0 ? sum / n : 0;
+}
+
+globalThis.vgGrainEnergySeries = async ({ grainOn }) => {
+  const gridW = ${GRAIN_GRID_W};
+  const gridH = ${GRAIN_GRID_H};
+  const cw = ${GRAIN_CANVAS_W};
+  const ch = ${GRAIN_CANVAS_H};
+  const canvas = makeCanvas(cw, ch);
+  const renderer = createVireGlassRenderer(canvas);
+  renderer.resize(cw, ch);
+  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true });
+  const medium = createMediumBackdrop();
+  const dt = ${GRAIN_DT};
+  const params = { mistGrainAmount: grainOn ? MEDIUM_DEFAULTS.mistGrainAmount : 0 };
+  function frame() {
+    renderer.render({
+      density: 1,
+      debug: 'normal',
+      pieces: [],
+      backdrop: medium.pass({ gridWidth: gridW, gridHeight: gridH, dt, params }),
+    });
+  }
+  for (let i = 0; i < ${GRAIN_WARMUP_STEPS}; i += 1) frame();
+  const buf = readCanvas(gl, cw, ch);
+  medium.destroy();
+  const luma = new Array(cw * ch);
+  for (let i = 0; i < cw * ch; i += 1) {
+    luma[i] = 0.2126 * buf[i * 4] + 0.7152 * buf[i * 4 + 1] + 0.0722 * buf[i * 4 + 2];
+  }
+  return { energy: vgHighFrequencyEnergy(luma, cw, ch) };
+};
+
+// --- Chamber look: a track is sharp at birth, then broadens, sags and fades ----------------------
+//
+// One manually-built muon emission (long, straight, thin — the easiest shape to take a clean
+// perpendicular cross-section of) stamped through the real emit() path, read back via
+// readTrackGrid() (raw density, no compositing/lighting in the way) immediately (birth) and again
+// TRACK_LATER_S of simulated time later with no further emissions.
+globalThis.vgTrackShapeSeries = async ({ canary }) => {
+  const gridW = ${TRACK_GRID_W};
+  const gridH = ${TRACK_GRID_H};
+  const canvas = makeCanvas(gridW, gridH);
+  const renderer = createVireGlassRenderer(canvas);
+  renderer.resize(gridW, gridH);
+  const medium = createMediumBackdrop();
+  const dt = ${TRACK_DT};
+  // The canary removes every mechanism that could broaden or fade a stamp: zero turbulence leaves
+  // the backtrace sampling its own exact texel center every frame (no diffusion of its own), and
+  // zero decay leaves the total exactly where it was stamped.
+  const params = canary ? { decay: 0, turbulence: 0, condensateSettleWiggle: 0 } : {};
+  const muon = MEDIUM_TRACK_PRESETS.muon;
+  const minDim = Math.min(gridW, gridH);
+  const emission = { ...muon, source: [0.5, 0.5], angle: 0, seed: 1, depth: 1 };
+
+  function frame(emissions) {
+    renderer.render({
+      density: 1,
+      debug: 'normal',
+      pieces: [],
+      backdrop: medium.pass({ gridWidth: gridW, gridHeight: gridH, dt, params, emissions }),
+    });
+  }
+  frame([emission]);
+  const birth = medium.readTrackGrid();
+  const steps = Math.round(${TRACK_LATER_S} / dt);
+  for (let i = 0; i < steps; i += 1) frame([]);
+  const later = medium.readTrackGrid();
+  medium.destroy();
+
+  // angle=0 (straight along +x from grid-center, see web/medium.ts's emit()) — a vertical scanline
+  // at the track's own midpoint column is exactly perpendicular to it. Sigma is a density-weighted
+  // standard deviation across that scanline: a robust "width" with no threshold to pick by hand.
+  const midCol = Math.min(Math.max(Math.round(gridW / 2 + (muon.lengthFrac * minDim) / 2), 0), gridW - 1);
+  function crossSection(grid) {
+    let mass = 0;
+    let weighted = 0;
+    let total = 0;
+    for (let r = 0; r < gridH; r += 1) mass += grid.data[r * gridW + midCol];
+    for (let r = 0; r < gridH; r += 1) weighted += grid.data[r * gridW + midCol] * r;
+    for (let i = 0; i < grid.data.length; i += 1) total += grid.data[i];
+    const meanRow = mass > 1e-6 ? weighted / mass : gridH / 2;
+    let variance = 0;
+    for (let r = 0; r < gridH; r += 1) {
+      const v = grid.data[r * gridW + midCol];
+      variance += v * (r - meanRow) * (r - meanRow);
+    }
+    const sigma = mass > 1e-6 ? Math.sqrt(variance / mass) : 0;
+    return { sigma, total };
+  }
+  return { birth: crossSection(birth), later: crossSection(later) };
+};
 `;
 
 function centroidTrend(samples) {
@@ -2361,6 +2620,83 @@ async function main() {
     );
   }
 
+  // --- 13. Chamber look: beams are visible — luminance inside a light's cone vs outside it. -------
+  console.log('--- beams: luminance inside a light\'s cone reads brighter than outside it, at the same distance ---');
+  const beamCorrect = await page.evaluate((a) => globalThis.vgBeamSeries(a), { lightOn: true });
+  console.log(
+    `  inside-cone mean ${beamCorrect.insideMean.toFixed(2)} (n=${beamCorrect.insideN}), outside mean ${beamCorrect.outsideMean.toFixed(2)} (n=${beamCorrect.outsideN}), ratio ${beamCorrect.ratio.toFixed(3)}`,
+  );
+  if (!(beamCorrect.ratio >= MIN_BEAM_RATIO)) {
+    failed.push(
+      `beams: inside/outside luma ratio ${beamCorrect.ratio.toFixed(3)} is below the required ${MIN_BEAM_RATIO} — the light's cone does not read as a visible beam`,
+    );
+  }
+
+  console.log('--- canary: the same light at zero intensity must not show a cone-shaped difference ---');
+  const beamCanary = await page.evaluate((a) => globalThis.vgBeamSeries(a), { lightOn: false });
+  console.log(
+    `  inside-cone mean ${beamCanary.insideMean.toFixed(2)}, outside mean ${beamCanary.outsideMean.toFixed(2)}, ratio ${beamCanary.ratio.toFixed(3)}`,
+  );
+  if (!(beamCanary.ratio <= MAX_CANARY_BEAM_RATIO)) {
+    failed.push(
+      `beams canary did not fail (ratio ${beamCanary.ratio.toFixed(3)} with the light off) — this gate is not actually sensitive to the light mechanism`,
+    );
+  }
+
+  // --- 14. Chamber look: mist grain reads as fine droplet texture. --------------------------------
+  console.log('--- grain: high-frequency energy of the calm-state composite is well above a smooth field\'s ---');
+  const grainCorrect = await page.evaluate((a) => globalThis.vgGrainEnergySeries(a), { grainOn: true });
+  console.log(`  high-frequency energy ${grainCorrect.energy.toFixed(3)}`);
+  if (!(grainCorrect.energy >= MIN_GRAIN_ENERGY)) {
+    failed.push(
+      `grain: high-frequency energy ${grainCorrect.energy.toFixed(3)} is below the required ${MIN_GRAIN_ENERGY} — the mist does not read as fine grain`,
+    );
+  }
+
+  console.log('--- canary: grain amount 0 must read close to smooth ---');
+  const grainCanary = await page.evaluate((a) => globalThis.vgGrainEnergySeries(a), { grainOn: false });
+  console.log(`  high-frequency energy ${grainCanary.energy.toFixed(3)}`);
+  if (!(grainCanary.energy <= MAX_CANARY_GRAIN_ENERGY)) {
+    failed.push(
+      `grain canary did not fail (energy ${grainCanary.energy.toFixed(3)} with grain off) — this gate is not actually sensitive to the grain mechanism`,
+    );
+  }
+
+  // --- 15. Chamber look: a track is sharp at birth, then broadens, sags and fades. ----------------
+  console.log('--- track shape: a stamped track broadens and fades over +1.5s -------------------------------');
+  const trackCorrect = await page.evaluate((a) => globalThis.vgTrackShapeSeries(a), { canary: false });
+  const broadenRatio = trackCorrect.birth.sigma > 1e-6 ? trackCorrect.later.sigma / trackCorrect.birth.sigma : Infinity;
+  const fadeRatio = trackCorrect.birth.total > 1e-6 ? trackCorrect.later.total / trackCorrect.birth.total : 1;
+  console.log(
+    `  birth: sigma ${trackCorrect.birth.sigma.toFixed(3)}, total ${trackCorrect.birth.total.toFixed(2)}`,
+  );
+  console.log(
+    `  +${TRACK_LATER_S}s: sigma ${trackCorrect.later.sigma.toFixed(3)}, total ${trackCorrect.later.total.toFixed(2)}`,
+  );
+  console.log(`  broaden ratio ${broadenRatio.toFixed(3)}, fade ratio ${fadeRatio.toFixed(3)}`);
+  if (!(broadenRatio >= MIN_TRACK_BROADEN_RATIO)) {
+    failed.push(
+      `track shape: broaden ratio ${broadenRatio.toFixed(3)} is below the required ${MIN_TRACK_BROADEN_RATIO} — a track does not visibly broaden`,
+    );
+  }
+  if (!(fadeRatio <= MAX_TRACK_FADE_RATIO)) {
+    failed.push(
+      `track shape: fade ratio ${fadeRatio.toFixed(3)} exceeds ${MAX_TRACK_FADE_RATIO} — a track does not visibly fade within ${TRACK_LATER_S}s`,
+    );
+  }
+
+  console.log('--- canary: zero turbulence and zero decay must show almost no broadening or fading ---');
+  const trackCanary = await page.evaluate((a) => globalThis.vgTrackShapeSeries(a), { canary: true });
+  const canaryBroadenRatio =
+    trackCanary.birth.sigma > 1e-6 ? trackCanary.later.sigma / trackCanary.birth.sigma : 1;
+  const canaryFadeRatio = trackCanary.birth.total > 1e-6 ? trackCanary.later.total / trackCanary.birth.total : 1;
+  console.log(`  broaden ratio ${canaryBroadenRatio.toFixed(3)}, fade ratio ${canaryFadeRatio.toFixed(3)}`);
+  if (!(canaryBroadenRatio <= MAX_CANARY_TRACK_BROADEN_RATIO && canaryFadeRatio >= MIN_CANARY_TRACK_FADE_RATIO)) {
+    failed.push(
+      `track shape canary did not fail (broaden ${canaryBroadenRatio.toFixed(3)}, fade ${canaryFadeRatio.toFixed(3)}) — this gate is not actually sensitive to turbulence/decay`,
+    );
+  }
+
   await browser.close();
 
   if (failed.length) {
@@ -2369,7 +2705,7 @@ async function main() {
     return;
   }
   console.log(
-    "check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), the phase wrap is seamless (canary caught), the far depth plane reads slower and lower-contrast than the near one (both canaries caught), the far plane decorrelates from the near one at 128x72 (canary caught), the bottom boost is a steady-state property and vapor drift is a valid motion cue (both canaries caught), the depth composite's cost over the pre-depth one is reported, and the composited backdrop at the product's own default size reads as isotropic gas, not a lattice of straight lines (canary caught)",
+    "check-medium: gravity settles toward the canvas bottom (canary caught), water is conserved, no per-frame flicker, a resize resamples instead of reseeding (canary caught), the phase wrap is seamless (canary caught), the far depth plane reads slower and lower-contrast than the near one (both canaries caught), the far plane decorrelates from the near one at 128x72 (canary caught), the bottom boost is a steady-state property and vapor drift is a valid motion cue (both canaries caught), the depth composite's cost over the pre-depth one is reported, the composited backdrop at the product's own default size reads as isotropic gas, not a lattice of straight lines (canary caught), a light's cone reads as a visible beam (canary caught), the calm state reads as fine mist grain (canary caught), and a stamped track broadens and fades within +1.5s (canary caught)",
   );
 }
 

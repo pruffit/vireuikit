@@ -10,6 +10,10 @@ import { VG_VALUE_NOISE } from './noise';
 // u_source) is wider, dimmer and has settled downward — those droplets had time to grow earlier.
 // The path's noise-driven spread also grows toward the tail and fades toward the head, so the
 // thread stays straight and crisp at its leading end.
+//
+// Stamped equally into r/g/b (no per-track color mask): a track carries no color of its own, it is
+// lit the same way as the mist around it (`MEDIUM_COMPOSITE_SHADER`) — species/lights own hue now,
+// not which random channel a track happened to land on.
 export const MEDIUM_EMIT_SHADER = `
 uniform float2 u_source;
 uniform float2 u_head;
@@ -21,7 +25,6 @@ uniform float  u_settle;
 uniform float  u_tailDim;
 uniform float  u_intensity;
 uniform float  u_seed;
-uniform float3 u_channelMask;
 
 ${VG_VALUE_NOISE}
 
@@ -44,7 +47,7 @@ half4 main(float2 xy) {
     best = max(best, v);
   }
 
-  float3 dye = u_channelMask * (best * u_intensity);
+  float3 dye = float3(best * u_intensity);
   return half4(half3(dye), half(1.0));
 }
 `;

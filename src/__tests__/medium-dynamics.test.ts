@@ -42,8 +42,8 @@ describe('createMediumDynamics: emission scheduling', () => {
   it('is deterministic: two independent runs with the same inputs give the same result', () => {
     const a = run(600);
     const b = run(600);
-    expect(a.emissions.map((e) => [e.seed, e.angle, e.channel])).toEqual(
-      b.emissions.map((e) => [e.seed, e.angle, e.channel]),
+    expect(a.emissions.map((e) => [e.seed, e.angle, e.depth])).toEqual(
+      b.emissions.map((e) => [e.seed, e.angle, e.depth]),
     );
   });
 
@@ -72,12 +72,25 @@ describe('createMediumDynamics: emission scheduling', () => {
     }
   });
 
-  it('while playing, only emits alpha/beta from the fixed cover-art point', () => {
+  it('while playing, only emits alpha starbursts from the fixed cover-art point', () => {
     const { emissions } = run(1200);
     expect(emissions.length).toBeGreaterThan(0);
     for (const e of emissions) {
       expect(e.source).toEqual(SOURCE);
+      // Every playing-state emission is a ray of the alpha preset's own shape (length is untouched
+      // by depth — only width/intensity are, see applyTrackDepth — but IS scaled per-ray, so this
+      // checks the ceiling rather than exact equality).
+      expect(e.raggedFrac).toBe(MEDIUM_TRACK_PRESETS.alpha.raggedFrac);
+      expect(e.lengthFrac).toBeLessThanOrEqual(MEDIUM_TRACK_PRESETS.alpha.lengthFrac);
     }
+  });
+
+  it('a single eligible event stamps a starburst (many rays at once), not one ray', () => {
+    // 20s at 128 BPM is ~10 emission-cadence bars (MEDIUM_EMISSION_BEATS=4); even with the
+    // eligibility gate well under half of those firing, a one-ray-per-event scheme could not clear
+    // this floor — only a multi-ray burst per event can.
+    const { emissions } = run(1200);
+    expect(emissions.length).toBeGreaterThan(20);
   });
 
   it('paused/stopped never produce new tracks', () => {
@@ -87,27 +100,38 @@ describe('createMediumDynamics: emission scheduling', () => {
     }
   });
 
-  it('idle produces rare natural tracks from a random point, not from cover art', () => {
+  it('idle produces rare background-radiation tracks (electron/muon) from a random point, never alpha', () => {
     const dyn = createMediumDynamics();
     const emissions: VireUIKitMediumEmission[] = [];
     let position = 0;
-    // ~40s — comfortably longer than the average interval between natural tracks.
-    for (let i = 0; i < 2400; i += 1) {
+    // The idle branch never reads bpm/positionSeconds, only accumulated dt — a coarse 1s step
+    // simulates ~50 minutes (well over 80 average intervals) in 3000 iterations instead of 180000,
+    // enough occurrences that both background kinds are certain to show up at least once.
+    const IDLE_DT = 1;
+    for (let i = 0; i < 3000; i += 1) {
       const frame = dyn.step({
         state: 'idle',
         bpm: 128,
         amplitude: 0,
         sourcePoint: SOURCE,
-        dt: DT,
+        dt: IDLE_DT,
         positionSeconds: position,
       });
       emissions.push(...frame.emissions);
-      position += DT;
+      position += IDLE_DT;
     }
     expect(emissions.length).toBeGreaterThan(0);
     for (const e of emissions) {
       expect(e.source).not.toEqual(SOURCE);
+      // Never the alpha shape (length is untouched by depth, so the preset's own value identifies
+      // it): background radiation is electron or muon, the driven decay source is the only alpha.
+      expect(e.lengthFrac).not.toBe(MEDIUM_TRACK_PRESETS.alpha.lengthFrac);
     }
+    const electronCount = emissions.filter((e) => e.lengthFrac === MEDIUM_TRACK_PRESETS.electron.lengthFrac).length;
+    const muonCount = emissions.filter((e) => e.lengthFrac === MEDIUM_TRACK_PRESETS.muon.lengthFrac).length;
+    expect(electronCount).toBeGreaterThan(0);
+    expect(muonCount).toBeGreaterThan(0);
+    expect(electronCount + muonCount).toBe(emissions.length);
   });
 });
 
@@ -128,13 +152,20 @@ describe('createMediumDynamics: turbulence', () => {
 });
 
 describe('track presets', () => {
-  it('alpha is thick, short and straight; beta is thin, long and ragged', () => {
-    const alpha = MEDIUM_TRACK_PRESETS.alpha;
-    const beta = MEDIUM_TRACK_PRESETS.beta;
+  it('alpha is thick, short and straight; electron is thin, longer and ragged', () => {
+    const { alpha, electron } = MEDIUM_TRACK_PRESETS;
     expect(alpha.raggedFrac).toBe(0);
-    expect(beta.raggedFrac).toBeGreaterThan(0);
-    expect(beta.lengthFrac).toBeGreaterThan(alpha.lengthFrac);
-    expect(alpha.tailWidthFrac).toBeGreaterThan(beta.tailWidthFrac);
+    expect(electron.raggedFrac).toBeGreaterThan(0);
+    expect(electron.lengthFrac).toBeGreaterThan(alpha.lengthFrac);
+    expect(alpha.tailWidthFrac).toBeGreaterThan(electron.tailWidthFrac);
+  });
+
+  it('muon is long, straight and thin — a cosmic ray crossing the whole chamber', () => {
+    const { alpha, electron, muon } = MEDIUM_TRACK_PRESETS;
+    expect(muon.raggedFrac).toBe(0);
+    expect(muon.lengthFrac).toBeGreaterThan(alpha.lengthFrac);
+    expect(muon.lengthFrac).toBeGreaterThan(electron.lengthFrac);
+    expect(muon.headWidthFrac).toBeLessThan(alpha.headWidthFrac);
   });
 
   it('every preset has a dimmer, wider tail than head — a sharp head, a settled tail', () => {
@@ -145,10 +176,10 @@ describe('track presets', () => {
     }
   });
 
-  it('natural is dimmer than alpha and beta — a solitary background track, not a full one', () => {
-    const { alpha, beta, natural } = MEDIUM_TRACK_PRESETS;
-    expect(natural.intensity).toBeLessThan(alpha.intensity);
-    expect(natural.intensity).toBeLessThan(beta.intensity);
+  it('background radiation (electron, muon) is dimmer than an alpha burst ray — no driven source', () => {
+    const { alpha, electron, muon } = MEDIUM_TRACK_PRESETS;
+    expect(electron.intensity).toBeLessThan(alpha.intensity);
+    expect(muon.intensity).toBeLessThan(alpha.intensity);
   });
 });
 
@@ -161,16 +192,6 @@ describe('track depth: which plane a track lives on', () => {
       expect(e.depth).toBeLessThanOrEqual(1);
     }
     expect(a.emissions.map((e) => e.depth)).toEqual(b.emissions.map((e) => e.depth));
-  });
-
-  it('depth is decorrelated from channel and angle: not every far track shares a channel', () => {
-    // Regression guard for a shared-multiplier mistake: if depth's hash reused the channel or angle
-    // multiplier, every emission with the same depth bucket would also share a channel or angle.
-    const { emissions } = run(2400);
-    const farRed = emissions.filter((e) => e.depth < 0.5 && e.channel[0] === 1);
-    const farOther = emissions.filter((e) => e.depth < 0.5 && e.channel[0] !== 1);
-    expect(farOther.length).toBeGreaterThan(0);
-    expect(farRed.length).toBeGreaterThan(0);
   });
 
   it('applyTrackDepth: a far track (depth 0) is thinner and dimmer than a near one (depth 1), same preset', () => {
@@ -186,8 +207,13 @@ describe('track depth: which plane a track lives on', () => {
     expect(far.raggedFrac).toBe(preset.raggedFrac);
   });
 
-  it('applyTrackDepth: depth 1 reproduces the preset exactly (both ranges top out at 1)', () => {
-    const preset = MEDIUM_TRACK_PRESETS.beta;
-    expect(applyTrackDepth(preset, 1)).toEqual(preset);
+  it('applyTrackDepth: depth 1 is slightly LARGER than the base preset — near depth of field, not merely full-size', () => {
+    const preset = MEDIUM_TRACK_PRESETS.electron;
+    const near = applyTrackDepth(preset, 1);
+    expect(near.headWidthFrac).toBeGreaterThan(preset.headWidthFrac);
+    expect(near.tailWidthFrac).toBeGreaterThan(preset.tailWidthFrac);
+    // Intensity's own range still tops out at 1 — only width (and, by construction, the same
+    // Gaussian stamp's edge softness) grows for a near track, not brightness.
+    expect(near.intensity).toBe(preset.intensity);
   });
 });
