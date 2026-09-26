@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 The medium now reads as a real cloud chamber — a dark volume lit by static lamps, with sharp
 condensation tracks — instead of colored smoke clouds with no visible light source.
