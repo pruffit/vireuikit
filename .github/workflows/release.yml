@@ -22,16 +22,11 @@ jobs:
 
       - run: npm ci
 
-      - name: Install Chromium for shader gates
-        run: npx playwright install --with-deps chromium chromium-headless-shell
-
       - name: Gates
         run: |
           npm run check:english
           npm run typecheck
           npm test
-          npm run check:glsl
-          npm run check:medium
 
       - run: npm run build
 

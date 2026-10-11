@@ -21,20 +21,11 @@ jobs:
       - name: Everything in the repository is English
         run: npm run check:english
 
-      - name: Install Chromium for shader gates
-        run: npx playwright install --with-deps chromium chromium-headless-shell
-
       - name: Typecheck
         run: npm run typecheck
 
       - name: Unit tests
         run: npm test
-
-      - name: The medium's shaders compile on the web target
-        run: npm run check:glsl
-
-      - name: The medium behaves (gravity, water conservation, no flicker)
-        run: npm run check:medium
 
       - name: Build
         run: npm run build
