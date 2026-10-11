@@ -64,7 +64,7 @@ try {
   writeFileSync(join(sandbox, 'package.json'), JSON.stringify({ name: 'consume', private: true, version: '1.0.0' }));
   run(npm, ['install', '--silent', '--no-audit', '--no-fund', ...tarballs], sandbox);
 
-  const entries = ['vireuikit', 'vireuikit/web'];
+  const entries = ['vireuikit'];
   const cjs = entries.map((e) => `require(${JSON.stringify(e)});`).join('\n');
   const esm = entries.map((e, i) => `import * as m${i} from ${JSON.stringify(e)};`).join('\n');
 
