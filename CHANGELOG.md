@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+**Breaking.** The GPU backdrop is removed: `createMediumBackdrop`, the `vireuikit/web` entry point,
+the medium model and everything that came with it — its params and defaults, track presets, light
+rig (`lightRigForCover`/`lightRigForCharacter`), dynamics and track layer. The package is now the
+kit only: atom states and the capsule-to-target growth morph. The cloud-chamber backdrop was dropped
+as a design direction.
+
 ## 0.4.0
 
 The medium now reads as a real cloud chamber — a dark volume lit by static lamps, with sharp
