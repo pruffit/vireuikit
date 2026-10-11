@@ -6,7 +6,7 @@
 the medium model and everything that came with it — its params and defaults, track presets, light
 rig (`lightRigForCover`/`lightRigForCharacter`), dynamics and track layer. The package is now the
 kit only: atom states and the capsule-to-target growth morph. The cloud-chamber backdrop was dropped
-as a design direction.
+as a design direction; stay on 0.4.x if you depend on it.
 
 ## 0.4.0
 
