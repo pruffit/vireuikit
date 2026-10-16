@@ -35,3 +35,8 @@ jobs:
 
       - name: Every name the docs tell you to import exists
         run: npm run check:readme
+
+      - name: Browser behaviour tests on the lab
+        run: |
+          npx playwright install --with-deps chromium
+          npm run check:lab

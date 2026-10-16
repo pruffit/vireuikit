@@ -64,17 +64,17 @@ try {
   writeFileSync(join(sandbox, 'package.json'), JSON.stringify({ name: 'consume', private: true, version: '1.0.0' }));
   run(npm, ['install', '--silent', '--no-audit', '--no-fund', ...tarballs], sandbox);
 
-  const entries = ['vireuikit'];
+  const entries = ['vireuikit', 'vireuikit/web'];
   const cjs = entries.map((e) => `require(${JSON.stringify(e)});`).join('\n');
   const esm = entries.map((e, i) => `import * as m${i} from ${JSON.stringify(e)};`).join('\n');
 
   writeFileSync(
     join(sandbox, 'cjs.cjs'),
-    `${cjs}\nconst { ATOM_AT_REST } = require('vireuikit');\nif (typeof ATOM_AT_REST.pressed !== 'number') throw new Error('the atom model did not load');\nconsole.log('cjs ok');`,
+    `${cjs}\nconst { ATOM_AT_REST } = require('vireuikit');\nif (typeof ATOM_AT_REST.pressed !== 'number') throw new Error('the atom model did not load');\nif (typeof require('vireuikit/web').defineVireElements !== 'function') throw new Error('the web entry did not load');\nconsole.log('cjs ok');`,
   );
   writeFileSync(
     join(sandbox, 'esm.mjs'),
-    `${esm}\nimport { ATOM_AT_REST } from 'vireuikit';\nif (typeof ATOM_AT_REST.pressed !== 'number') throw new Error('the atom model did not load');\nconsole.log('esm ok');`,
+    `${esm}\nimport { ATOM_AT_REST } from 'vireuikit';\nif (typeof ATOM_AT_REST.pressed !== 'number') throw new Error('the atom model did not load');\nimport { defineVireElements } from 'vireuikit/web';\nif (typeof defineVireElements !== 'function') throw new Error('the web entry did not load');\nconsole.log('esm ok');`,
   );
 
   for (const [kind, file] of [['CommonJS', 'cjs.cjs'], ['ESM', 'esm.mjs']]) {
