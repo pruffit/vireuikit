@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+- **Foundation.** `sizes.ts` (button and icon button sizes in dp, nested radius, hit slop), pure behaviour
+  state machines (press, hover, focus, disabled) with spring visuals, and accessibility modes
+  (reduce transparency, increase contrast, reduce motion) with a system-or-override resolver.
+- **`vireuikit/web`.** `<vire-button>` and `<vire-icon-button>` upgrade a native button in place (waiting for
+  it if the page is still being parsed), attach glass through `vireglass/dom` on demand (opt-in with the
+  `glass` attribute), keep a 44 dp hit area on coarse pointers, and clean up on disconnect. The entry is safe
+  to import on a server; `defineVireElements({ nonce })` supports a strict CSP.
+- **Lab and gates.** `npm run lab` (Vite) with generated backdrops and a reference pane fed from
+  `VIREUIKIT_REFERENCE_DIR`; `npm run check:lab` runs the Playwright behaviour tests (in CI),
+  `npm run check:lab:visual` the local screenshot set. `npm run typecheck` also checks `src/kit` without a DOM lib.
+- `docs/design.md` and `docs/acceptance.md`.
+
 ## 0.5.0
 
 **Breaking.** The GPU backdrop is removed: `createMediumBackdrop`, the `vireuikit/web` entry point,
