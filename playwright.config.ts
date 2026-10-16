@@ -12,7 +12,8 @@ export default defineConfig({
     deviceScaleFactor: 1,
     colorScheme: 'light',
   },
-  expect: { toHaveScreenshot: { maxDiffPixelRatio: 0.003, animations: 'disabled' } },
+  // The default colour threshold (0.2) let a whole resting body through; 0.02 sees it, and the render is stable at it.
+  expect: { toHaveScreenshot: { threshold: 0.02, maxDiffPixelRatio: 0.0005, animations: 'disabled' } },
   webServer: {
     command: 'npm run lab',
     url: 'http://127.0.0.1:5179',

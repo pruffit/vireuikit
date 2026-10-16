@@ -1,5 +1,5 @@
 // Backdrops are generated, so the repository carries no third-party images.
-export const BACKDROPS = ['light', 'dark', 'text', 'busy', 'photo'] as const;
+export const BACKDROPS = ['light', 'dark', 'text', 'busy', 'photo', 'mid'] as const;
 export type Backdrop = (typeof BACKDROPS)[number];
 
 const hash = (x: number, y: number): number => {
@@ -87,6 +87,7 @@ const CSS = `
 [data-backdrop='light'] { background: radial-gradient(circle at 18% 30%, #fbe3b5 0, transparent 46%), radial-gradient(circle at 82% 70%, #b9d4f4 0, transparent 50%), #f2f2f4; }
 [data-backdrop='dark'] { background: radial-gradient(circle at 20% 70%, #4a2e63 0, transparent 48%), radial-gradient(circle at 80% 25%, #1f4a5e 0, transparent 52%), #121216; }
 [data-backdrop='text'] { background: #fbfbf8; }
+[data-backdrop='mid'] { background: #86868c; }
 [data-backdrop='photo'] { color-scheme: dark; color: #fff; }
 [data-backdrop='busy'] { background: #eceef2; }
 .bd-layer { position: absolute; inset: 0; z-index: -1; overflow: clip; }

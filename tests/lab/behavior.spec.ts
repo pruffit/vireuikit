@@ -1,5 +1,8 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { centerOf, openCase, press, pressFirstFrame, scaleOf } from './helpers';
+import type { Footprint } from '../../lab/footprint';
+import { atomRimOpacity } from '../../src/kit/atom';
+import { measureImage, type Measure } from './measure';
 
 const log = (page: Page) =>
   page.locator('#log').evaluate((el) => (el.textContent ?? '').split('\n').filter(Boolean));
@@ -236,6 +239,36 @@ test.describe('glass and its absence', () => {
     await expect.poll(filters).toBe(0);
   });
 
+  test('removing the element leaves none of its own custom properties behind', async ({ page }) => {
+    await openCase(page, 'view=sandbox&glass=1');
+    const left = await page.evaluate(() => {
+      const hosts = [...document.querySelectorAll<HTMLElement>('[data-vk]')];
+      hosts.forEach((el) => el.remove());
+      return hosts.flatMap((el) => [...el.style].filter((name) => name.startsWith('--vk-')));
+    });
+    expect(left).toEqual([]);
+  });
+
+  // The kit reads the lens's probe as `r g b` in 0..1; if that format changes, the rim must fail here, not fall back quietly.
+  test('the rim strength follows the probe the lens publishes', async ({ page }) => {
+    const read = async (backdrop: string) => {
+      await openCase(page, `atom=button&state=rest&backdrop=${backdrop}&glass=1`);
+      return page.locator('.cell[data-state=rest] vire-button').evaluate((host) => ({
+        tint: host.querySelector('button')!.style.getPropertyValue('--vireglass-tint'),
+        rim: Number(host.style.getPropertyValue('--vk-rim')),
+      }));
+    };
+    const dark = await read('dark');
+    const light = await read('light');
+    for (const { tint, rim } of [dark, light]) {
+      expect(tint).toMatch(/^[\d.]+ [\d.]+ [\d.]+$/);
+      const [r, g, b] = tint.split(' ').map(Number) as [number, number, number];
+      expect(Math.max(r, g, b)).toBeLessThanOrEqual(1);
+      expect(rim).toBeCloseTo(atomRimOpacity(0.2126 * r + 0.7152 * g + 0.0722 * b), 3);
+    }
+    expect(light.rim).toBeGreaterThan(dark.rim + 0.2);
+  });
+
   test('connecting again after removal upgrades it once more', async ({ page }) => {
     await openCase(page, 'view=sandbox&glass=1');
     await page.evaluate(() => {
@@ -253,14 +286,37 @@ test.describe('glass and its absence', () => {
 
 for (const atom of ATOMS) {
   test.describe(`${atom.name}: accessibility modes`, () => {
-    test('reduced transparency drops the lens and keeps a body', async ({ page }) => {
+    test('reduced transparency keeps the lens and frosts it', async ({ page }) => {
+      const read = (host: Locator) =>
+        host.evaluate((el) => ({
+          alpha: Number(el.style.getPropertyValue('--vk-body-alpha')),
+          blur: Number(document.querySelector('svg[data-vireglass-filters] feGaussianBlur')?.getAttribute('stdDeviation')),
+        }));
+      await openCase(page, 'view=sandbox&glass=1&rt=0');
+      const clear = await read(page.locator(atom.id));
       await openCase(page, 'view=sandbox&glass=1&rt=1');
       const host = page.locator(atom.id);
-      await expect(host).toHaveAttribute('data-surface', 'frosted');
-      await expect(host).toHaveAttribute('data-glass', 'off');
-      expect(await host.locator('button').evaluate((el) => el.style.backdropFilter)).toBe('');
+      await expect(host).toHaveAttribute('data-surface', 'glass');
+      await expect(host).toHaveAttribute('data-glass', 'on');
+      await expect(host).toHaveAttribute('data-frost', '');
+      expect(await host.locator('button').evaluate((el) => el.style.backdropFilter)).toContain('url(');
+      const frosted = await read(host);
+      expect(frosted.alpha).toBeGreaterThan(clear.alpha * 2);
+      expect(frosted.blur).toBeGreaterThan(clear.blur * 2);
       await host.locator('button').click();
       expect(await log(page)).toEqual([atom.click]);
+    });
+
+    // The frosted body is lighter than the backdrop, so the ink follows the body, not the probe.
+    test('reduced transparency keeps the ink readable against the lifted body', async ({ page }) => {
+      const inkLightness = async () => {
+        const color = await page.locator(atom.id).locator('button').evaluate((el) => getComputedStyle(el).color);
+        return color.startsWith('oklab') ? Number(/oklab\(([\d.]+)/.exec(color)![1]) : Number(/\d+/.exec(color)![0]) / 255;
+      };
+      await openCase(page, 'view=sandbox&backdrop=mid&glass=1&rt=0');
+      expect(await inkLightness()).toBeGreaterThan(0.8);
+      await openCase(page, 'view=sandbox&backdrop=mid&glass=1&rt=1');
+      expect(await inkLightness()).toBeLessThan(0.2);
     });
 
     test('increased contrast adds a border', async ({ page }) => {
@@ -433,16 +489,84 @@ test.describe('a lens that fails to attach', () => {
     await page.waitForFunction(() => document.documentElement.dataset.ready === '1');
     const play = page.locator('#play');
     await expect(play).toHaveAttribute('data-surface', 'frosted');
+    const attempts = () => page.evaluate(() => (window as unknown as { __attempts?: number }).__attempts ?? 0);
+    await expect.poll(attempts).toBeGreaterThan(0);
+    let seen = await attempts();
 
     await page.evaluate(() => window.__lab.setA11yOverride({ reduceTransparency: false }));
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __attempts?: number }).__attempts ?? 0)).toBe(5);
+    await expect.poll(attempts).toBeGreaterThan(seen);
+    seen = await attempts();
     await expect(play).toHaveAttribute('data-glass', 'off');
     await expect(play).toHaveAttribute('data-surface', 'plain');
 
     await page.evaluate(() => window.__lab.setA11yOverride({ increaseContrast: true }));
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __attempts?: number }).__attempts ?? 0)).toBe(10);
+    await expect.poll(attempts).toBeGreaterThan(seen);
     await play.locator('button').click();
     expect(await log(page)).toEqual(['click:play']);
     expect(errors).toEqual([]);
+  });
+});
+
+// Bounds come from the same measurement on the reference frames (docs/acceptance.md, "Resting body"), with a margin.
+test.describe('resting body and rim', () => {
+  const DPR = 2;
+  test.use({ deviceScaleFactor: DPR });
+
+  const BODY_L = [0.02, 0.14] as const;
+  const RIM_OVER_SURROUND = [0.1, 0.45] as const;
+  const CARRIED_CHROMA = 0.04;
+
+  const separates = (m: Measure) =>
+    m.dL >= BODY_L[0] &&
+    m.dL <= BODY_L[1] &&
+    m.rimOverSurround >= RIM_OVER_SURROUND[0] &&
+    m.rimOverSurround <= RIM_OVER_SURROUND[1] &&
+    Math.abs(m.dC) <= CARRIED_CHROMA;
+
+  async function measureRest(page: Page, atom: 'button' | 'iconButton', backdrop: string, css = ''): Promise<Measure> {
+    await openCase(page, `atom=${atom}&state=rest&size=touch&backdrop=${backdrop}&glass=1`);
+    if (css) await page.addStyleTag({ content: css });
+    const stage = page.locator('#stage');
+    const box = (await stage.boundingBox())!;
+    const body = (await page.locator('.cell[data-state=rest] button').boundingBox())!;
+    const at: Footprint = {
+      cx: (body.x - box.x + body.width / 2) * DPR,
+      cy: (body.y - box.y + body.height / 2) * DPR,
+      hw: (atom === 'iconButton' ? body.height : body.width) * (DPR / 2),
+      hh: body.height * (DPR / 2),
+    };
+    return measureImage(page, await stage.screenshot(), 'png', at);
+  }
+
+  // Only dark and photo have headroom; over near-white the body cannot get much lighter than its surround.
+  for (const atom of ['button', 'iconButton'] as const) {
+    for (const backdrop of ['dark', 'photo']) {
+      test(`${atom} on ${backdrop} stands off its surround and carries its colour`, async ({ page }) => {
+        const m = await measureRest(page, atom, backdrop);
+        expect(m.dL).toBeGreaterThanOrEqual(BODY_L[0]);
+        expect(m.dL).toBeLessThanOrEqual(BODY_L[1]);
+        expect(m.rimOverSurround).toBeGreaterThanOrEqual(RIM_OVER_SURROUND[0]);
+        expect(m.rimOverSurround).toBeLessThanOrEqual(RIM_OVER_SURROUND[1]);
+        expect(Math.abs(m.dC)).toBeLessThanOrEqual(CARRIED_CHROMA);
+      });
+    }
+
+    test(`${atom} is lighter than the light backdrop around it`, async ({ page }) => {
+      expect((await measureRest(page, atom, 'light')).dL).toBeGreaterThan(0.01);
+    });
+  }
+
+  // The old look (no body, rim at full strength) has to fail the gate.
+  test('canary: a clear body fails the gate', async ({ page }) => {
+    expect(separates(await measureRest(page, 'button', 'dark'))).toBe(true);
+    const m = await measureRest(page, 'button', 'dark', ':is(vire-button,vire-icon-button)[data-vk]>button{background:none !important}');
+    expect(separates(m)).toBe(false);
+    expect(m.dL).toBeLessThan(BODY_L[0]);
+  });
+
+  test('canary: a rim at full strength fails the gate', async ({ page }) => {
+    const m = await measureRest(page, 'button', 'dark', ':is(vire-button,vire-icon-button)[data-vk]>button::after{opacity:1 !important}');
+    expect(separates(m)).toBe(false);
+    expect(m.rimOverSurround).toBeGreaterThan(RIM_OVER_SURROUND[1]);
   });
 });

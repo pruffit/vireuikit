@@ -6,5 +6,7 @@ dist/
 Thumbs.db
 .idea/
 .vscode/
+/*.png
+/*.measure.json
 test-results/
 playwright-report/

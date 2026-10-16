@@ -3,10 +3,12 @@ import {
   ATOM_AT_REST,
   atomAtRest,
   atomLift,
+  atomBody,
   atomMaterial,
+  atomRimOpacity,
   type VireUIKitAtomKind,
 } from '../kit/atom';
-import { VIREGLASS_CONTROL_MATERIAL } from 'vireglass';
+import { VIREGLASS_CONTROL_MATERIAL, applyAccessibility, resolveOptics } from 'vireglass';
 
 const KINDS: readonly VireUIKitAtomKind[] = [
   'button',
@@ -76,5 +78,62 @@ describe('lift into the glass', () => {
       expect(lift).toBeGreaterThanOrEqual(0);
       expect(lift).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+describe('the body', () => {
+  const body = (state: Partial<typeof ATOM_AT_REST> = {}, frost = false) =>
+    atomBody(VIREGLASS_CONTROL_MATERIAL, { ...ATOM_AT_REST, ...state }, frost);
+
+  it('rest already carries a body that lifts the backdrop', () => {
+    const rest = body();
+    expect(rest.alpha).toBeGreaterThan(0.2);
+    expect(rest.lift).toBeGreaterThanOrEqual(0.1);
+  });
+
+  it('the pressed end is the milky tint the kit already drew', () => {
+    expect(body({ pressed: 1 })).toEqual({ alpha: 0.34, white: 0.35, lift: 0 });
+  });
+
+  it('hover sits between rest and press, and press past one is clamped', () => {
+    const [rest, hover, press] = [body(), body({ hovered: 1 }), body({ pressed: 1 })];
+    expect(hover.lift).toBeLessThan(rest.lift);
+    expect(hover.lift).toBeGreaterThan(press.lift);
+    expect(body({ pressed: 3 })).toEqual(press);
+  });
+
+  it('disabled stops asserting itself', () => {
+    expect(body({ disabled: true }).alpha).toBeLessThan(body().alpha / 2);
+    expect(body({ disabled: true, pressed: 1 })).toEqual(body({ disabled: true }));
+  });
+
+  it('reduced transparency raises the body to the density the glass itself asks for', () => {
+    const asked = applyAccessibility(resolveOptics(VIREGLASS_CONTROL_MATERIAL), {
+      reduceTransparency: true,
+      increaseContrast: false,
+      reduceMotion: false,
+    }).bodyDensity;
+    expect(body({}, true).alpha).toBe(asked);
+    expect(body({}, true).alpha).toBeGreaterThan(0.7);
+    expect(body({}, true).lift).toBeGreaterThan(body().lift);
+  });
+});
+
+describe('the rim light', () => {
+  it('grows with the lightness behind it and stays bounded', () => {
+    let last = 0;
+    for (let luma = 0; luma <= 1; luma += 0.05) {
+      const v = atomRimOpacity(luma);
+      expect(v).toBeGreaterThanOrEqual(last);
+      expect(v).toBeGreaterThan(0.2);
+      expect(v).toBeLessThanOrEqual(0.7);
+      last = v;
+    }
+    expect(atomRimOpacity(0.9)).toBeGreaterThan(atomRimOpacity(0.15) * 2);
+  });
+
+  it('a pressed control shows the full highlight', () => {
+    expect(atomRimOpacity(0.15, { ...ATOM_AT_REST, pressed: 1 })).toBe(1);
+    expect(atomRimOpacity(0.15, { ...ATOM_AT_REST, hovered: 1 })).toBeGreaterThan(atomRimOpacity(0.15));
   });
 });

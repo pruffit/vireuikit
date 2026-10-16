@@ -1,7 +1,7 @@
 import { VIREGLASS_CONTROL_MATERIAL, type VireGlassMaterial } from 'vireglass';
 import type { GlassMorph } from 'vireglass/dom';
 import { presentationFor, sameA11y, type A11yMode, type A11yOverride, type Presentation } from '../kit/a11y';
-import { atomMaterial, type VireUIKitAtomKind } from '../kit/atom';
+import { atomBody, atomRimOpacity, atomMaterial, type VireUIKitAtomKind } from '../kit/atom';
 import {
   CONTROL_IDLE,
   POINTER_INPUT,
@@ -80,6 +80,8 @@ export function createControlElementClass(
     #glassKey = '';
     #glassBroken = false;
     #lastMaterialKey = '';
+    #backdropLuma = 0.5;
+    #rim = '';
     #frame = 0;
     #lastFrame = 0;
     #cleanups: (() => void)[] = [];
@@ -119,7 +121,10 @@ export function createControlElementClass(
       this.#control = null;
       this.#state = CONTROL_IDLE;
       this.#suppressClick = false;
-      for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-size']) this.removeAttribute(name);
+      for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-size']) this.removeAttribute(name);
+      for (const name of Array.from(this.style)) if (name.startsWith('--vk-')) this.style.removeProperty(name);
+      this.#backdropLuma = 0.5;
+      this.#rim = '';
       this.#presentation = null;
       this.#mode = null;
     }
@@ -359,7 +364,7 @@ export function createControlElementClass(
       if (!afterFailure) this.#glassBroken = false;
       const mode = effectiveA11y(this.#own);
       let next = presentationFor(mode, this.#glassMode() !== 'off');
-      if (this.#glassBroken && next.glass) next = { ...next, glass: false, surface: 'plain' };
+      if (this.#glassBroken && next.glass) next = { ...next, glass: false, surface: next.frost ? 'frosted' : 'plain' };
       const changed =
         force || !this.#mode || !sameA11y(this.#mode, mode) || next.surface !== this.#presentation?.surface;
       this.#mode = mode;
@@ -367,6 +372,7 @@ export function createControlElementClass(
       this.#applySize();
       this.setAttribute('data-surface', next.surface);
       this.toggleAttribute('data-contrast', next.contrastBorder);
+      this.toggleAttribute('data-frost', next.frost);
       this.setAttribute('data-glass', next.glass ? 'on' : 'off');
       if (changed) this.#reattachGlass(mode);
       if (this.#forced()) this.#applyForced();
@@ -419,6 +425,7 @@ export function createControlElementClass(
           this.#glass = session;
           if (this.#morph) session.setMorph(this.#morph);
           this.#pushMaterial(true);
+          this.#syncRim();
           this.dispatchEvent(new CustomEvent('vire-glass-ready'));
         })
         .catch(() => {
@@ -441,6 +448,19 @@ export function createControlElementClass(
       const material: VireGlassMaterial = atomMaterial(VIREGLASS_CONTROL_MATERIAL, kind, quantized);
       glass.setMaterial(material);
       if (this.#glassMode() === 'touch' && this.#forced()) glass.setAppear(quantized.pressed);
+    }
+
+    // The lens publishes the probe as `r g b` in 0..1 (gamma-encoded sRGB, so this luma is too).
+    #syncRim(): void {
+      const tint = this.#control?.style.getPropertyValue('--vireglass-tint').trim().split(/\s+/).map(Number);
+      if (tint?.length === 3 && !tint.some(Number.isNaN)) {
+        this.#backdropLuma = 0.2126 * tint[0]! + 0.7152 * tint[1]! + 0.0722 * tint[2]!;
+      }
+      const state = visualAtomState(this.#visual, this.#state);
+      const rim = atomRimOpacity(this.#backdropLuma, state).toFixed(3);
+      if (rim === this.#rim) return;
+      this.#rim = rim;
+      this.style.setProperty('--vk-rim', rim);
     }
 
     #render(immediate = false): void {
@@ -466,11 +486,16 @@ export function createControlElementClass(
       const set = (name: string, value: number) => this.style.setProperty(name, value.toFixed(3));
       set('--vk-press', v.pressed.x);
       set('--vk-hover', v.hovered.x);
+      const body = atomBody(VIREGLASS_CONTROL_MATERIAL, visualAtomState(v, this.#state), this.#presentation?.frost ?? false);
+      set('--vk-body-alpha', body.alpha);
+      set('--vk-body-white', body.white);
+      set('--vk-body-lift', body.lift);
       this.toggleAttribute('data-pressed', this.#state.press.by !== null);
       this.toggleAttribute('data-hovered', this.#state.hovered);
       this.toggleAttribute('data-focus', this.#state.focused);
       this.toggleAttribute('data-disabled', this.#state.disabled);
       this.#pushMaterial();
+      if (this.#glass) this.#syncRim();
     }
   };
 }

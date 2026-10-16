@@ -21,11 +21,13 @@ export function resolveA11y(system: A11yMode, override: A11yOverride = {}): A11y
   };
 }
 
-/** `plain`: no glass was asked for. `frosted`: the opaque stand-in under reduced transparency. */
+/** `plain`: no glass was asked for. `frosted`: the stand-in when glass under reduced transparency cannot attach. */
 export type Surface = 'plain' | 'frosted' | 'glass';
 
 export type Presentation = {
   glass: boolean;
+  /** Reduced transparency: the glass stays and frosts. */
+  frost: boolean;
   surface: Surface;
   contrastBorder: boolean;
   instantSprings: boolean;
@@ -33,10 +35,10 @@ export type Presentation = {
 
 // Reduced motion stops the springs, not the press response itself.
 export function presentationFor(mode: A11yMode, wantsGlass: boolean): Presentation {
-  const surface: Surface = !wantsGlass ? 'plain' : mode.reduceTransparency ? 'frosted' : 'glass';
   return {
-    glass: surface === 'glass',
-    surface,
+    glass: wantsGlass,
+    frost: wantsGlass && mode.reduceTransparency,
+    surface: wantsGlass ? 'glass' : 'plain',
     contrastBorder: mode.increaseContrast,
     instantSprings: mode.reduceMotion,
   };
