@@ -124,9 +124,13 @@ describe('hover and focus follow the input', () => {
     expect(run([{ type: 'enter' }, { type: 'leave' }]).state.hovered).toBe(false);
   });
 
-  it('touch has no hover and no focus ring: the same events leave it at rest', () => {
-    const out = run([{ type: 'enter' }, { type: 'focus', visible: true }], TOUCH_INPUT);
-    expect(out.state).toEqual(CONTROL_IDLE);
+  it('touch has no hover', () => {
+    expect(run([{ type: 'enter' }], TOUCH_INPUT).state).toEqual(CONTROL_IDLE);
+  });
+
+  it('a key on a touch device still shows the focus ring', () => {
+    expect(run([{ type: 'focus', visible: true }], TOUCH_INPUT).state.focused).toBe(true);
+    expect(run([{ type: 'focus', visible: false }], TOUCH_INPUT).state.focused).toBe(false);
   });
 
   it('only keyboard focus counts', () => {

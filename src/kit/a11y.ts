@@ -31,8 +31,7 @@ export type Presentation = {
   instantSprings: boolean;
 };
 
-// Reduced transparency drops the lens but keeps a complete control (B 10:36); reduced motion
-// stops the springs, not the press response itself (M 18:35).
+// Reduced motion stops the springs, not the press response itself.
 export function presentationFor(mode: A11yMode, wantsGlass: boolean): Presentation {
   const surface: Surface = !wantsGlass ? 'plain' : mode.reduceTransparency ? 'frosted' : 'glass';
   return {

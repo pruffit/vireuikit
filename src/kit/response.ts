@@ -7,8 +7,7 @@ export type PressResponse = {
   defocus: number;
 };
 
-// A piece that lifts into the glass grows more: the finger covers it, and the enlarged lens is
-// the only sign of a hit (S).
+// A lifted piece grows more: the finger covers it, so the enlarged lens is the only sign of a hit.
 const LIFTING: PressResponse = { grow: 0.18, defocus: 1.6 };
 const SINKING: PressResponse = { grow: 0.06, defocus: 1 };
 

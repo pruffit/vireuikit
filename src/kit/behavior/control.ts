@@ -2,11 +2,10 @@ import { stepFocus, type FocusChange } from './focus';
 import { stepHover, type HoverChange } from './hover';
 import { PRESS_IDLE, stepPress, type PressEvent, type PressState } from './press';
 
-/** What this device's input can produce: touch has neither hover nor a focus ring. */
-export type InputCaps = { hover: boolean; keyboardFocus: boolean };
+export type InputCaps = { hover: boolean };
 
-export const TOUCH_INPUT: InputCaps = { hover: false, keyboardFocus: false };
-export const POINTER_INPUT: InputCaps = { hover: true, keyboardFocus: true };
+export const TOUCH_INPUT: InputCaps = { hover: false };
+export const POINTER_INPUT: InputCaps = { hover: true };
 
 export type ControlState = {
   press: PressState;
@@ -48,7 +47,7 @@ export function stepControl(state: ControlState, event: ControlEvent, caps: Inpu
       // Focus moving away takes the key-up with it, so a held key press must not outlive it.
       const press = event.type === 'blur' && state.press.by === 'keyboard' ? PRESS_IDLE : state.press;
       return {
-        state: { ...state, press, focused: !state.disabled && stepFocus(event, caps.keyboardFocus) },
+        state: { ...state, press, focused: !state.disabled && stepFocus(event) },
         activated: false,
       };
     }

@@ -19,7 +19,6 @@ const PRESS = { response: 0.18, damping: 0.78 };
 const HOVER = { response: 0.22, damping: 1 };
 const FOCUS = { response: 0.16, damping: 1 };
 
-/** Returns whether anything is still moving, so a target can stop its frame loop. */
 export function stepControlVisual(
   visual: ControlVisual,
   dt: number,
