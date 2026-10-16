@@ -53,9 +53,7 @@ const MATERIAL_STEPS = 10;
 const SUPPRESS_MS = 100;
 
 export interface VireControlElement extends HTMLElement {
-  /** Overrides the system accessibility settings for this element only. */
   a11y: A11yOverride;
-  /** The hook for growth: a host opening out of this control hands its merge shape here. */
   setMorph(morph: GlassMorph | null): void;
 }
 
@@ -80,6 +78,7 @@ export function createControlElementClass(
     #glass: GlassSession | null = null;
     #glassToken = 0;
     #glassKey = '';
+    #glassBroken = false;
     #lastMaterialKey = '';
     #frame = 0;
     #lastFrame = 0;
@@ -190,7 +189,7 @@ export function createControlElementClass(
 
     #forced(): ForcedState | null {
       const wanted = this.getAttribute(FORCE_ATTRIBUTE);
-      return wanted !== null && wanted in FORCED ? (wanted as ForcedState) : null;
+      return wanted !== null && Object.hasOwn(FORCED, wanted) ? (wanted as ForcedState) : null;
     }
 
     #dispatch(event: ControlEvent): boolean {
@@ -248,7 +247,6 @@ export function createControlElementClass(
           const wasPressed = this.#state.press.by === 'pointer';
           const activated = this.#dispatch({ type: 'up', source: 'pointer' });
           if (own && !activated && !wasPressed && !inside(e)) holdSuppression();
-          if (!own && activated) control.click();
         });
         on<PointerEvent>(target, 'pointercancel', (e) => {
           if (mine(e)) this.#dispatch({ type: 'cancel' });
@@ -263,6 +261,19 @@ export function createControlElementClass(
       };
       bind(control, true);
       bind(this, false);
+
+      // A tap in the hit area clicks the host; the button gets the one click, and the host sees it bubble.
+      on<MouseEvent>(
+        this,
+        'click',
+        (e) => {
+          if (e.target !== this) return;
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          control.click();
+        },
+        true,
+      );
 
       // The lens captures the pointer, so a release outside the button still clicks it; only a
       // click that follows such a release is dropped, a keyboard or scripted one never is.
@@ -344,9 +355,11 @@ export function createControlElementClass(
       this.#render(true);
     }
 
-    #refreshMode(force = false): void {
+    #refreshMode(force = false, afterFailure = false): void {
+      if (!afterFailure) this.#glassBroken = false;
       const mode = effectiveA11y(this.#own);
-      const next = presentationFor(mode, this.#glassMode() !== 'off');
+      let next = presentationFor(mode, this.#glassMode() !== 'off');
+      if (this.#glassBroken && next.glass) next = { ...next, glass: false, surface: 'plain' };
       const changed =
         force || !this.#mode || !sameA11y(this.#mode, mode) || next.surface !== this.#presentation?.surface;
       this.#mode = mode;
@@ -400,13 +413,20 @@ export function createControlElementClass(
           onTouch: this.#glassMode() === 'touch',
         },
         () => token === this.#glassToken && this.isConnected,
-      ).then((session) => {
-        if (!session) return;
-        this.#glass = session;
-        if (this.#morph) session.setMorph(this.#morph);
-        this.#pushMaterial(true);
-        this.dispatchEvent(new CustomEvent('vire-glass-ready'));
-      });
+      )
+        .then((session) => {
+          if (!session) return;
+          this.#glass = session;
+          if (this.#morph) session.setMorph(this.#morph);
+          this.#pushMaterial(true);
+          this.dispatchEvent(new CustomEvent('vire-glass-ready'));
+        })
+        .catch(() => {
+          if (token !== this.#glassToken) return;
+          this.#glassKey = '';
+          this.#glassBroken = true;
+          this.#refreshMode(false, true);
+        });
     }
 
     #pushMaterial(force = false): void {

@@ -351,16 +351,98 @@ test.describe('hit area on a coarse pointer', () => {
       expect(x).toBeGreaterThan(0);
     });
   }
+
+  test('a tap in the hit area is exactly one click, seen on the host and on the button', async ({ page }) => {
+    await openCase(page, 'view=sandbox&size=small&glass=0');
+    await page.evaluate(() => {
+      const counts = { host: 0, button: 0 };
+      (window as unknown as { __clicks: typeof counts }).__clicks = counts;
+      const host = document.querySelector('#share')!;
+      host.addEventListener('click', () => (counts.host += 1));
+      host.querySelector('button')!.addEventListener('click', () => (counts.button += 1));
+    });
+    const { box, y } = await centerOf(page.locator('#share button'));
+    await page.touchscreen.tap(box.x - 5, y);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __clicks: object }).__clicks)).toEqual({
+      host: 1,
+      button: 1,
+    });
+    expect(await log(page)).toEqual(['click:share']);
+  });
+
+  test('a key shows the focus ring even though the pointer is coarse', async ({ page }) => {
+    await openCase(page, 'view=sandbox');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('#play')).toHaveAttribute('data-focus', '');
+  });
 });
 
-test.describe('hit area on a fine pointer', () => {
-  test('small has no extra reach', async ({ page }) => {
-    await openCase(page, 'view=sandbox&size=small&glass=0');
-    const { box, y } = await centerOf(page.locator('#share button'));
-    const hit = await page.evaluate(
-      ([px, py]) => (document.elementFromPoint(px!, py!) as HTMLElement | null)?.closest('vire-icon-button')?.id ?? '',
-      [box.x - 4, y],
+test.describe('forced colours', () => {
+  test('text keeps the system colour, undimmed', async ({ page }) => {
+    await page.emulateMedia({ forcedColors: 'active' });
+    await openCase(page, 'view=sandbox&glass=1');
+    const { color, fill, native, nativeDisabled, disabled } = await page.evaluate(() => {
+      const probe = document.createElement('button');
+      probe.textContent = 'x';
+      document.body.append(probe);
+      const off = document.createElement('button');
+      off.disabled = true;
+      document.body.append(off);
+      const own = getComputedStyle(document.querySelector('#play button')!);
+      const dis = getComputedStyle(document.querySelector('#off button')!);
+      return {
+        color: own.color,
+        fill: own.webkitTextFillColor,
+        native: getComputedStyle(probe).color,
+        nativeDisabled: getComputedStyle(off).color,
+        disabled: dis.color,
+      };
+    });
+    expect(color).toBe(native);
+    expect(fill).not.toMatch(/\/ 0\.\d/);
+    expect(disabled).toBe(nativeDisabled);
+  });
+});
+
+test.describe('a lens that fails to attach', () => {
+  test('a module that cannot be loaded leaves a complete plain control and no unhandled error', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await page.route('**/vireglass_dom.js*', (route) => route.abort());
+    await page.goto('/?chrome=0&view=sandbox&glass=1');
+    await page.waitForFunction(() => document.documentElement.dataset.ready === '1');
+    const play = page.locator('#play');
+    await expect(play).toHaveAttribute('data-glass', 'off');
+    await expect(play).toHaveAttribute('data-surface', 'plain');
+    expect(await play.locator('button').evaluate((el) => el.style.backdropFilter)).toBe('');
+    await play.locator('button').click();
+    expect(await log(page)).toEqual(['click:play']);
+    expect(errors).toEqual([]);
+  });
+
+  test('an attach that throws falls back to the mode surface and is tried again, for every element, on the next change', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await page.route('**/vireglass_dom.js*', (route) =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body: 'export function attachGlass() { window.__attempts = (window.__attempts ?? 0) + 1; throw new Error("boom"); }',
+      }),
     );
-    expect(hit).toBe('');
+    await page.goto('/?chrome=0&view=sandbox&glass=1&rt=1');
+    await page.waitForFunction(() => document.documentElement.dataset.ready === '1');
+    const play = page.locator('#play');
+    await expect(play).toHaveAttribute('data-surface', 'frosted');
+
+    await page.evaluate(() => window.__lab.setA11yOverride({ reduceTransparency: false }));
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __attempts?: number }).__attempts ?? 0)).toBe(5);
+    await expect(play).toHaveAttribute('data-glass', 'off');
+    await expect(play).toHaveAttribute('data-surface', 'plain');
+
+    await page.evaluate(() => window.__lab.setA11yOverride({ increaseContrast: true }));
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __attempts?: number }).__attempts ?? 0)).toBe(10);
+    await play.locator('button').click();
+    expect(await log(page)).toEqual(['click:play']);
+    expect(errors).toEqual([]);
   });
 });

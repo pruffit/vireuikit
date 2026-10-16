@@ -36,6 +36,13 @@ ${HOST}[data-surface=frosted]>button{
 ${HOST}[data-contrast]:is([data-surface=plain],[data-surface=frosted])>button{box-shadow:inset 0 0 0 2px currentColor}
 ${HOST}[data-contrast][data-surface=frosted]>button{background:Canvas}
 ${HOST}[data-contrast][data-surface=glass]>button{background:color-mix(in srgb,color-mix(in srgb,#fff calc((1 - var(--vireglass-ink,0))*100%),#000) 88%,transparent)}
+
+@media (forced-colors:active){
+${BODY}{-webkit-text-fill-color:currentColor;text-shadow:none;color:ButtonText;background:ButtonFace;border:1px solid ButtonText;backdrop-filter:none;-webkit-backdrop-filter:none;transform:none}
+${BODY}>svg{opacity:1;filter:none}
+${HOST}[data-disabled]>button{-webkit-text-fill-color:currentColor;color:GrayText;border-color:GrayText}
+${HOST}[data-focus]>button{outline-color:Highlight}
+}
 `;
 
 const STYLE_ATTR = 'data-vireuikit';

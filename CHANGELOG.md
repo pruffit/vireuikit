@@ -5,7 +5,8 @@
 - **Foundation.** `sizes.ts` (button and icon button sizes in dp, nested radius, hit slop), pure behaviour
   state machines (press, hover, focus, disabled) with spring visuals, and accessibility modes
   (reduce transparency, increase contrast, reduce motion) with a system-or-override resolver.
-- **`vireuikit/web`.** `<vire-button>` and `<vire-icon-button>` upgrade a native button in place (waiting for
+- **`vireuikit/web` returns, with new content.** It is the web elements below and has nothing to do with the GPU
+  backdrop entry point removed in 0.5.0. `<vire-button>` and `<vire-icon-button>` upgrade a native button in place (waiting for
   it if the page is still being parsed), attach glass through `vireglass/dom` on demand (opt-in with the
   `glass` attribute), keep a 44 dp hit area on coarse pointers, and clean up on disconnect. The entry is safe
   to import on a server; `defineVireElements({ nonce })` supports a strict CSP.

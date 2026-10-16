@@ -56,7 +56,7 @@ A button is an action: nothing grows out of it, and it sinks under press rather 
 | B5 | A button does not grow into anything. `setMorph` exists on both elements as a hook for a host, but the button never calls it and nothing opens out of it. | unit (`pressResponse` only grows the body); `setMorph` itself is not tested (step 2) |
 | B6 | The press is cancelled when the pointer leaves, and releasing outside does not activate. | unit; behaviour "the pointer leaving cancels the press" |
 | B7 | A release outside never swallows a later click: a keyboard or scripted click, and a real click, still fire. | behaviour "after a release outside…", "a release outside followed by a real click…" |
-| B8 | Hover exists only with a cursor; keyboard focus draws a ring, a click does not. A key press does not stay held when focus moves away. | unit; behaviour "hover comes with the cursor", "keyboard focus shows the ring…", "a key press does not stick…" |
+| B8 | Hover exists only with a cursor; keyboard focus draws a ring on any device (W 2.4.7), a click does not. A key press does not stay held when focus moves away. | unit; behaviour "hover comes with the cursor", "keyboard focus shows the ring…", "a key shows the focus ring even though the pointer is coarse", "a key press does not stick…" |
 | B9 | Disabled stays glass but stops asserting itself: lower presence, no response, cannot be activated. | unit; behaviour "a disabled control cannot be activated"; snapshot of the disabled state |
 | B10 | It works before the glass: the native button clicks, submits its form, is named and focusable with no element defined; a button that already has keyboard focus shows the ring as it upgrades. | behaviour "before the upgrade" |
 | B11 | Upgrading while the page is still being parsed adopts the single native button; none is synthesized. | behaviour "upgrade while the page is parsed" (elements defined by a script before the markup) |
@@ -69,9 +69,11 @@ A button is an action: nothing grows out of it, and it sinks under press rather 
 | B18 | Reduced motion: springs are instant, the press response itself stays (M 18:35). | unit; behaviour "reduced motion makes the press instant" against "the same press without it is still moving one frame in" |
 | B19 | The system settings are followed live, and a setting made on the page beats them. | behaviour "the system setting is followed…" (reduced motion only), "a setting made on the page changes live elements" |
 | B20 | Appearance goes by modulating the lens, never by fading the element (M 2:55). | the element never animates opacity; the touch-only variant uses `setAppear`. Not gated. |
-| B21 | The hit area meets the target floor on a coarse pointer without changing layout. | behaviour "hit area on a coarse pointer", "hit area on a fine pointer" |
+| B21 | The hit area meets the target floor on a coarse pointer without changing layout, and a tap in it is exactly one click, seen once on the host and once on the button. | behaviour "hit area on a coarse pointer" (including "a tap in the hit area is exactly one click…"), "hit area on a fine pointer" |
 | B22 | The element cleans up: removing it removes its lens and its filter; reconnecting upgrades again. | behaviour "removing the element removes its lens and its filter", "connecting again…" |
 | B23 | Edge light, adaptive shadow, dispersion, backdrop blur at the rim: the material's, not the kit's. | owned by `vireglass`; visible in the snapshots, not asserted here |
+| B24 | If the lens cannot be loaded or attached, the control falls back to the plain surface (frosted under reduced transparency), stays clickable, raises no unhandled error, and the next change retries the attach. | behaviour "a lens that fails to attach" (an aborted module request; an `attachGlass` that throws, counting the retries) |
+| B25 | Under forced colours the text keeps the system colour, undimmed, and the own tints and blur are dropped (W 1.4.11). | behaviour "forced colours" |
 
 ## Icon button
 
@@ -98,4 +100,7 @@ The carrier of lift into the glass, and later of growth into a menu.
   modes are tested through the programmatic override.
 - Real finger gestures: touch is emulated (tap, coarse pointer), and the finger glow of B1/I4 is `vireglass`'s.
 - The press timing: stills are compared, not the motion curve.
+- A retry after a module that failed to load: browsers cache a failed dynamic import, so the retry is attempted but
+  may fail again without a new request; only a throwing `attachGlass` is observed retrying.
+- Forced colours: the colour of the text is asserted, not how the control looks.
 - Snapshots: Windows baselines only, run locally, not in CI.

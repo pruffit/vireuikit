@@ -7,6 +7,8 @@ npm install
 npm test
 ```
 
+The package itself runs on Node 20; developing it (the lab runs on Vite 8) needs Node 20.19 or newer.
+
 ## Gates
 
 All must be green before a PR is considered:
