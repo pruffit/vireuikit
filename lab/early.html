@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>VireUIKit lab: early define</title>
+    <script src="/__early.js"></script>
+    <script>
+      VireWeb.defineVireElements();
+    </script>
+  </head>
+  <body style="font: 14px system-ui; padding: 40px">
+    <vire-button id="early-play"><button type="button">Play</button></vire-button>
+    <vire-icon-button id="early-share"><button type="button" aria-label="Share">S</button></vire-icon-button>
+    <pre id="log"></pre>
+    <script>
+      document.querySelector('#early-play button').addEventListener('click', function () {
+        document.getElementById('log').textContent += 'click:early-play\n';
+      });
+      document.documentElement.dataset.ready = '1';
+    </script>
+  </body>
+</html>

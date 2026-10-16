@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VireUIKit lab</title>
+    <style>
+      html, body { margin: 0; height: 100%; font: 14px/1.4 system-ui, sans-serif; background: #15161a; color: #e8e8ec; }
+      #app { display: grid; grid-template-columns: minmax(0, 1fr) auto; height: 100%; }
+      #app[data-chrome='0'] { display: block; height: auto; }
+      #main { padding: 16px; overflow: auto; }
+      #app[data-chrome='0'] #main { padding: 0; overflow: visible; }
+      #bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 14px; }
+      #bar label { display: inline-flex; gap: 6px; align-items: center; }
+      #bar select, #bar input { font: inherit; }
+      #app[data-chrome='0'] #bar, #app[data-chrome='0'] #side { display: none; }
+      #stage { position: relative; width: 760px; overflow: clip; border-radius: 0; isolation: isolate; }
+      #rows { position: relative; display: grid; gap: 36px; padding: 40px 36px; }
+      .row { display: grid; gap: 6px; }
+      .row > .name { font: 12px system-ui; opacity: 0; height: 0; }
+      .cells { display: flex; gap: 28px; align-items: center; flex-wrap: wrap; }
+      .cell { display: grid; justify-items: center; gap: 10px; }
+      .cell > .cap { font: 11px system-ui; color: CanvasText; opacity: 0.0; height: 0; }
+      #app[data-labels='1'] .cell > .cap { opacity: 0.7; height: auto; }
+      #side { width: 420px; border-left: 1px solid #2a2c33; padding: 12px; overflow: auto; }
+      #side h2 { font: 600 13px system-ui; margin: 0 0 8px; }
+      #thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+      #thumbs img { width: 100%; cursor: pointer; border: 1px solid #333; }
+      #big { width: 100%; margin-bottom: 8px; }
+      #log { font: 12px ui-monospace, monospace; white-space: pre-wrap; min-height: 80px; }
+      .sandbox { display: flex; gap: 24px; padding: 48px; align-items: center; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="main">
+        <div id="bar"></div>
+        <div id="stage"><div id="rows"></div></div>
+        <pre id="log"></pre>
+      </div>
+      <aside id="side"></aside>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
