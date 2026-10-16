@@ -39,17 +39,26 @@ attribute, a development aid of the elements that the lab and the snapshots use.
   carries no third-party images.
 - **Reference viewer** shows frames from the reference videos next to the atom. The frames are read from a
   local directory given by `VIREUIKIT_REFERENCE_DIR`; they are third-party material and are never committed.
+- **Reference backdrop** (`?view=reference&ref=<id>`) puts our atom on the backdrop around a reference control, at the
+  same relative size, so the two can be measured on the same pixels. `npx playwright test reference` prints the
+  measurements side by side (it is skipped when the directory is not set).
 
 ## Gates
 
 | Gate | Checks |
 |---|---|
 | `npm test` | the model: states, flow boundaries, sizes, accessibility responses |
-| `npm run check:lab` | Playwright behaviour tests on the lab, no screenshots: roles and keyboard, state transitions, events, upgrade while parsing, glass-off degradation, accessibility modes, hit area. Runs in CI |
+| `npm run check:lab` | Playwright behaviour tests on the lab, no screenshots: roles and keyboard, state transitions, events, upgrade while parsing, glass-off degradation, accessibility modes, hit area, and the resting body and rim measured on the pixels of a render against bounds taken from the reference (`docs/acceptance.md`, "Resting body"), with canaries that must fail. Runs in CI |
 | `npm run check:lab:visual` | the screenshot set: atom × state × backdrop × glass on/off against committed baselines in `tests/lab/__screenshots__/<platform>/`. Local only: the baselines are Windows renders and CI does not run it. `npm run check:lab:visual:update` rewrites them |
 | existing | `check:english`, `check:package`, `check:readme`, `typecheck` (the model under `src/kit` is also checked with no DOM lib), `build` |
 
 Visual baselines change only on purpose, in the same commit as the code that changes the look.
+
+The comparison is strict: colour `threshold` 0.02 and `maxDiffPixelRatio` 0.0005. Playwright's default threshold of 0.2
+passed a whole resting body unnoticed. Against the previous look (body alpha 0) 0.02 fails on every glass-on case, and
+it is stable over repeated runs on the baselines' machine. It does not see a fifth off the body's lift (0.10 to 0.08);
+that is what the numeric bounds in `check:lab` are for. `--update-snapshots` rewrites only files that fail, so delete a
+baseline to force a rewrite.
 
 ## Acceptance of an atom
 

@@ -5,16 +5,23 @@ describe('accessibility modes', () => {
   it('without any setting, glass stays glass', () => {
     expect(presentationFor(A11Y_NONE, true)).toEqual({
       glass: true,
+      frost: false,
       surface: 'glass',
       contrastBorder: false,
       instantSprings: false,
     });
   });
 
-  it('reduced transparency removes the lens but keeps a body', () => {
+  it('reduced transparency keeps the lens and asks it to frost', () => {
     const p = presentationFor({ ...A11Y_NONE, reduceTransparency: true }, true);
-    expect(p.glass).toBe(false);
-    expect(p.surface).toBe('frosted');
+    expect(p.glass).toBe(true);
+    expect(p.frost).toBe(true);
+    expect(p.surface).toBe('glass');
+  });
+
+  it('a control that did not ask for glass has nothing to frost', () => {
+    const p = presentationFor({ ...A11Y_NONE, reduceTransparency: true }, false);
+    expect(p).toMatchObject({ glass: false, frost: false, surface: 'plain' });
   });
 
   it('increased contrast keeps the lens and asks for a border', () => {
@@ -43,7 +50,7 @@ describe('accessibility modes', () => {
 
   it('the three settings combine', () => {
     const p = presentationFor({ reduceTransparency: true, increaseContrast: true, reduceMotion: true }, true);
-    expect(p).toEqual({ glass: false, surface: 'frosted', contrastBorder: true, instantSprings: true });
+    expect(p).toEqual({ glass: true, frost: true, surface: 'glass', contrastBorder: true, instantSprings: true });
   });
 });
 

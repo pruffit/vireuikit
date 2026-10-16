@@ -24,6 +24,8 @@ for (const atom of ATOMS) {
 test('reduced transparency and increased contrast, glass requested', async ({ page }) => {
   await openCase(page, 'atom=button&backdrop=busy&glass=1&rt=1');
   await expect(page.locator('#stage')).toHaveScreenshot('button-busy-reduce-transparency.png');
+  await openCase(page, 'atom=button&backdrop=mid&glass=1&rt=1');
+  await expect(page.locator('#stage')).toHaveScreenshot('button-mid-reduce-transparency.png');
   await openCase(page, 'atom=button&backdrop=busy&glass=1&ic=1');
   await expect(page.locator('#stage')).toHaveScreenshot('button-busy-increase-contrast.png');
 });

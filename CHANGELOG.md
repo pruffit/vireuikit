@@ -14,6 +14,14 @@
   `VIREUIKIT_REFERENCE_DIR`; `npm run check:lab` runs the Playwright behaviour tests (in CI),
   `npm run check:lab:visual` the local screenshot set. `npm run typecheck` also checks `src/kit` without a DOM lib.
 - `docs/design.md` and `docs/acceptance.md`.
+- **A resting body.** At rest the glass control carries a body that lifts the backdrop (`atomBody`) and a rim drawn at
+  a strength that follows the backdrop (`atomRimOpacity`), measured against reference frames in OKLab; the pressed look
+  is unchanged. `check:lab` gates body separation and rim contrast on pixels, with canaries for the old look.
+- **Reduced transparency frosts the glass instead of removing it.** The lens stays, its blur and the body density come
+  from `vireglass`'s own accessibility rules, and the ink follows the body. `Presentation` gains `frost`; the opaque
+  `frosted` surface remains only as the stand-in when a lens cannot attach.
+- The lab gains a reference backdrop view and a `mid` backdrop; `npx playwright test reference` compares our atom with
+  the reference controls (needs `VIREUIKIT_REFERENCE_DIR`).
 
 ## 0.5.0
 

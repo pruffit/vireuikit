@@ -69,14 +69,15 @@ setA11yOverride({ reduceTransparency: true });
   `medium` otherwise), `disabled`.
 - On a coarse pointer every size keeps a hit area of at least 44 dp without changing layout.
 - The element dispatches `vire-glass-ready` once its lens is attached. If the lens cannot be loaded or attached,
-  the control stays a complete one on its plain (or, under reduced transparency, frosted) surface, and the next
+  the control stays a complete one on its plain (or, under reduced transparency, opaque frosted) surface, and the next
   setting change tries again.
 - Set `disabled` on the host element: it is mirrored onto the inner `<button>` and wins over it. Clearing it on
   the host re-enables the button.
 - Under `forced-colors` the elements keep the system colours and drop their own tints and blur.
 - Accessibility follows the system `prefers-*` settings; `setA11yOverride` or the element's `a11y`
-  property overrides them. Reduced transparency drops the lens and keeps an opaque control. Text takes the
-  page's colour; the opaque and high-contrast bodies assume the page's `color-scheme` matches it.
+  property overrides them. Reduced transparency keeps the lens and frosts it: a blurrier lens and a denser body, with the
+  ink following the body. Text takes the page's colour; the frosted fallback and the high-contrast bodies assume
+  the page's `color-scheme` matches it.
 - The elements inject one stylesheet. Under a strict CSP pass `nonce` to `defineVireElements`, or ship the
   exported `STYLES` string yourself.
 - Importing the module touches no DOM, so it is safe on a server; `defineVireElements()` is the only call
