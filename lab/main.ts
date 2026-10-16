@@ -1,6 +1,8 @@
-import { CONTROL_SIZES, type ControlSize } from '../src/kit/sizes';
+import { BUTTON_SIZES, CONTROL_SIZES, type ControlSize } from '../src/kit/sizes';
 import { defineVireElements, setA11yOverride } from 'vireuikit/web';
 import { BACKDROPS, paintBackdrop, type Backdrop } from './backdrops';
+import { referenceControl } from './reference-controls';
+import { REFERENCE_STAGE, paintReferenceStage } from './reference-stage';
 
 const FORCEABLE_STATES = ['rest', 'hover', 'focus', 'pressed', 'disabled'] as const;
 
@@ -21,7 +23,7 @@ const flag = (name: string): boolean | undefined => {
   return v === '1' ? true : v === '0' ? false : undefined;
 };
 
-const view = pick('view', ['gallery', 'sandbox'] as const, 'gallery');
+const view = pick('view', ['gallery', 'sandbox', 'reference'] as const, 'gallery');
 const atomParam = pick('atom', ['all', ...ATOMS] as const, 'all');
 const stateParam = pick('state', ['all', ...FORCEABLE_STATES] as const, 'all');
 const backdrop = pick('backdrop', BACKDROPS, 'light') as Backdrop;
@@ -44,7 +46,7 @@ if (upgrade) {
 }
 
 const stage = document.getElementById('stage')!;
-paintBackdrop(stage, backdrop);
+if (view !== 'reference') paintBackdrop(stage, backdrop);
 
 function make(atom: Atom, state: string | null): HTMLElement {
   const host = document.createElement(TAGS[atom]);
@@ -128,7 +130,20 @@ function sandbox(): void {
   rows.append(form);
 }
 
+async function reference(): Promise<void> {
+  const control = referenceControl(params.get('ref') ?? '') ?? referenceControl('a217-pause')!;
+  const rows = document.getElementById('rows')!;
+  rows.style.cssText = 'position:absolute;inset:0;display:grid;place-items:center;padding:0;gap:0';
+  stage.style.width = `${REFERENCE_STAGE.width}px`;
+  stage.style.height = `${REFERENCE_STAGE.height}px`;
+  const height = BUTTON_SIZES[size].height;
+  const src = `/__reference/file?path=${encodeURIComponent(control.file)}`;
+  stage.style.backgroundColor = await paintReferenceStage(stage, control, height, src);
+  rows.append(make(atomParam === 'all' ? control.atom : atomParam, stateParam === 'all' ? 'rest' : stateParam));
+}
+
 if (view === 'sandbox') sandbox();
+else if (view === 'reference') await reference();
 else gallery();
 
 function buildChrome(): void {
@@ -140,7 +155,7 @@ function buildChrome(): void {
   const check = (name: string, label: string) =>
     `<label><input type="checkbox" data-flag="${name}"${params.get(name) === '1' ? ' checked' : ''}>${label}</label>`;
   bar.innerHTML = [
-    select('view', ['gallery', 'sandbox'], view),
+    select('view', ['gallery', 'sandbox', 'reference'], view),
     select('atom', ['all', ...ATOMS], atomParam),
     select('state', ['all', ...FORCEABLE_STATES], stateParam),
     select('backdrop', BACKDROPS, backdrop),
