@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- **`<vire-menu>`.** Upgrades a platform popover menu (a `popovertarget` trigger, bare or inside `<vire-button>` or
+  `<vire-icon-button>`, and a `popover` list of item buttons) that already works without the element. After the
+  upgrade it adds the menu-button roles with their keyboard, grows its glass out of the trigger through the core's
+  `setMorph`, closes after a choice, Escape, a press outside or Tab, and runs the growth back into the trigger before
+  the list leaves the top layer. Attributes `glass`, `size`, `corner`; property `sample`. `MENU_TAG` and the
+  `VireMenuElement` type are exported from `vireuikit/web`.
+- **The menu's model.** `stepMenu` (the menu-button keyboard as a pure state machine, typeahead included),
+  `menuPlacement` and `menuCorner` (pinned to the trigger's corner, flipped or slid into the viewport),
+  `menuSurfaceFrame` (the surface's box, the lens's second shape and the content's offset per growth frame),
+  `menuActivity`, `menuMaterial`, `menuBody`, `menuGlass`, `MENU_DROP_BODY`, `menuItemFill`, and `menuSize` for rows,
+  padding and a radius concentric with the items. Sizes, timing, the body and the drop are measured against Apple's
+  reference of a menu growing out of its toolbar (`docs/acceptance.md`, "Menu").
+- **The growth is refitted to that reference.** `DEFAULT_GROWTH_TIMING` is now `shrinkOpen` 0.21, `shrinkClose` 0.14,
+  `growOpen` 0.38, `growClose` 0.4 (the drop forms at 0.10 s instead of 0.18 s, the overshoot comes at 0.37 s instead of
+  0.51 s), and `growthInk` brings the incoming ink in over the last tenth of the growth instead of from 0.45.
+- **`setCarried` on `<vire-button>` and `<vire-icon-button>`.** A menu growing out of the control carries its body:
+  the control drops its lens (by modulating it out), its body and its rim, and its glyph defocuses with the growth;
+  `null` takes the body back.
+- The lab gains `atom=menu` (the menu's states on every backdrop), `view=menu`, `early-menu.html` and
+  `view=menu-reference`, which puts frames of the reference next to our menu at the same moment. `check:lab` holds the
+  menu's behaviour, its growth sampled frame by frame and its body measured like the reference, with canaries;
+  `check:lab:visual` has its baselines.
+
 ## 0.6.0
 
 - **On `vireglass` 3.** The peer range is `^3.0.0`. The rim is the core's: its strength now follows the surround, within
