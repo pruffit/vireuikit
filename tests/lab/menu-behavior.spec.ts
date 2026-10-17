@@ -252,7 +252,16 @@ const mark = (page: Page) => page.evaluate(() => (window as unknown as { __frame
 
 type Run = { opening: Frame[]; closing: Frame[]; trigger: { x: number; y: number; width: number; height: number } };
 
+// The drop is smaller than a 44 dp trigger for about 30 ms; a quarter-speed clock lets every frame be seen.
+async function slowTime(page: Page, factor = 0.25): Promise<void> {
+  await page.addInitScript((k) => {
+    const raf = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = (cb) => raf((t) => cb(t * k));
+  }, factor);
+}
+
 async function openAndClose(page: Page, query: string): Promise<Run> {
+  await slowTime(page);
   await openCase(page, query);
   const trigger = (await page.locator('#more > vire-icon-button').boundingBox())!;
   await record(page);
