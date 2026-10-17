@@ -20,11 +20,11 @@ spec) lives outside this repository; this document only covers the code.
 
 | Path | What | Published |
 |---|---|---|
-| `src/kit/` | Model: kinds, states, material per state (`atom.ts`), growth morph (`morph.ts`), sizes in dp (`sizes.ts`), behaviours as pure state machines (`behavior/`), accessibility modes | yes, `vireuikit` |
-| `src/web/` | Custom elements (`<vire-button>`, `<vire-icon-button>`, …). Each wraps a native control passed as light DOM, upgrades it, attaches glass with `vireglass/dom` where the atom is a navigation-layer piece, and drives states from the model | yes, `vireuikit/web` |
+| `src/kit/` | Model: kinds, states, material per state (`atom.ts`), growth morph (`morph.ts`), the menu's keyboard, placement and surface (`menu.ts`), sizes in dp (`sizes.ts`), behaviours as pure state machines (`behavior/`), accessibility modes | yes, `vireuikit` |
+| `src/web/` | Custom elements (`<vire-button>`, `<vire-icon-button>`, `<vire-menu>`, …). Each wraps native markup passed as light DOM, upgrades it, attaches glass with `vireglass/dom` where the atom is a navigation-layer piece, and drives states from the model | yes, `vireuikit/web` |
 | `src/native/` | Android target, after the web | not started; will be `vireuikit/native` |
 | `lab/` | The test environment: a Vite app with a gallery per atom (every state, forced via URL), backdrops, accessibility toggles, glass on/off, an interaction sandbox and a reference viewer | no |
-| `tests/lab/` | Playwright tests against the lab: behaviour (`behavior.spec.ts`) and visual snapshots (`visual.spec.ts`) | no |
+| `tests/lab/` | Playwright tests against the lab: behaviour (`*behavior.spec.ts`) and visual snapshots (`*visual.spec.ts`) | no |
 
 Custom elements because the consumers differ: a React app (VireMusic web) and plain DOM in a shadow tree
 (VireBook). A custom element works in both without a framework adapter.
@@ -51,7 +51,7 @@ attribute, a development aid of the elements that the lab and the snapshots use.
 | Gate | Checks |
 |---|---|
 | `npm test` | the model: states, flow boundaries, sizes, accessibility responses |
-| `npm run check:lab` | Playwright behaviour tests on the lab, no screenshots: roles and keyboard, state transitions, events, upgrade while parsing, glass-off degradation, accessibility modes, hit area, and the resting body and rim measured on the pixels of a render against bounds taken from the reference (`docs/acceptance.md`, "Resting body"), with canaries that must fail. Runs in CI |
+| `npm run check:lab` | Playwright behaviour tests on the lab, no screenshots: roles and keyboard, state transitions, events, upgrade while parsing, glass-off degradation, accessibility modes, hit area, the menu's growth sampled frame by frame and what it hands the lens, and the resting body and rim measured on the pixels of a render against bounds taken from the reference (`docs/acceptance.md`, "Resting body"), with canaries that must fail. Runs in CI |
 | `npm run check:lab:visual` | the screenshot set: atom × state × backdrop × glass on/off against committed baselines in `tests/lab/__screenshots__/<platform>/`. Local only: the baselines are Windows renders and CI does not run it. `npm run check:lab:visual:update` rewrites them |
 | existing | `check:english`, `check:package`, `check:readme`, `typecheck` (the model under `src/kit` is also checked with no DOM lib), `build` |
 
@@ -62,6 +62,35 @@ passed a whole resting body unnoticed. Against the previous look (body alpha 0) 
 it is stable over repeated runs on the baselines' machine. It does not see a fifth off the body's lift (0.10 to 0.08);
 that is what the numeric bounds in `check:lab` are for. `--update-snapshots` rewrites only files that fail, so delete a
 baseline to force a rewrite.
+
+## The menu
+
+The research defines the menu by two things: it is the result of growth out of its trigger, with closing as the
+same growth run backwards, and it closes after a choice. How the web element gets there:
+
+- **The first HTML is the platform's popover.** A trigger `<button popovertarget>` (bare, or inside `<vire-button>`
+  or `<vire-icon-button>`) and a `popover` list of item buttons with `popovertargetaction="hide"`. Without the
+  element the browser opens and closes it, a choice closes it, Escape and a press outside dismiss it, and focus comes
+  back to the trigger. The markup carries no menu roles: `role="menu"` promises arrow keys, so the element adds the
+  roles together with the keyboard and takes them away on disconnect.
+- **After the upgrade the element shows and hides the list.** The list becomes a `manual` popover and the
+  `popovertarget` attributes are lifted (and restored on disconnect), because the platform hides a popover at once and
+  the growth has to run back before the list leaves the top layer. Escape, a press outside and Tab are the element's
+  then; the keyboard follows the menu-button pattern (`stepMenu`).
+- **One body.** The menu replaces its trigger (M 5:11 and the showcase frames: the trigger is gone while the menu is
+  out). The list is the one glass surface; while the menu is out the trigger hands its body over (`setCarried` on the
+  control elements: no lens, no body, the glyph defocusing with the growth), so the two never stack as glass on glass,
+  and the trigger takes the body back when the surface has retracted onto it.
+- **The core's morph.** Each frame the surface's box is the growth frame's body (`menuSurfaceFrame`) and the second
+  shape goes to the lens's `setMorph`, offset from the surface's centre; the content keeps its final position while
+  the box moves, so it is revealed and comes into focus rather than sliding in.
+- **Placement is under the finger.** The menu pins to the trigger's corner that points to the nearest viewport corner
+  and grows into the open space (S: the button morphs into the menu so the grip does not change). The `corner`
+  attribute fixes the corner for a host that knows its layout.
+- **A menu does not flip.** Larger elements adapt but do not switch between light and dark (M 15:29), so the backdrop
+  is read once as the menu opens (or taken from the host's `sample`) and held while it is out.
+- **Disabled items are skipped** by the arrows and by typeahead, as native disabled buttons are skipped by Tab; they
+  stay visible, dimmed and announced.
 
 ## Acceptance of an atom
 
@@ -80,7 +109,7 @@ An atom is done when:
    attach, the lab, `check:lab`.
 1. Button and icon button: press, hover and focus where the input has them, disabled; the icon button lifts
    into the glass under the finger.
-2. Menu: grows out of its icon button, closes after a choice, closing retraces the growth.
+2. Menu: grows out of its trigger, closes after a choice, closing retraces the growth.
 3. Switch and slider: the knob lifts into the glass while held.
 4. Segmented control: breaks into parts on entering selection mode.
 5. Chip and field: grow into a popover or suggestions where they open a list.
