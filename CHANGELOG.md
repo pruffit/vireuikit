@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## 0.6.0
 
 - **On `vireglass` 3.** The peer range is `^3.0.0`. The rim is the core's: its strength now follows the surround, within
   the reference tolerance on every smooth row, so the kit no longer scales the lens's `::after`, and a pressed control's
