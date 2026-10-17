@@ -127,9 +127,9 @@ button or a bare `<button>`; it grows only because it opens a menu (B5). Behavio
 | N12 | One body: while the menu is out the trigger draws no glass and no body of its own and its glyph goes out of focus as the growth begins, so there is never glass on glass; it takes the body back when the menu has retracted into it (M 13:24; M 5:11, the toolbar's glyphs defocus as it gathers into the drop). | behaviour "the trigger hands its body over and takes it back"; snapshots `menu-*` |
 | N13 | Glass only on the menu's surface: the items are content on it and carry no lens, and the active item's highlight is ink on the glass (the nearer half of a press), concentric with the menu. | unit `menuItemFill`; behaviour "the surface is the only lens"; snapshots |
 | N14 | The growth goes through the core's morph: while the drop and the menu are joined, the second shape is handed to the surface's lens through `setMorph`, offset from the surface's centre, and nothing is handed once they are one. | unit `menuSurfaceFrame`; behaviour "the lens is handed the second shape while they are joined" (a recording stand-in for `vireglass/dom`) |
-| N15 | The drop and the menu are one medium: the body goes to the active end while it is a drop and back to rest as a menu. At rest the menu carries the control's resting body; the reference menu is 0.058 to 0.072 lighter than what it covers, with ΔC 0.000 (M 5:11, two text-free regions, the open frame minus the same pixels before it opened). | unit `menuActivity`; behaviour "the resting menu stands off its surround and carries its colour" (the B26 bounds), canary "a clear menu fails it" |
+| N15 | The drop and the menu are one medium. As a drop it is the gathered medium lit by a concentrate of its surroundings: the reference drop is white over its light grey (L 0.97 to 1.00 over 0.79 to 0.82), and over a dark backdrop it can only brighten (§5). As a menu at rest it carries the control's resting body: the reference menu is 0.058 to 0.072 lighter than what it covers, with ΔC 0.000 (M 5:11, two text-free regions, the open frame minus the same pixels before it opened). | unit `menuActivity`, `menuBody`; behaviour "the resting menu on the mid grey lifts what it covers as the reference menu does" (within 0.05 of it, ours +0.043), "…stands off what it covers…" (dark +0.019, photo +0.026, light +0.017, ΔC within 0.02), "the drop … is lit well above its surround" (ΔL above 0.1, under 0.7 over dark); canaries "a clear menu fails it", "the resting body in the drop's place fails the drop's bound" |
 | N16 | A large element does not flip between light and dark (M 15:29): the backdrop is read once as the menu opens and held while it is out. | behaviour "the ink holds while the menu is out" |
-| N17 | A larger piece is thicker glass, with a deeper shadow and more lensing (M 7:02–7:25). | owned by `vireglass` (bevel, thickness and shadow scale with the geometry); not asserted |
+| N17 | A larger piece is thicker glass, with a deeper shadow, more lensing and a softer scattering of light (M 7:02–7:25), and Regular turns text under it into soft spots (M 11:47). The menu's surface is the control material with the core's sheet scattering (roughness 0.85, a blur of about 10 dp where the control's is 0.4); the thickness and the shadow follow the geometry in the core. | unit `menuGlass`; behaviour "the surface scatters what lies under it far more softly…"; snapshot `menu-text-glass-on`; thickness and shadow owned by `vireglass`, not asserted |
 | N18 | Reduced motion: no growth; the menu is at its size in its first frame and gone in the first frame of closing, its content in focus at once (M 18:35). | unit; behaviour "reduced motion opens and closes in one frame" |
 | N19 | Reduced transparency frosts the surface (the lens stays, its blur rises, the body goes to `vireglass`'s density and the ink follows it); increased contrast borders it (M 18:22, 18:29). | behaviour; snapshots `menu-busy-reduce-transparency`, `menu-busy-increase-contrast` |
 | N20 | Glass off leaves a complete menu: an opaque surface, the same keyboard and choice, and the same growth on the plain surface. | behaviour "glass off…"; snapshots `menu-*-glass-off` |
@@ -151,9 +151,11 @@ M 5:11 against ours at the touch tier, with the same label width:
 | width, four rows, "Three" the longest | 167 dp | 162 |
 | height, four rows | 206 dp | 202 |
 | corner | ≈ 37 dp | 35 |
-| body over what it covers, ΔL / ΔC | +0.058 to +0.072 / 0.000 | the resting body (N15) |
-| the drop's lightness | 0.97 to 1.00 over 0.79 to 0.82 (ΔL ≈ +0.2) | the press end of the body (B28) |
+| body over what it covers, ΔL / ΔC | +0.058 to +0.072 / 0.000, over a grey of L 0.66 to 0.80 | +0.043 / 0.000 over the mid grey (L 0.62); +0.019 dark, +0.026 photo, +0.017 light |
+| the drop's lightness | 0.97 to 1.00 over 0.79 to 0.82 (ΔL ≈ +0.2) | +0.220 over the mid grey; 0.99 over light; 0.46 over dark (+0.146) |
 | the drop's size | ≈ 63 dp, from a 172 × 44 dp toolbar | 48 dp (1.1 × the source's smaller side) |
+| the drop's shape | a flat-bottomed drop with a ridge, then a bulb on a neck while closing | a circle; the neck is in the lens (N14), not in the silhouette |
+| the content | none until 95 % of the height (0.30 s), heavily blurred, sharp by about 0.40 s | none until 90 % of the growth, sharp at size (0.31 s) |
 | where it sits | the toolbar's bottom-leading corner, 6 dp further out and 9.5 dp lower | flush on the trigger's corner |
 
 Timing. The reference is tracked frame by frame (the box of everything lighter than the frame before the menu opened,
@@ -170,10 +172,13 @@ for this menu, where the reference drop measures 67 to 77 dp):
 | closing reaches the drop | 0.25 s | 0.23 | 0.23 |
 | closing is back in the source, its ridge gone | 0.42 s | 0.57 | 0.44 |
 
-The rows and their spacing, the timing up to the overshoot and the closing, and the body are held (unit tests and
-N15). The drop's whiteness is the milky press that is already open (B28, M 3:52). The drop's size, the menu's offset
-from the toolbar and the slide that settles it there are layout of the reference (a wide toolbar gathers more glass;
-the menu sits concentric with the window, which the kit does not know), so they are reported, not held.
+The rows and their spacing, the timing up to the overshoot and the closing, the resting body and the drop's lightness
+are held (unit tests and N15). The drop's size, the menu's offset from the toolbar and the slide that settles it there
+are layout of the reference (a wide toolbar gathers more glass; the menu sits concentric with the window, which the kit
+does not know), so they are reported, not held. The silhouette is one element's box, so the neck between the drop and
+the menu shapes the refraction but not the outline. The lab's `view=menu-reference` puts ten of the frames (opening
+and closing) next to ours at the same time since the start, over the frame before the menu opened with the toolbar
+filled in from its surround.
 
 ## Resting body
 
