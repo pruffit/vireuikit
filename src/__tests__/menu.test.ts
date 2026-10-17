@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { VIREGLASS_CONTROL_MATERIAL } from 'vireglass';
+import { VIREGLASS_CONTROL_MATERIAL, VIREGLASS_SHEET_MATERIAL, resolveOptics } from 'vireglass';
 import {
   ATOM_AT_REST,
   MENU_CLOSED,
   MENU_CORNERS,
+  MENU_DROP_BODY,
   atomBody,
   createGrowthState,
   growthPhase,
   menuActivity,
   menuBody,
   menuCorner,
+  menuGlass,
   menuItemFill,
+  menuMaterial,
   menuPlacement,
   menuSurfaceFrame,
   stepGrowth,
@@ -249,10 +252,13 @@ describe('the surface on each frame of the growth', () => {
     expect(over.box.height).toBeGreaterThan(menu.height);
   });
 
+  // M 5:11: no content until 95 % of the height, blurred at first, sharp by the overshoot.
   it('the content comes into focus only near size', () => {
-    const half = menuSurfaceFrame(trigger, menu, anchor, { shrink: 1, grow: 0.4 });
-    expect(half.ink.incoming).toBe(0);
-    expect(menuSurfaceFrame(trigger, menu, anchor, { shrink: 1, grow: 0.9 }).ink.incoming).toBeGreaterThan(0.8);
+    const ink = (grow: number) => menuSurfaceFrame(trigger, menu, anchor, { shrink: 1, grow }).ink.incoming;
+    expect(ink(0.85)).toBe(0);
+    expect(ink(0.95)).toBeGreaterThan(0.2);
+    expect(ink(0.95)).toBeLessThan(0.8);
+    expect(ink(1)).toBe(1);
   });
 
   it('the drop is the active medium and the menu is at rest', () => {
@@ -261,9 +267,29 @@ describe('the surface on each frame of the growth', () => {
     expect(menuActivity({ shrink: 1, grow: 1.03 })).toBe(0);
     expect(menuActivity({ shrink: 1, grow: 0.1 })).toBeGreaterThan(0.8);
     expect(menuBody(VIREGLASS_CONTROL_MATERIAL, 0)).toEqual(atomBody(VIREGLASS_CONTROL_MATERIAL, ATOM_AT_REST));
-    expect(menuBody(VIREGLASS_CONTROL_MATERIAL, 1)).toEqual(
-      atomBody(VIREGLASS_CONTROL_MATERIAL, { ...ATOM_AT_REST, pressed: 1 }),
+    expect(menuBody(VIREGLASS_CONTROL_MATERIAL, 1)).toEqual(MENU_DROP_BODY);
+  });
+
+  // M 5:11: the drop is white over a light grey; the light is the surroundings', so it adds lightness, not white.
+  it('the drop lifts what it covers and adds little white of its own', () => {
+    const drop = menuBody(VIREGLASS_CONTROL_MATERIAL, 1);
+    const rest = menuBody(VIREGLASS_CONTROL_MATERIAL, 0);
+    expect(drop.alpha).toBeGreaterThan(rest.alpha * 2);
+    expect(drop.lift).toBeGreaterThanOrEqual(0.15);
+    expect(drop.white).toBeLessThanOrEqual(rest.white);
+  });
+
+  // M 7:19: a menu presented from a toolbar button scatters light more softly than the button.
+  it('a menu scatters like the core\'s sheets, where a control barely does', () => {
+    expect(menuGlass(VIREGLASS_CONTROL_MATERIAL).roughness).toBe(VIREGLASS_SHEET_MATERIAL.roughness);
+    expect(resolveOptics(menuMaterial(VIREGLASS_CONTROL_MATERIAL, 0)).blur).toBeGreaterThan(
+      resolveOptics(VIREGLASS_CONTROL_MATERIAL).blur * 10,
     );
+    expect(menuGlass(VIREGLASS_CONTROL_MATERIAL).ior).toBe(VIREGLASS_CONTROL_MATERIAL.ior);
+  });
+
+  it('under reduced transparency the drop is the frosted body', () => {
+    expect(menuBody(VIREGLASS_CONTROL_MATERIAL, 1, true)).toEqual(atomBody(VIREGLASS_CONTROL_MATERIAL, ATOM_AT_REST, true));
   });
 });
 

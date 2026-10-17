@@ -1,6 +1,6 @@
 // The menu: the menu-button keyboard as a pure state machine, where the menu sits relative to its
 // trigger, and what its glass surface is on each frame of the growth. Boxes are in dp.
-import type { VireGlassMaterial, VireGlassMorph } from 'vireglass';
+import { VIREGLASS_SHEET_MATERIAL, type VireGlassMaterial, type VireGlassMorph } from 'vireglass';
 import { ATOM_AT_REST, atomBody, atomMaterial, type AtomBody } from './atom';
 import { growthFrame, type GrowthInk, type GrowthPhase, type GrowthPoint } from './morph';
 
@@ -229,13 +229,27 @@ export function menuSurfaceFrame(
   };
 }
 
-/** The drop is the medium at its active end, the menu at rest is the control's resting glass. */
-export function menuMaterial(base: VireGlassMaterial, activity: number): VireGlassMaterial {
-  return atomMaterial(base, 'menu', { ...ATOM_AT_REST, pressed: activity });
+/** A menu is a larger piece of the same glass, and a larger piece scatters light more softly (M 7:19): it
+ *  takes the core's sheet scattering, which turns text under it into soft spots without turning it to mush. */
+export function menuGlass(base: VireGlassMaterial): VireGlassMaterial {
+  return { ...base, roughness: Math.max(base.roughness, VIREGLASS_SHEET_MATERIAL.roughness) };
 }
 
+/** The drop is the medium at its active end, the menu at rest is the resting glass. */
+export function menuMaterial(base: VireGlassMaterial, activity: number): VireGlassMaterial {
+  return atomMaterial(menuGlass(base), 'menu', { ...ATOM_AT_REST, pressed: activity });
+}
+
+/** The gathered medium lit by a concentrate of its surroundings: about 0.2 lighter than what it covers at
+ *  M 5:11, so white over a light backdrop, and only brighter over a dark one. */
+export const MENU_DROP_BODY: AtomBody = { alpha: 0.9, white: 0.1, lift: 0.2 };
+
 export function menuBody(base: VireGlassMaterial, activity: number, frost = false): AtomBody {
-  return atomBody(base, { ...ATOM_AT_REST, pressed: activity }, frost);
+  const rest = atomBody(base, ATOM_AT_REST, frost);
+  if (frost) return rest;
+  const k = Math.min(Math.max(activity, 0), 1);
+  const mix = (key: keyof AtomBody) => rest[key] + (MENU_DROP_BODY[key] - rest[key]) * k;
+  return { alpha: mix('alpha'), white: mix('white'), lift: mix('lift') };
 }
 
 export type MenuItemState = { active: boolean; pressed: boolean; disabled: boolean };

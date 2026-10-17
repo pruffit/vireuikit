@@ -84,8 +84,9 @@ const NECK_GAIN = 0.3;
 const NECK_RAMP = 4;
 const CORNER_EASE_START = 0.55;
 const INK_OUT_END = 0.4;
-const INK_IN_START = 0.45;
-const INK_IN_END = 0.95;
+// M 5:11: nothing of the menu shows until it is at 95 % of its height, and it is sharp by the overshoot.
+const INK_IN_START = 0.9;
+const INK_IN_END = 1;
 
 export function growthInk(phase: GrowthPhase): GrowthInk {
   const a = Math.min(Math.max(phase.shrink, 0), 1);
