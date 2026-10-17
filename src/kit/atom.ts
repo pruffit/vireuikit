@@ -89,13 +89,6 @@ const REST_BODY: AtomBody = { alpha: 0.25, white: 0.15, lift: 0.1 };
 const PRESSED_BODY: AtomBody = { alpha: 0.34, white: 0.35, lift: 0 };
 const FROST_LIFT = 0.26;
 
-/** Rim strength by the luma behind the control: the core draws it white everywhere, the reference follows the surroundings. */
-export function atomRimOpacity(backdropLuma: number, state: VireUIKitAtomState = ATOM_AT_REST): number {
-  const t = Math.min(Math.max((backdropLuma - 0.15) / 0.3, 0), 1);
-  const rest = 0.27 + 0.38 * t * t * (3 - 2 * t);
-  return rest + (1 - rest) * activation(state);
-}
-
 /** The body for a state; reduced transparency raises it to the density `vireglass` asks of the glass in that mode. */
 export function atomBody(
   base: VireGlassMaterial,

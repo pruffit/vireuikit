@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- **On `vireglass` 3.** The peer range is `^3.0.0`. The rim is the core's: its strength now follows the surround, within
+  the reference tolerance on every smooth row, so the kit no longer scales the lens's `::after`, and a pressed control's
+  rim no longer flares to full white. The kit keeps its own body and attaches with `body: false`: measured against the
+  same reference, the core's body is not lighter than its surround over a light backdrop, off by more than 0.05 in
+  lightness on two smooth rows, and near black under reduced transparency (`docs/acceptance.md`, "Resting body").
+- **`sample` on the elements.** A host that knows the backdrop (an image, a video) sets it on `<vire-button>` or
+  `<vire-icon-button>`, before or after the lens attaches; `null` returns to the probe.
 - **Foundation.** `sizes.ts` (button and icon button sizes in dp, nested radius, hit slop), pure behaviour
   state machines (press, hover, focus, disabled) with spring visuals, and accessibility modes
   (reduce transparency, increase contrast, reduce motion) with a system-or-override resolver.
@@ -14,14 +21,15 @@
   `VIREUIKIT_REFERENCE_DIR`; `npm run check:lab` runs the Playwright behaviour tests (in CI),
   `npm run check:lab:visual` the local screenshot set. `npm run typecheck` also checks `src/kit` without a DOM lib.
 - `docs/design.md` and `docs/acceptance.md`.
-- **A resting body.** At rest the glass control carries a body that lifts the backdrop (`atomBody`) and a rim drawn at
-  a strength that follows the backdrop (`atomRimOpacity`), measured against reference frames in OKLab; the pressed look
-  is unchanged. `check:lab` gates body separation and rim contrast on pixels, with canaries for the old look.
+- **A resting body.** At rest the glass control carries a body that lifts the backdrop (`atomBody`), measured with the
+  core's rim against reference frames in OKLab; the pressed tint is unchanged. `check:lab` gates body separation and rim
+  contrast on pixels, with canaries for the old look.
 - **Reduced transparency frosts the glass instead of removing it.** The lens stays, its blur and the body density come
   from `vireglass`'s own accessibility rules, and the ink follows the body. `Presentation` gains `frost`; the opaque
   `frosted` surface remains only as the stand-in when a lens cannot attach.
-- The lab gains a reference backdrop view and a `mid` backdrop; `npx playwright test reference` compares our atom with
-  the reference controls (needs `VIREUIKIT_REFERENCE_DIR`).
+- The lab gains a reference backdrop view and a `mid` backdrop; `npx playwright test reference` compares our atom, at
+  rest and pressed, with the reference controls, among them the pressed one at M 3:52 (needs `VIREUIKIT_REFERENCE_DIR`).
+  Image backdrops hand the elements a backdrop sample instead of declaring their mean colour.
 
 ## 0.5.0
 

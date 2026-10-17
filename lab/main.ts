@@ -1,5 +1,6 @@
 import { BUTTON_SIZES, CONTROL_SIZES, type ControlSize } from '../src/kit/sizes';
-import { defineVireElements, setA11yOverride } from 'vireuikit/web';
+import type { BackdropSample } from 'vireglass';
+import { defineVireElements, setA11yOverride, type VireControlElement } from 'vireuikit/web';
 import { BACKDROPS, paintBackdrop, type Backdrop } from './backdrops';
 import { referenceControl } from './reference-controls';
 import { REFERENCE_STAGE, paintReferenceStage } from './reference-stage';
@@ -46,7 +47,7 @@ if (upgrade) {
 }
 
 const stage = document.getElementById('stage')!;
-if (view !== 'reference') paintBackdrop(stage, backdrop);
+let sample: BackdropSample | null = view === 'reference' ? null : await paintBackdrop(stage, backdrop);
 
 function make(atom: Atom, state: string | null): HTMLElement {
   const host = document.createElement(TAGS[atom]);
@@ -62,6 +63,7 @@ function make(atom: Atom, state: string | null): HTMLElement {
     button.textContent = 'Play';
   }
   host.append(button);
+  if (sample && upgrade) (host as VireControlElement).sample = sample;
   return host;
 }
 
@@ -138,8 +140,8 @@ async function reference(): Promise<void> {
   stage.style.height = `${REFERENCE_STAGE.height}px`;
   const height = BUTTON_SIZES[size].height;
   const src = `/__reference/file?path=${encodeURIComponent(control.file)}`;
-  stage.style.backgroundColor = await paintReferenceStage(stage, control, height, src);
-  rows.append(make(atomParam === 'all' ? control.atom : atomParam, stateParam === 'all' ? 'rest' : stateParam));
+  sample = await paintReferenceStage(stage, control, height, src);
+  rows.append(make(atomParam === 'all' ? control.atom : atomParam, stateParam === 'all' ? (control.state ?? 'rest') : stateParam));
 }
 
 if (view === 'sandbox') sandbox();

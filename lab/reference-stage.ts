@@ -1,3 +1,4 @@
+import type { BackdropSample } from 'vireglass';
 import type { ReferenceControl } from './reference-controls';
 
 export const REFERENCE_STAGE = { width: 180, height: 120 } as const;
@@ -33,13 +34,13 @@ function shrink(img: HTMLImageElement, width: number): HTMLCanvasElement {
   return source as HTMLCanvasElement;
 }
 
-/** Fills the control's footprint from its surround; returns the mean colour under it, since the glass probe reads styles, not pixels. */
+/** Fills the control's footprint from its surround; returns the sample under it, since the glass probe reads styles, not pixels. */
 export async function paintReferenceStage(
   stage: HTMLElement,
   control: ReferenceControl,
   heightPx: number,
   src: string,
-): Promise<string> {
+): Promise<BackdropSample> {
   const { width: W, height: H } = REFERENCE_STAGE;
   const style = document.createElement('style');
   style.textContent = SCHEME_CSS;
@@ -110,24 +111,18 @@ export async function paintReferenceStage(
       }
     }
   }
-  let mr = 0;
-  let mg = 0;
-  let mb = 0;
-  let n = 0;
+  const under: { r: number; g: number; b: number }[] = [];
   for (let i = 0; i < W * H; i += 1) {
     if (!masked[i]) continue;
     for (let c = 0; c < 3; c += 1) data[i * 4 + c] = field[i * 3 + c]!;
-    if (masked[i] !== FOOTPRINT) continue;
-    mr += field[i * 3]!;
-    mg += field[i * 3 + 1]!;
-    mb += field[i * 3 + 2]!;
-    n += 1;
+    if (masked[i] === FOOTPRINT) under.push({ r: data[i * 4]!, g: data[i * 4 + 1]!, b: data[i * 4 + 2]! });
   }
   g.putImageData(px, 0, 0);
   const layer = document.createElement('div');
   layer.style.cssText = `position:absolute;inset:0;z-index:-1;background:url(${canvas.toDataURL('image/png')}) 0 0/100% 100%`;
   stage.prepend(layer);
-  const mean = [mr, mg, mb].map((v) => Math.round(v / n));
-  stage.setAttribute('data-backdrop', 0.2126 * mean[0]! + 0.7152 * mean[1]! + 0.0722 * mean[2]! > 128 ? 'ref-light' : 'ref-dark');
-  return `rgb(${mean.join(' ')})`;
+  const { statsFromSamples } = await import('vireglass/dom');
+  const sample = statsFromSamples(under);
+  stage.setAttribute('data-backdrop', sample.luma > 0.5 ? 'ref-light' : 'ref-dark');
+  return sample;
 }

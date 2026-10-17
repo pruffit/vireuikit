@@ -1,7 +1,7 @@
-import { VIREGLASS_CONTROL_MATERIAL, type VireGlassMaterial } from 'vireglass';
+import { VIREGLASS_CONTROL_MATERIAL, type BackdropSample, type VireGlassMaterial } from 'vireglass';
 import type { GlassMorph } from 'vireglass/dom';
 import { presentationFor, sameA11y, type A11yMode, type A11yOverride, type Presentation } from '../kit/a11y';
-import { atomBody, atomRimOpacity, atomMaterial, type VireUIKitAtomKind } from '../kit/atom';
+import { atomBody, atomMaterial, type VireUIKitAtomKind } from '../kit/atom';
 import {
   CONTROL_IDLE,
   POINTER_INPUT,
@@ -54,6 +54,7 @@ const SUPPRESS_MS = 100;
 
 export interface VireControlElement extends HTMLElement {
   a11y: A11yOverride;
+  sample: BackdropSample | null;
   setMorph(morph: GlassMorph | null): void;
 }
 
@@ -80,8 +81,6 @@ export function createControlElementClass(
     #glassKey = '';
     #glassBroken = false;
     #lastMaterialKey = '';
-    #backdropLuma = 0.5;
-    #rim = '';
     #frame = 0;
     #lastFrame = 0;
     #cleanups: (() => void)[] = [];
@@ -89,6 +88,7 @@ export function createControlElementClass(
     #suppressTimer = 0;
     #slop = { x: 0, y: 0 };
     #morph: GlassMorph | null = null;
+    #sample: BackdropSample | null = null;
 
     get a11y(): A11yOverride {
       return this.#own;
@@ -99,12 +99,28 @@ export function createControlElementClass(
       if (this.#control) this.#refreshMode();
     }
 
+    get sample(): BackdropSample | null {
+      return this.#sample;
+    }
+
+    set sample(next: BackdropSample | null) {
+      this.#sample = next;
+      this.#glass?.setSample(next);
+    }
+
     setMorph(morph: GlassMorph | null): void {
       this.#morph = morph;
       this.#glass?.setMorph(morph);
     }
 
     connectedCallback(): void {
+      // Set before the element was defined, a property lands on the instance and hides the accessor.
+      for (const key of ['a11y', 'sample']) {
+        if (!Object.prototype.hasOwnProperty.call(this, key)) continue;
+        const value: unknown = Reflect.get(this, key);
+        Reflect.deleteProperty(this, key);
+        Reflect.set(this, key, value);
+      }
       ensureStyles(this, options.nonce);
       this.#cleanups.push(watchCoarsePointer(() => this.#onInputChange()));
       this.#cleanups.push(watchSystemA11y(() => this.#refreshMode()));
@@ -123,8 +139,6 @@ export function createControlElementClass(
       this.#suppressClick = false;
       for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-size']) this.removeAttribute(name);
       for (const name of Array.from(this.style)) if (name.startsWith('--vk-')) this.style.removeProperty(name);
-      this.#backdropLuma = 0.5;
-      this.#rim = '';
       this.#presentation = null;
       this.#mode = null;
     }
@@ -410,6 +424,7 @@ export function createControlElementClass(
       this.#glassKey = key;
       if (!want || !control) return;
       const token = this.#glassToken;
+      const sample = this.#sample;
       void attachControlGlass(
         control,
         {
@@ -417,6 +432,7 @@ export function createControlElementClass(
           geometry: this.#geometry(control),
           accessibility: mode,
           onTouch: this.#glassMode() === 'touch',
+          sample,
         },
         () => token === this.#glassToken && this.isConnected,
       )
@@ -424,8 +440,8 @@ export function createControlElementClass(
           if (!session) return;
           this.#glass = session;
           if (this.#morph) session.setMorph(this.#morph);
+          if (this.#sample !== sample) session.setSample(this.#sample);
           this.#pushMaterial(true);
-          this.#syncRim();
           this.dispatchEvent(new CustomEvent('vire-glass-ready'));
         })
         .catch(() => {
@@ -448,19 +464,6 @@ export function createControlElementClass(
       const material: VireGlassMaterial = atomMaterial(VIREGLASS_CONTROL_MATERIAL, kind, quantized);
       glass.setMaterial(material);
       if (this.#glassMode() === 'touch' && this.#forced()) glass.setAppear(quantized.pressed);
-    }
-
-    // The lens publishes the probe as `r g b` in 0..1 (gamma-encoded sRGB, so this luma is too).
-    #syncRim(): void {
-      const tint = this.#control?.style.getPropertyValue('--vireglass-tint').trim().split(/\s+/).map(Number);
-      if (tint?.length === 3 && !tint.some(Number.isNaN)) {
-        this.#backdropLuma = 0.2126 * tint[0]! + 0.7152 * tint[1]! + 0.0722 * tint[2]!;
-      }
-      const state = visualAtomState(this.#visual, this.#state);
-      const rim = atomRimOpacity(this.#backdropLuma, state).toFixed(3);
-      if (rim === this.#rim) return;
-      this.#rim = rim;
-      this.style.setProperty('--vk-rim', rim);
     }
 
     #render(immediate = false): void {
@@ -495,7 +498,6 @@ export function createControlElementClass(
       this.toggleAttribute('data-focus', this.#state.focused);
       this.toggleAttribute('data-disabled', this.#state.disabled);
       this.#pushMaterial();
-      if (this.#glass) this.#syncRim();
     }
   };
 }
