@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>VireUIKit lab: early define, menu</title>
+    <script src="/__early.js"></script>
+    <script>
+      VireWeb.defineVireElements();
+    </script>
+  </head>
+  <body style="font: 14px system-ui; padding: 40px">
+    <vire-menu id="early-menu">
+      <vire-icon-button><button type="button" id="early-trigger" popovertarget="early-list" aria-label="More">M</button></vire-icon-button>
+      <div id="early-list" popover>
+        <button type="button" popovertarget="early-list" popovertargetaction="hide">One</button>
+        <button type="button" popovertarget="early-list" popovertargetaction="hide">Two</button>
+      </div>
+    </vire-menu>
+    <pre id="log"></pre>
+    <script>
+      document.getElementById('early-list').addEventListener('click', function (e) {
+        document.getElementById('log').textContent += 'click:' + e.target.textContent + '\n';
+      });
+      document.documentElement.dataset.ready = '1';
+    </script>
+  </body>
+</html>
