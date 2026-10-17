@@ -10,6 +10,8 @@ export type ReferenceControl = Footprint & {
   atom: 'button' | 'iconButton';
   /** Which accessibility mode the reference was showing. */
   mode?: 'reduce-transparency';
+  /** A reference control caught under the finger; the rest are at rest. */
+  state?: 'pressed';
 };
 
 const I137 = 'ios26-4k/i137.00.jpg';
@@ -23,6 +25,7 @@ export const REFERENCE_CONTROLS: readonly ReferenceControl[] = [
   { id: 'a217-info', file: I137, at: 'A 2:17', atom: 'button', cx: 741, cy: 1620, hw: 125, hh: 72 },
   { id: 'a218-more', file: 'ios26-4k/i138.00.jpg', at: 'A 2:18', atom: 'iconButton', cx: 2867, cy: 1227, hw: 247, hh: 247 },
   { id: 'm172-next', file: 'meet4k/m172.00.jpg', at: 'M 2:52', atom: 'iconButton', cx: 2635, cy: 1105, hw: 228, hh: 228 },
+  { id: 'm352-pressed', file: 'meet4k/m232.00.jpg', at: 'M 3:52', atom: 'iconButton', cx: 1912, cy: 1021, hw: 517, hh: 517, state: 'pressed' },
   { id: 'm718-bar', file: 'meet4k/m718.00.jpg', at: 'M 11:58', atom: 'button', cx: 1921, cy: 1086, hw: 818, hh: 356 },
   { id: 'm1826-glass', file: 'meet4k/m1106.00.png', at: 'M 18:26', atom: 'iconButton', cx: 1966, cy: 961, hw: 422, hh: 392, ellipse: true },
   { id: 'm1830-reduced', file: 'meet4k/m1110.00.png', at: 'M 18:30', atom: 'iconButton', cx: 1916, cy: 962, hw: 490, hh: 435, ellipse: true, mode: 'reduce-transparency' },

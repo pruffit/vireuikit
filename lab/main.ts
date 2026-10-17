@@ -139,7 +139,7 @@ async function reference(): Promise<void> {
   const height = BUTTON_SIZES[size].height;
   const src = `/__reference/file?path=${encodeURIComponent(control.file)}`;
   stage.style.backgroundColor = await paintReferenceStage(stage, control, height, src);
-  rows.append(make(atomParam === 'all' ? control.atom : atomParam, stateParam === 'all' ? 'rest' : stateParam));
+  rows.append(make(atomParam === 'all' ? control.atom : atomParam, stateParam === 'all' ? (control.state ?? 'rest') : stateParam));
 }
 
 if (view === 'sandbox') sandbox();
