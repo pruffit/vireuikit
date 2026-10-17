@@ -1,4 +1,4 @@
-import type { VireGlassAccessibility, VireGlassGeometry, VireGlassMaterial } from 'vireglass';
+import type { BackdropSample, VireGlassAccessibility, VireGlassGeometry, VireGlassMaterial } from 'vireglass';
 import type { AttachGlassOptions, GlassHandle, GlassMorph } from 'vireglass/dom';
 
 export type GlassParams = {
@@ -7,6 +7,8 @@ export type GlassParams = {
   accessibility: VireGlassAccessibility;
   /** The glass appears only under the finger. */
   onTouch: boolean;
+  /** The backdrop as the host knows it; null leaves it to the lens's probe. */
+  sample: BackdropSample | null;
 };
 
 export type GlassSession = {
@@ -14,6 +16,7 @@ export type GlassSession = {
   setGeometry(geometry: VireGlassGeometry): void;
   setAppear(t: number): void;
   setMorph(morph: GlassMorph | null): void;
+  setSample(sample: BackdropSample | null): void;
   destroy(): void;
 };
 
@@ -34,7 +37,11 @@ export async function attachControlGlass(
     geometry: params.geometry,
     accessibility: params.accessibility,
     variant: params.onTouch ? 'interactive' : 'present',
+    // The kit paints its own body: the core's is darker than its surround over a light backdrop and
+    // near black under reduced transparency with light ink (docs/acceptance.md, "Resting body").
+    body: false,
   };
+  if (params.sample) opts.sample = params.sample;
   const handle: GlassHandle = attachGlass(el, opts);
 
   return {
@@ -48,6 +55,7 @@ export async function attachControlGlass(
     },
     setAppear: (t) => handle.setAppear(t),
     setMorph: (morph) => handle.setMorph(morph),
+    setSample: (sample) => handle.setSample(sample),
     destroy: () => handle.destroy(),
   };
 }

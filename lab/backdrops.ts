@@ -1,4 +1,6 @@
 // Backdrops are generated, so the repository carries no third-party images.
+import type { BackdropSample } from 'vireglass';
+
 export const BACKDROPS = ['light', 'dark', 'text', 'busy', 'photo', 'mid'] as const;
 export type Backdrop = (typeof BACKDROPS)[number];
 
@@ -23,15 +25,14 @@ function valueNoise(x: number, y: number): number {
 }
 
 /** Deterministic photo-like texture: layered noise mapped through a warm-to-cool palette. */
-function noiseImage(width: number, height: number): { url: string; mean: string } {
+type Rgb = { r: number; g: number; b: number };
+
+function noiseImage(width: number, height: number): { url: string; pixels: Rgb[] } {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
   const img = ctx.createImageData(width, height);
-  let r = 0;
-  let g = 0;
-  let b = 0;
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       let n = 0;
@@ -51,17 +52,12 @@ function noiseImage(width: number, height: number): { url: string; mean: string 
       img.data[i + 1] = pg;
       img.data[i + 2] = pb;
       img.data[i + 3] = 255;
-      r += pr;
-      g += pg;
-      b += pb;
     }
   }
   ctx.putImageData(img, 0, 0);
-  const count = width * height;
-  return {
-    url: canvas.toDataURL('image/png'),
-    mean: `rgb(${Math.round(r / count)} ${Math.round(g / count)} ${Math.round(b / count)})`,
-  };
+  const pixels: Rgb[] = [];
+  for (let i = 0; i < img.data.length; i += 4) pixels.push({ r: img.data[i]!, g: img.data[i + 1]!, b: img.data[i + 2]! });
+  return { url: canvas.toDataURL('image/png'), pixels };
 }
 
 const WORDS = 'glass lens edge light rim body ink press lift hover focus rest touch surface material depth blur'.split(' ');
@@ -102,8 +98,9 @@ const CSS = `
 .b-row em { font-style: normal; color: #6a6e78; }
 `;
 
-/** Paints the backdrop into `stage` and tags it so the surrounding colours follow it. */
-export function paintBackdrop(stage: HTMLElement, kind: Backdrop): void {
+/** Paints the backdrop into `stage` and tags it so the surrounding colours follow it. An image
+ *  backdrop returns its sample, since the glass probe reads declared colours, not pixels. */
+export async function paintBackdrop(stage: HTMLElement, kind: Backdrop): Promise<BackdropSample | null> {
   if (!document.getElementById('lab-backdrop-css')) {
     const style = document.createElement('style');
     style.id = 'lab-backdrop-css';
@@ -119,11 +116,12 @@ export function paintBackdrop(stage: HTMLElement, kind: Backdrop): void {
     layer.innerHTML = textPage();
   } else if (kind === 'busy') {
     layer.innerHTML = busyMock();
-  } else if (kind === 'photo') {
-    const { url, mean } = noiseImage(380, 260);
-    stage.style.backgroundColor = mean;
-    layer.style.cssText = `background:url(${url}) center/cover`;
   }
-  if (kind !== 'photo') stage.style.backgroundColor = '';
   stage.prepend(layer);
+  if (kind !== 'photo') return null;
+  const photo = noiseImage(380, 260);
+  layer.style.cssText = `background:url(${photo.url}) center/cover`;
+  // Loaded only here: the failure tests stub this module, and the other backdrops must not need it.
+  const { statsFromSamples } = await import('vireglass/dom');
+  return statsFromSamples(photo.pixels);
 }

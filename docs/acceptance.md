@@ -57,7 +57,7 @@ A button is an action: nothing grows out of it, and it sinks under press rather 
 | B6 | The press is cancelled when the pointer leaves, and releasing outside does not activate. | unit; behaviour "the pointer leaving cancels the press" |
 | B7 | A release outside never swallows a later click: a keyboard or scripted click, and a real click, still fire. | behaviour "after a release outside…", "a release outside followed by a real click…" |
 | B8 | Hover exists only with a cursor; keyboard focus draws a ring on any device (W 2.4.7), a click does not. A key press does not stay held when focus moves away. | unit; behaviour "hover comes with the cursor", "keyboard focus shows the ring…", "a key shows the focus ring even though the pointer is coarse", "a key press does not stick…" |
-| B9 | Disabled stays glass but stops asserting itself: lower presence, no response, cannot be activated. | unit; behaviour "a disabled control cannot be activated"; snapshot of the disabled state |
+| B9 | Disabled stays glass but stops asserting itself: a quarter of the resting body, dimmed ink, no response, cannot be activated. | unit; behaviour "a disabled control cannot be activated"; snapshot of the disabled state |
 | B10 | It works before the glass: the native button clicks, submits its form, is named and focusable with no element defined; a button that already has keyboard focus shows the ring as it upgrades. | behaviour "before the upgrade" |
 | B11 | Upgrading while the page is still being parsed adopts the single native button; none is synthesized. | behaviour "upgrade while the page is parsed" (elements defined by a script before the markup) |
 | B12 | Glass is opt-in: with no `glass` attribute there is no lens, and the plain control is complete (visible body, clickable, announced by role and name). | behaviour "glass is opt-in…", "glass off leaves a complete, clickable, named control"; `*-glass-off` snapshots |
@@ -71,12 +71,13 @@ A button is an action: nothing grows out of it, and it sinks under press rather 
 | B20 | Appearance goes by modulating the lens, never by fading the element (M 2:55). | the element never animates opacity; the touch-only variant uses `setAppear`. Not gated. |
 | B21 | The hit area meets the target floor on a coarse pointer without changing layout, and a tap in it is exactly one click, seen once on the host and once on the button. | behaviour "hit area on a coarse pointer" (including "a tap in the hit area is exactly one click…"), "hit area on a fine pointer" |
 | B22 | The element cleans up: removing it removes its lens and its filter; reconnecting upgrades again. | behaviour "removing the element removes its lens and its filter", "connecting again…" |
-| B23 | Edge light, adaptive shadow, dispersion, backdrop blur at the rim: the material's, not the kit's. The one thing the kit sets is how strongly the rim is drawn (B27). | owned by `vireglass`; visible in the snapshots, not asserted here beyond B27 |
+| B23 | Edge light and the rim's strength, adaptive shadow, dispersion, backdrop blur at the rim: the material's, not the kit's. | owned by `vireglass`; visible in the snapshots, not asserted here beyond B27 |
 | B24 | If the lens cannot be loaded or attached, the control falls back to the plain surface (frosted under reduced transparency), stays clickable, raises no unhandled error, and the next change retries the attach. | behaviour "a lens that fails to attach" (an aborted module request; an `attachGlass` that throws, counting the retries) |
 | B25 | Under forced colours the text keeps the system colour, undimmed, and the own tints and blur are dropped (W 1.4.11). | behaviour "forced colours" |
 | B26 | At rest the glass body stands off its surround and carries its colour (see "Resting body"). | behaviour "resting body and rim", canary "a clear body fails the gate"; measured |
-| B27 | At rest the rim reads clearly over a bright backdrop and faintly over a dark one, and a pressed control keeps the full highlight (see "Resting body"). | behaviour "resting body and rim", canary "a rim at full strength fails the gate"; unit `atomRimOpacity` |
+| B27 | At rest the rim reads clearly over a bright backdrop and faintly over a dark one (see "Resting body"). The strength is the core's, which follows the surround; the kit does not scale it. | behaviour "resting body and rim", canary "a rim at full strength fails the gate" (a white line all round); measured |
 | B28 | The press end of the body is the milky tint the kit already drew: alpha 0.34, 35 % white (pixel-identical to before). | unit `atomBody` |
+| B29 | A host that knows its backdrop (an image, a video: the lens's probe reads declared colours only) gives it to the element as `sample`, at any time; `null` hands it back to the probe. | behaviour "a sample set on the element replaces the probe…", "a sample given before the lens attaches…" |
 
 ## Icon button
 
@@ -97,8 +98,8 @@ The carrier of lift into the glass, and later of growth into a menu.
 
 At rest, over a smooth backdrop, a glass control with no body of its own is only its rim: the lens has nothing to
 refract. The reference resting body is a visible smoky disc that carries the backdrop's colour, with a readable rim.
-The kit gives the control a body at rest (`atomBody`) and draws the lens's rim at a strength that follows the
-backdrop (`atomRimOpacity`); both are measured against the reference below.
+The kit gives the control a body at rest (`atomBody`, attached with `body: false` so the core does not paint its
+own); the rim is the core's, whose strength follows the surround. Both are measured against the reference below.
 
 ### How it is measured
 
@@ -113,70 +114,88 @@ reference ellipses in perspective use an elliptical distance), in OKLab from sRG
   0.07 R inside to 0.03 R outside the edge, minus the surround's lightness.
 
 `tests/lab/measure.ts` does this for the gate and for `npx playwright test reference`, which measures every
-reference control and our atom on the same backdrop (`VIREUIKIT_REFERENCE_DIR` set; the lab's `view=reference`
-paints the frame's backdrop around the control, scaled so that the reference control is as tall as ours, with the
-control's own footprint filled smoothly from its surround). Footprints are in `lab/reference-controls.ts`. Frames
-M 18:26 and M 18:30 are taken from the video at that time; the rest are the extracted frames. sRGB is assumed for
-the video's colours.
+reference control and our atom, at rest and pressed, on the same backdrop (`VIREUIKIT_REFERENCE_DIR` set; the lab's
+`view=reference` paints the frame's backdrop around the control, scaled so that the reference control is as tall as
+ours, with the control's own footprint filled smoothly from its surround, and hands the element the sample of that
+footprint). Footprints are in `lab/reference-controls.ts`. Frames M 18:26 and M 18:30 are taken from the video at
+that time; the rest are the extracted frames. sRGB is assumed for the video's colours.
 
 ### What the reference measures, and ours
 
 Lightness and chroma differences are in OKLab; ours is the kit's atom at the touch size (44 dp) on the same
-backdrop, before and after this change.
+backdrop. "Before" is the kit on `vireglass` 2.3.1, which dimmed the core's full-white rim by a factor of its own;
+"after" is the kit on 3.0.0 with the core's rim. The body is the kit's in both.
 
-| Frame and control | ref ΔL | before | after | ref ΔC | before | after | ref rim | before | after |
-|---|---|---|---|---|---|---|---|---|---|
-| A 2:17 skip back, circle | +0.086 | +0.023 | +0.083 | +0.007 | -0.002 | -0.003 | 0.240 | 0.707 | 0.264 |
-| A 2:17 pause, large circle | +0.071 | +0.038 | +0.104 | +0.013 | +0.006 | +0.005 | 0.257 | 0.762 | 0.321 |
-| A 2:17 skip forward, circle | +0.045 | +0.027 | +0.093 | +0.004 | +0.003 | +0.003 | 0.268 | 0.796 | 0.324 |
-| A 2:17 Continue Watching, capsule | +0.080 | +0.046 | +0.096 | +0.011 | +0.000 | +0.000 | 0.256 | 0.699 | 0.277 |
-| A 2:17 Info, capsule over warm | +0.126 | +0.025 | +0.083 | +0.020 | -0.006 | -0.008 | 0.268 | 0.702 | 0.251 |
-| M 2:52 next, circle over sky | +0.076 | +0.002 | +0.041 | -0.001 | -0.001 | -0.005 | 0.246 | 0.329 | 0.227 |
-| A 2:18 more, circle over grass (a) | +0.232 | +0.046 | +0.093 | -0.013 | +0.005 | +0.003 | 0.372 | 0.541 | 0.356 |
-| M 11:58 toolbar capsule over text (a) | +0.049 | -0.047 | -0.012 | -0.000 | -0.001 | -0.001 | 0.114 | 0.129 | 0.078 |
-| M 18:26 circle over a flower (a) | +0.040 | +0.030 | +0.064 | +0.040 | +0.002 | +0.003 | 0.291 | 0.340 | 0.240 |
-| M 18:30 the same, reduced transparency (a) (b) | +0.169 | +0.239 | +0.170 | +0.010 | -0.058 | -0.025 | 0.187 | 0.239 | 0.265 |
+| Frame and control | ref ΔL | before | after | ref ΔC | after | ref rim | before | after |
+|---|---|---|---|---|---|---|---|---|
+| A 2:17 skip back, circle | +0.086 | +0.083 | +0.086 | +0.007 | -0.003 | 0.240 | 0.264 | 0.249 |
+| A 2:17 pause, large circle | +0.071 | +0.104 | +0.106 | +0.013 | +0.005 | 0.257 | 0.321 | 0.302 |
+| A 2:17 skip forward, circle | +0.045 | +0.093 | +0.093 | +0.004 | +0.002 | 0.268 | 0.324 | 0.311 |
+| A 2:17 Continue Watching, capsule | +0.080 | +0.096 | +0.098 | +0.011 | +0.000 | 0.256 | 0.277 | 0.252 |
+| A 2:17 Info, capsule over warm | +0.126 | +0.083 | +0.084 | +0.020 | -0.008 | 0.268 | 0.251 | 0.235 |
+| M 2:52 next, circle over sky | +0.076 | +0.041 | +0.043 | -0.001 | -0.005 | 0.246 | 0.227 | 0.243 |
+| A 2:18 more, circle over grass (a) | +0.232 | +0.093 | +0.097 | -0.013 | +0.004 | 0.372 | 0.356 | 0.375 |
+| M 11:58 toolbar capsule over text (a) | +0.049 | -0.012 | -0.006 | -0.000 | -0.001 | 0.114 | 0.078 | 0.084 |
+| M 18:26 circle over a flower (a) | +0.040 | +0.064 | +0.071 | +0.040 | +0.004 | 0.291 | 0.240 | 0.257 |
+| M 18:30 the same, reduced transparency (a) | +0.169 | +0.169 | +0.177 | +0.010 | -0.023 | 0.187 | 0.266 | 0.231 |
+| M 3:52 circle under the finger, pressed (a) (b) | +0.198 | +0.039 | +0.046 | +0.001 | -0.003 | 0.392 | 0.385 | 0.286 |
 
 (a) The backdrop is not smooth: what lies under the control is not in the frame, so the surround is only a guess
-for it. These rows are reported, not held to the tolerance. In the "before" columns of the last row the lens was
-removed and the control was the opaque stand-in (b).
+for it. These rows are reported, not held to the tolerance. (b) The only reference control caught pressed, compared
+with our pressed atom; the finger covers the lower part of the body and of the surround in both.
 
 **Tolerance**, on the six rows not marked (a), all on smooth backdrops: ours is within 0.05 of the reference in ΔL,
 within 0.08 in rim over surround and within 0.04 in ΔC. The largest gaps among them are ΔL +0.048 (skip forward)
-and -0.043 (Info), rim +0.064 (pause) and ΔC 0.028 (Info). Before, ΔL was 0.02 to 0.10 under the reference on every
-one of them and the rim 0.43 to 0.53 over it on the dark ones, since the core's highlight is white at full strength
-everywhere. The (a) rows are further off in ΔL (grass -0.139, text -0.061) and in rim only on the reduced
-transparency row (+0.078).
+and -0.042 (Info), rim +0.045 (pause) and ΔC 0.028 (Info). The kit's own rim factor left the rim up to +0.064 over
+the reference (pause); the core's is within +0.045 of it. The (a) rows are further off in ΔL (grass -0.135, text
+-0.055).
+
+**Pressed.** Our pressed body is no milkier than before (+0.046 against the reference's +0.198 at M 3:52), and the
+rim no longer flares: over the dark frames the pressed rim measured 0.72 to 0.81 over the surround before (the
+core's lobe at full white) and 0.26 to 0.34 after. At M 3:52 that full-white lobe happened to match the reference
+(0.385 against 0.392); the core's line reads 0.286 there, because its strength follows the surround and not the
+press (see below).
 
 ### The gate
 
 B26 and B27 hold on generated backdrops with headroom: ΔL between 0.02 and 0.14, |ΔC| at most 0.04, rim over
 surround between 0.10 and 0.45. The bounds sit under the lowest and over the highest reference values above
-(ΔL 0.040 to 0.232 on every row, 0.045 to 0.126 on the smooth ones; rim 0.11 to 0.37) with a margin. Over a
+(ΔL 0.040 to 0.232 on every resting row, 0.045 to 0.126 on the smooth ones; rim 0.11 to 0.37) with a margin. Over a
 near-white backdrop the body cannot get much lighter, so there the gate asks only for a clearly positive ΔL (above
-0.01): every reference row is positive, ours is 0.02 and a body of nothing measures 0.004. The canaries are the old
-look: a body of nothing (ΔL under 0.02) and the rim at full strength (0.7 over a dark backdrop).
+0.01): every reference row is positive, ours is 0.02 and a body of nothing measures 0.004. On the dark and photo
+backdrops ours measures ΔL 0.03 to 0.04 and rim 0.15 to 0.19 (0.15 to 0.21 with the kit's rim factor), so the
+bounds did not move. The canaries are the old look: a body of nothing (ΔL 0.004) and a rim drawn white all round
+(0.70 over a dark backdrop).
 
 The bounds come from the reference, not from our own output, and the gate measures pixels of a render, so a change
 to the core's lens that moves the body or the rim fails it in either direction.
 
-### What the core does not offer
+### What the core offers, and what the kit still does itself
 
-Neither is changed here; both are worked around in the kit.
+- **The rim is the core's.** `vireglass` 3.0 draws a thin line round the whole contour whose strength follows the
+  lightness around the element, and it lands within the tolerance on every smooth row (above), so the kit's factor
+  (`atomRimOpacity`, `--vk-rim` on the lens's `::after`) is gone. What it does not do is brighten under press: the
+  line's strength is capped at the reflectance of ordinary glass, so the denser pressed medium draws it barely
+  brighter (0.286 against the reference's 0.392 at M 3:52). A core change would let the press reach the line.
+- **The body stays the kit's.** The core now paints a body on the SVG path as well. Measured in place of
+  `atomBody` (`body` left on, same lab, same samples), it misses the kit's bounds:
 
-- **The rim's strength is not a material parameter.** `rimGradientCss` draws the key-light lobe at full white on
-  every backdrop: on the dark frames the brightest rim bin is 0.95 in OKLab lightness against 0.42 to 0.53 in the
-  reference, and the rim over surround is 0.70 to 0.80 against 0.24 to 0.27. The kit dims the `::after` the core
-  draws, by a factor that follows the probed luma (0.27 over dark to 0.65 over bright). A core change would take a
-  `rim` strength in the material, or let the lobe follow the ambient the way the reference's does (a
-  reflection of the surroundings: 0.27 of white over a dark one, 0.6 to 0.7 over grass or sky).
-- **The body is not drawn on the SVG path.** `bodyCss` (density, tint, colour pickup) is only applied as
-  `background-color` on browsers without SVG backdrop filters; where they exist, the core only publishes
-  `--vireglass-body-color`, and over a dark backdrop that colour is darker than the surround, while the reference
-  body is lighter by 0.045 to 0.126. The kit therefore draws its own body (`atomBody`).
-- **The probe is blind to images and gradients.** The ambient colour that the body and the ink follow comes from
-  declared backgrounds, so over a photo the body is a lift of the page's colour, not of the photo's. A host that knows
-  its backdrop can pass `sample` to `attachGlass`; the elements do not expose it yet.
+  | Where | reference | kit body | core body | bound |
+  |---|---|---|---|---|
+  | A 2:17 skip forward, ΔL | +0.045 | +0.093 | +0.114 | within 0.05 of the reference |
+  | M 2:52 next, ΔL | +0.076 | +0.043 | +0.021 | within 0.05 of the reference |
+  | M 18:30 reduced transparency, ΔL | +0.169 | +0.177 | -0.359 | lighter than the surround (B16) |
+  | gate, light backdrop, ΔL | | 0.021 | -0.002 | above 0.01 |
+  | M 3:52 pressed, ΔL | +0.198 | +0.046 | -0.051 | not held (a) |
+
+  The other four smooth rows and the dark and photo gates (ΔL 0.069 and 0.024) are within the bounds with either
+  body. Under reduced transparency the core takes the body to the ink's own pole once its density passes 0.8, so
+  with a light glyph over M 18:30 it turns near black, where the reference is a light frosted body under a dark
+  glyph. The control material also carries no presence any more, so a disabled control's core body would not thin
+  (B9). Neither body comes near the reference's milky press.
+- **The probe is blind to images and gradients.** The ambient colour that the body, the ink and the rim follow comes
+  from declared backgrounds. A host that knows its backdrop sets `sample` on the element (B29), which goes to the
+  lens's `setSample`; the lab does this for its photo and reference backdrops instead of declaring their mean colour.
 
 ## What is not covered
 
@@ -188,6 +207,8 @@ Neither is changed here; both are worked around in the kit.
   modes are tested through the programmatic override.
 - Real finger gestures: touch is emulated (tap, coarse pointer), and the finger glow of B1/I4 is `vireglass`'s.
 - The press timing: stills are compared, not the motion curve.
+- The pressed body against M 3:52: measured (ΔL +0.046 against the reference's +0.198), not held. The press end is
+  the tint the kit drew before (B28); a milkier press is open.
 - A retry after a module that failed to load: browsers cache a failed dynamic import, so the retry is attempted but
   may fail again without a new request; only a throwing `attachGlass` is observed retrying.
 - Forced colours: the colour of the text is asserted, not how the control looks.

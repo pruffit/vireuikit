@@ -12,7 +12,7 @@ capsule-to-target growth morph.
 npm install vireuikit vireglass
 ```
 
-`vireglass` is a peer dependency — this package draws on its material model rather than
+`vireglass` (3.x) is a peer dependency — this package draws on its material model rather than
 shipping its own.
 
 ## Atom state and morph
@@ -68,6 +68,16 @@ setA11yOverride({ reduceTransparency: true });
   glass), `size` (`touch`, `small`, `medium`, `large`, `xlarge`; by default `touch` on a coarse pointer and
   `medium` otherwise), `disabled`.
 - On a coarse pointer every size keeps a hit area of at least 44 dp without changing layout.
+- The lens reads the backdrop from declared colours and cannot see an image, a video or a canvas. A host that knows
+  what lies under the control sets the element's `sample` (a `BackdropSample` from `vireglass`), at any time; `null`
+  hands it back to the probe.
+
+  ```ts
+  import { statsFromSamples } from 'vireglass/dom';
+
+  playButton.sample = statsFromSamples(coverColours); // [{ r, g, b }, …] in 0–255
+  ```
+
 - The element dispatches `vire-glass-ready` once its lens is attached. If the lens cannot be loaded or attached,
   the control stays a complete one on its plain (or, under reduced transparency, opaque frosted) surface, and the next
   setting change tries again.

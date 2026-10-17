@@ -182,8 +182,9 @@ describe('visual', () => {
     expect(on.ior).toBeGreaterThan(VIREGLASS_CONTROL_MATERIAL.ior);
 
     const off: ControlState = { ...CONTROL_IDLE, disabled: true };
-    const dim = atomMaterial(VIREGLASS_CONTROL_MATERIAL, 'button', visualAtomState(createControlVisual(), off));
-    expect(dim.presence).toBeLessThan(VIREGLASS_CONTROL_MATERIAL.presence);
+    const base = { ...VIREGLASS_CONTROL_MATERIAL, presence: 0.2 };
+    const dim = atomMaterial(base, 'button', visualAtomState(createControlVisual(), off));
+    expect(dim.presence).toBeLessThan(base.presence);
   });
 
   it('a button sinks under press and an icon button lifts into the glass', () => {

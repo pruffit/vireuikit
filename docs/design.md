@@ -41,7 +41,10 @@ attribute, a development aid of the elements that the lab and the snapshots use.
   local directory given by `VIREUIKIT_REFERENCE_DIR`; they are third-party material and are never committed.
 - **Reference backdrop** (`?view=reference&ref=<id>`) puts our atom on the backdrop around a reference control, at the
   same relative size, so the two can be measured on the same pixels. `npx playwright test reference` prints the
-  measurements side by side (it is skipped when the directory is not set).
+  measurements side by side, our atom at rest and pressed (it is skipped when the directory is not set).
+- **Image backdrops** hand the elements a backdrop sample (`sample`), because the lens's probe reads declared colours
+  and cannot see an image: the photo the sample of the whole picture, the reference backdrop that of the control's
+  footprint.
 
 ## Gates
 

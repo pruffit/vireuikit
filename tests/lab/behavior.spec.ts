@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { centerOf, openCase, press, pressFirstFrame, scaleOf } from './helpers';
 import type { Footprint } from '../../lab/footprint';
-import { atomRimOpacity } from '../../src/kit/atom';
+import type { VireControlElement } from '../../src/web';
 import { measureImage, type Measure } from './measure';
 
 const log = (page: Page) =>
@@ -249,24 +249,46 @@ test.describe('glass and its absence', () => {
     expect(left).toEqual([]);
   });
 
-  // The kit reads the lens's probe as `r g b` in 0..1; if that format changes, the rim must fail here, not fall back quietly.
-  test('the rim strength follows the probe the lens publishes', async ({ page }) => {
-    const read = async (backdrop: string) => {
-      await openCase(page, `atom=button&state=rest&backdrop=${backdrop}&glass=1`);
-      return page.locator('.cell[data-state=rest] vire-button').evaluate((host) => ({
-        tint: host.querySelector('button')!.style.getPropertyValue('--vireglass-tint'),
-        rim: Number(host.style.getPropertyValue('--vk-rim')),
+  // The probe reads declared colours and is blind to images; a host that knows its backdrop says so.
+  test('a sample set on the element replaces the probe, live, and null hands it back', async ({ page }) => {
+    await openCase(page, 'atom=button&state=rest&backdrop=light&glass=1');
+    const host = page.locator('.cell[data-state=rest] vire-button');
+    const read = () =>
+      host.locator('button').evaluate((el) => ({
+        ink: el.style.getPropertyValue('--vireglass-ink'),
+        tint: el.style.getPropertyValue('--vireglass-tint-color'),
       }));
-    };
-    const dark = await read('dark');
-    const light = await read('light');
-    for (const { tint, rim } of [dark, light]) {
-      expect(tint).toMatch(/^[\d.]+ [\d.]+ [\d.]+$/);
-      const [r, g, b] = tint.split(' ').map(Number) as [number, number, number];
-      expect(Math.max(r, g, b)).toBeLessThanOrEqual(1);
-      expect(rim).toBeCloseTo(atomRimOpacity(0.2126 * r + 0.7152 * g + 0.0722 * b), 3);
+    const setSample = (dark: boolean) =>
+      host.evaluate((el, dark) => {
+        const v = 0.06;
+        (el as VireControlElement).sample = dark ? { luma: v, busy: 0, lo: v, hi: v, r: v, g: v, b: v } : null;
+      }, dark);
+    const probed = await read();
+    expect(probed.ink).toBe('0');
+    await setSample(true);
+    const fed = await read();
+    expect(fed.ink).toBe('1');
+    expect(fed.tint).not.toBe(probed.tint);
+    await setSample(false);
+    expect(await read()).toEqual(probed);
+  });
+
+  test('a sample given before the lens attaches, or while it loads, is the one it starts from', async ({ page }) => {
+    await openCase(page, 'view=sandbox&backdrop=light&glass=0');
+    await page.evaluate(() => {
+      const dark = { luma: 0.06, busy: 0, lo: 0.06, hi: 0.06, r: 0.06, g: 0.06, b: 0.06 };
+      const before = document.querySelector('#play') as VireControlElement;
+      before.sample = dark;
+      before.setAttribute('glass', '');
+      const during = document.querySelector('#share') as VireControlElement;
+      during.setAttribute('glass', '');
+      during.sample = dark;
+    });
+    for (const id of ['#play', '#share']) {
+      await expect
+        .poll(() => page.locator(`${id} button`).evaluate((el) => el.style.getPropertyValue('--vireglass-ink')))
+        .toBe('1');
     }
-    expect(light.rim).toBeGreaterThan(dark.rim + 0.2);
   });
 
   test('connecting again after removal upgrades it once more', async ({ page }) => {
@@ -565,7 +587,7 @@ test.describe('resting body and rim', () => {
   });
 
   test('canary: a rim at full strength fails the gate', async ({ page }) => {
-    const m = await measureRest(page, 'button', 'dark', ':is(vire-button,vire-icon-button)[data-vk]>button::after{opacity:1 !important}');
+    const m = await measureRest(page, 'button', 'dark', ':is(vire-button,vire-icon-button)[data-vk]>button::after{background:#fff !important}');
     expect(separates(m)).toBe(false);
     expect(m.rimOverSurround).toBeGreaterThan(RIM_OVER_SURROUND[1]);
   });

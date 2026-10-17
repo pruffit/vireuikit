@@ -5,7 +5,6 @@ import {
   atomLift,
   atomBody,
   atomMaterial,
-  atomRimOpacity,
   type VireUIKitAtomKind,
 } from '../kit/atom';
 import { VIREGLASS_CONTROL_MATERIAL, applyAccessibility, resolveOptics } from 'vireglass';
@@ -50,15 +49,16 @@ describe('atom states', () => {
     expect(touchRest).toEqual(VIREGLASS_CONTROL_MATERIAL);
   });
 
+  // The control material carries no presence of its own; a base that does loses most of it.
   it('disabled lifts the legibility requirement but leaves the glass', () => {
-    const off = atomMaterial(VIREGLASS_CONTROL_MATERIAL, 'button', {
-      ...ATOM_AT_REST,
-      disabled: true,
-      pressed: 1,
-    });
-    expect(off.presence).toBeLessThan(VIREGLASS_CONTROL_MATERIAL.presence);
-    expect(off.ior).toBe(VIREGLASS_CONTROL_MATERIAL.ior);
+    const base = { ...VIREGLASS_CONTROL_MATERIAL, presence: 0.2 };
+    const off = atomMaterial(base, 'button', { ...ATOM_AT_REST, disabled: true, pressed: 1 });
+    expect(off.presence).toBeLessThan(base.presence / 2);
+    expect(off.ior).toBe(base.ior);
     expect(off.thickness).toBeGreaterThan(0);
+    expect(atomMaterial(VIREGLASS_CONTROL_MATERIAL, 'button', { ...ATOM_AT_REST, disabled: true, pressed: 1 })).toEqual(
+      VIREGLASS_CONTROL_MATERIAL,
+    );
   });
 });
 
@@ -116,24 +116,5 @@ describe('the body', () => {
     expect(body({}, true).alpha).toBe(asked);
     expect(body({}, true).alpha).toBeGreaterThan(0.7);
     expect(body({}, true).lift).toBeGreaterThan(body().lift);
-  });
-});
-
-describe('the rim light', () => {
-  it('grows with the lightness behind it and stays bounded', () => {
-    let last = 0;
-    for (let luma = 0; luma <= 1; luma += 0.05) {
-      const v = atomRimOpacity(luma);
-      expect(v).toBeGreaterThanOrEqual(last);
-      expect(v).toBeGreaterThan(0.2);
-      expect(v).toBeLessThanOrEqual(0.7);
-      last = v;
-    }
-    expect(atomRimOpacity(0.9)).toBeGreaterThan(atomRimOpacity(0.15) * 2);
-  });
-
-  it('a pressed control shows the full highlight', () => {
-    expect(atomRimOpacity(0.15, { ...ATOM_AT_REST, pressed: 1 })).toBe(1);
-    expect(atomRimOpacity(0.15, { ...ATOM_AT_REST, hovered: 1 })).toBeGreaterThan(atomRimOpacity(0.15));
   });
 });
