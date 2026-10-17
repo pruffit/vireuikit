@@ -325,7 +325,7 @@ describe('timing against the reference', () => {
     expect(o.atSize).toBeLessThan(0.35);
   });
 
-  it('it overshoots by about 3 % at about 0.37 s and settles by about 0.55 s', () => {
+  it('it overshoots by about 3.5 % at about 0.37 s and settles soon after', () => {
     const o = opening();
     expect(o.peak).toBeGreaterThan(1.02);
     expect(o.peak).toBeLessThan(1.05);
@@ -334,11 +334,11 @@ describe('timing against the reference', () => {
     expect(o.settled).toBeLessThan(0.6);
   });
 
-  it('closing reaches the drop at about 0.15 s and is back in the trigger at about 0.35 s', () => {
+  it('closing reaches the drop at about 0.25 s and is back in the trigger at about 0.42 s', () => {
     const c = closing();
-    expect(c.drop).toBeGreaterThan(0.11);
-    expect(c.drop).toBeLessThan(0.19);
-    expect(c.back).toBeGreaterThan(0.3);
-    expect(c.back).toBeLessThan(0.42);
+    expect(c.drop).toBeGreaterThan(0.2);
+    expect(c.drop).toBeLessThan(0.29);
+    expect(c.back).toBeGreaterThan(0.38);
+    expect(c.back).toBeLessThan(0.48);
   });
 });

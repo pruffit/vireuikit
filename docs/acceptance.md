@@ -48,8 +48,9 @@ capsule's computed radius is half its height, and under touch emulation a tap `s
 `medium` body clicks it while a point beyond the slop does not), and the `size` test in `menu-behavior.spec.ts`
 (rendered rows of 44, a menu radius of 35).
 
-The reference frames of M 5:11 were cut from the video at 29.97 fps (opening 311.45–312.40 s, closing 313.45–313.78 s)
-and are local like the others; lengths are converted with the toolbar's 282 px as 44 dp (6.41 px/dp).
+The reference frames of M 5:11 are every frame of the video from 311.478 to 312.446 s (opening) and from 313.414 to
+313.847 s (closing), at 29.97 fps, kept locally under `m511/` like the others; lengths are converted with the toolbar's
+282 px as 44 dp (6.41 px/dp).
 
 ## Button
 
@@ -120,7 +121,7 @@ button or a bare `<button>`; it grows only because it opens a menu (B5). Behavio
 | N6 | Escape closes and returns focus to the trigger; a press outside closes without taking focus back; Tab closes, and focus moves on from the trigger as if the menu were not there. | unit; behaviour "Escape…", "a press outside…", "Tab…" |
 | N7 | There is no way to choose and stay open. | by construction (no such option); unit (`choose` always closes) |
 | N8 | The glass grows out of the trigger: the surface's first frame is the trigger's body (box and radius), it contracts into a drop smaller than the trigger, the drop grows into the menu with a small overshoot, and the content comes into focus only near size (M 5:11, frame by frame; M 5:05 "the bubble simply pops open to reveal the content"). | unit (frames at the boundaries, the drop, the overshoot, the ink); behaviour "the surface starts on the trigger, passes a drop and lands on the menu", canary "a menu that pops open without growing fails it" |
-| N9 | The timing is the reference's: the drop forms in about 0.10 s, the menu is at size at about 0.3 s, overshoots by about 3 % at about 0.37 s and settles by about 0.55 s; closing reaches the drop at about 0.15 s and is back in the trigger at about 0.35 s (M 5:11). | unit `DEFAULT_GROWTH_TIMING` against these numbers |
+| N9 | The timing is the reference's: the drop forms in about 0.10 s, the menu is at size at about 0.3 s and overshoots by about 3.5 % at about 0.37 s; closing reaches the drop at about 0.25 s and is back in the trigger at about 0.42 s (M 5:11, "Against the reference"). | unit `DEFAULT_GROWTH_TIMING` against these numbers |
 | N10 | It stays under the finger: the menu shares the trigger's corner that points to the nearest viewport corner and grows into the open space, covering the trigger; it flips or slides only to stay in the viewport, and `corner` fixes the corner (S: the button morphs into the menu so that the grip does not change). | unit `menuPlacement`; behaviour "the menu pins to the trigger's corner" |
 | N11 | Closing retraces the growth: the content defocuses first, the menu flows back into a drop and the drop into the trigger, ending on the trigger's body; reopening midway turns back from where it is. | unit (reverse path, turning back); behaviour "closing runs back through the drop into the trigger" |
 | N12 | One body: while the menu is out the trigger draws no glass and no body of its own and its glyph goes out of focus as the growth begins, so there is never glass on glass; it takes the body back when the menu has retracted into it (M 13:24; M 5:11, the toolbar's glyphs defocus as it gathers into the drop). | behaviour "the trigger hands its body over and takes it back"; snapshots `menu-*` |
@@ -155,21 +156,24 @@ M 5:11 against ours at the touch tier, with the same label width:
 | the drop's size | ≈ 63 dp, from a 172 × 44 dp toolbar | 48 dp (1.1 × the source's smaller side) |
 | where it sits | the toolbar's bottom-leading corner, 6 dp further out and 9.5 dp lower | flush on the trigger's corner |
 
-Timing, from the frames (29.97 fps, so ±0.033 s) and from the model:
+Timing. The reference is tracked frame by frame (the box of everything lighter than the frame before the menu opened,
+so ±0.033 s), from the first frame that changes (311.578 s opening, 313.447 s closing); the model is the growth
+springs, with the drop "formed" when growth begins and "reached" on closing when growth is below 0.12 (a 66 dp body
+for this menu, where the reference drop measures 67 to 77 dp):
 
 | | reference | `DEFAULT_GROWTH_TIMING` before | after |
 |---|---|---|---|
-| the drop has formed, growth begins | ≈ 0.10 s | 0.18 | 0.10 |
-| at size (95 %) | ≈ 0.30 s | 0.40 | 0.28 |
-| overshoot | ≈ 3 % at ≈ 0.37 s | 3.3 % at 0.51 | 3.2 % at 0.37 |
-| settled | ≈ 0.55 s | 0.69 | 0.52 |
-| closing reaches the drop | ≈ 0.15 s | 0.23 | 0.16 |
-| closing is back in the trigger | ≈ 0.35 s | 0.57 | 0.37 |
+| the drop has formed and rises out of the source | 0.10 s | 0.18 | 0.10 |
+| at size (95 % of the height) | 0.30 to 0.33 s | 0.40 | 0.28 |
+| overshoot | 3.5 % of the height at 0.37 s (the top edge, 46 px past its rest) | 3.3 % at 0.51 | 3.2 % at 0.37 |
+| settled | 0.83 s, sliding 13 dp down into its window-concentric place after reaching size | 0.69 | 0.52 |
+| closing reaches the drop | 0.25 s | 0.23 | 0.23 |
+| closing is back in the source, its ridge gone | 0.42 s | 0.57 | 0.44 |
 
-The rows and their spacing, the timing and the body are held (unit tests and N15). The drop's whiteness is the
-milky press that is already open (B28, M 3:52). The drop's size and the menu's offset from the toolbar are layout of
-the reference (a wide toolbar gathers more glass; the menu there sits concentric with the window, which the kit
-does not know), so they are reported, not held.
+The rows and their spacing, the timing up to the overshoot and the closing, and the body are held (unit tests and
+N15). The drop's whiteness is the milky press that is already open (B28, M 3:52). The drop's size, the menu's offset
+from the toolbar and the slide that settles it there are layout of the reference (a wide toolbar gathers more glass;
+the menu sits concentric with the window, which the kit does not know), so they are reported, not held.
 
 ## Resting body
 

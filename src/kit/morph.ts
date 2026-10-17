@@ -209,9 +209,9 @@ export type GrowthTiming = {
 
 export const DEFAULT_GROWTH_TIMING: GrowthTiming = {
   shrinkOpen: 0.21,
-  shrinkClose: 0.18,
+  shrinkClose: 0.14,
   growOpen: 0.38,
-  growClose: 0.275,
+  growClose: 0.4,
   growDampingOpen: 0.72,
 };
 
