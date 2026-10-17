@@ -24,9 +24,9 @@ function valueNoise(x: number, y: number): number {
   return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
 }
 
-/** Deterministic photo-like texture: layered noise mapped through a warm-to-cool palette. */
 type Rgb = { r: number; g: number; b: number };
 
+/** Deterministic photo-like texture: layered noise mapped through a warm-to-cool palette. */
 function noiseImage(width: number, height: number): { url: string; pixels: Rgb[] } {
   const canvas = document.createElement('canvas');
   canvas.width = width;

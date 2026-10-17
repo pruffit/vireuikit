@@ -5,7 +5,7 @@
 - **On `vireglass` 3.** The peer range is `^3.0.0`. The rim is the core's: its strength now follows the surround, within
   the reference tolerance on every smooth row, so the kit no longer scales the lens's `::after`, and a pressed control's
   rim no longer flares to full white. The kit keeps its own body and attaches with `body: false`: measured against the
-  same reference, the core's body is darker than its surround over a light backdrop, off by more than 0.05 in
+  same reference, the core's body is not lighter than its surround over a light backdrop, off by more than 0.05 in
   lightness on two smooth rows, and near black under reduced transparency (`docs/acceptance.md`, "Resting body").
 - **`sample` on the elements.** A host that knows the backdrop (an image, a video) sets it on `<vire-button>` or
   `<vire-icon-button>`, before or after the lens attaches; `null` returns to the probe.

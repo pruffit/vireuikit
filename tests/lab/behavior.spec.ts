@@ -291,6 +291,28 @@ test.describe('glass and its absence', () => {
     }
   });
 
+  test('a sample set before the element is defined, or kept across a reconnect, still reaches the lens', async ({ page }) => {
+    await openCase(page, 'view=sandbox&upgrade=0&backdrop=light&glass=0');
+    await page.evaluate(() => {
+      const dark = { luma: 0.06, busy: 0, lo: 0.06, hi: 0.06, r: 0.06, g: 0.06, b: 0.06 };
+      const early = document.querySelector('#play') as VireControlElement;
+      early.sample = dark;
+      window.__lab.define();
+      early.setAttribute('glass', '');
+      const moved = document.querySelector('#share') as VireControlElement;
+      moved.setAttribute('glass', '');
+      moved.sample = dark;
+      const parent = moved.parentElement!;
+      moved.remove();
+      parent.append(moved);
+    });
+    for (const id of ['#play', '#share']) {
+      await expect
+        .poll(() => page.locator(`${id} button`).evaluate((el) => el.style.getPropertyValue('--vireglass-ink')))
+        .toBe('1');
+    }
+  });
+
   test('connecting again after removal upgrades it once more', async ({ page }) => {
     await openCase(page, 'view=sandbox&glass=1');
     await page.evaluate(() => {

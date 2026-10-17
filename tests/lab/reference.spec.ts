@@ -30,7 +30,7 @@ const FIELDS = ['bodyL', 'bodyC', 'surroundL', 'surroundC', 'dL', 'dC', 'dAB', '
 test('reference against ours, control by control', async ({ page }) => {
   test.setTimeout(360_000);
   const rows: { id: string; at: string; atom: string; reference: Measure; ours: Measure; pressed: Measure }[] = [];
-  // The reference shows these controls at rest only; the pressed row is ours on the same backdrop.
+  // Most reference controls are at rest; the pressed column is ours on the same backdrop.
   const shoot = async (control: ReferenceControl, state: 'rest' | 'pressed'): Promise<Measure> => {
     const rt = control.mode === 'reduce-transparency' ? '&rt=1' : '';
     await openCase(page, `view=reference&ref=${control.id}&glass=1&state=${state}${rt}`);

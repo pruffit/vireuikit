@@ -37,7 +37,7 @@ export async function attachControlGlass(
     geometry: params.geometry,
     accessibility: params.accessibility,
     variant: params.onTouch ? 'interactive' : 'present',
-    // The kit paints its own body: the core's is darker than its surround over a light backdrop and
+    // The kit paints its own body: the core's is not lighter than its surround over a light backdrop and
     // near black under reduced transparency with light ink (docs/acceptance.md, "Resting body").
     body: false,
   };

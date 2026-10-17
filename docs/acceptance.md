@@ -76,8 +76,8 @@ A button is an action: nothing grows out of it, and it sinks under press rather 
 | B25 | Under forced colours the text keeps the system colour, undimmed, and the own tints and blur are dropped (W 1.4.11). | behaviour "forced colours" |
 | B26 | At rest the glass body stands off its surround and carries its colour (see "Resting body"). | behaviour "resting body and rim", canary "a clear body fails the gate"; measured |
 | B27 | At rest the rim reads clearly over a bright backdrop and faintly over a dark one (see "Resting body"). The strength is the core's, which follows the surround; the kit does not scale it. | behaviour "resting body and rim", canary "a rim at full strength fails the gate" (a white line all round); measured |
-| B28 | The press end of the body is the milky tint the kit already drew: alpha 0.34, 35 % white (pixel-identical to before). | unit `atomBody` |
-| B29 | A host that knows its backdrop (an image, a video: the lens's probe reads declared colours only) gives it to the element as `sample`, at any time; `null` hands it back to the probe. | behaviour "a sample set on the element replaces the probe…", "a sample given before the lens attaches…" |
+| B28 | The press end of the body is the milky tint the kit already drew: alpha 0.34, 35 % white (the body tint is unchanged; the pressed rim is the core's now). | unit `atomBody` |
+| B29 | A host that knows its backdrop (an image, a video: the lens's probe reads declared colours only) gives it to the element as `sample`, at any time, even before the element is defined; `null` hands it back to the probe. | behaviour "a sample set on the element replaces the probe…", "a sample given before the lens attaches…", "a sample set before the element is defined…" |
 
 ## Icon button
 
@@ -164,8 +164,8 @@ surround between 0.10 and 0.45. The bounds sit under the lowest and over the hig
 near-white backdrop the body cannot get much lighter, so there the gate asks only for a clearly positive ΔL (above
 0.01): every reference row is positive, ours is 0.02 and a body of nothing measures 0.004. On the dark and photo
 backdrops ours measures ΔL 0.03 to 0.04 and rim 0.15 to 0.19 (0.15 to 0.21 with the kit's rim factor), so the
-bounds did not move. The canaries are the old look: a body of nothing (ΔL 0.004) and a rim drawn white all round
-(0.70 over a dark backdrop).
+bounds did not move. The canaries are a body of nothing (ΔL 0.004), the old look, and a rim drawn white all round (0.70 over a
+dark backdrop), brighter than even the old white lobe.
 
 The bounds come from the reference, not from our own output, and the gate measures pixels of a render, so a change
 to the core's lens that moves the body or the rim fails it in either direction.

@@ -114,6 +114,13 @@ export function createControlElementClass(
     }
 
     connectedCallback(): void {
+      // Set before the element was defined, a property lands on the instance and hides the accessor.
+      for (const key of ['a11y', 'sample']) {
+        if (!Object.prototype.hasOwnProperty.call(this, key)) continue;
+        const value: unknown = Reflect.get(this, key);
+        Reflect.deleteProperty(this, key);
+        Reflect.set(this, key, value);
+      }
       ensureStyles(this, options.nonce);
       this.#cleanups.push(watchCoarsePointer(() => this.#onInputChange()));
       this.#cleanups.push(watchSystemA11y(() => this.#refreshMode()));
