@@ -56,6 +56,9 @@ export interface VireControlElement extends HTMLElement {
   a11y: A11yOverride;
   sample: BackdropSample | null;
   setMorph(morph: GlassMorph | null): void;
+  /** A menu growing out of this control carries its body: no lens and no body of its own, the glyph in
+   *  focus by `ink` (1 sharp, 0 gone). `null` takes the body back. */
+  setCarried(ink: number | null): void;
 }
 
 export type ControlElementOptions = { nonce?: string | undefined };
@@ -89,6 +92,7 @@ export function createControlElementClass(
     #slop = { x: 0, y: 0 };
     #morph: GlassMorph | null = null;
     #sample: BackdropSample | null = null;
+    #carried: number | null = null;
 
     get a11y(): A11yOverride {
       return this.#own;
@@ -111,6 +115,16 @@ export function createControlElementClass(
     setMorph(morph: GlassMorph | null): void {
       this.#morph = morph;
       this.#glass?.setMorph(morph);
+    }
+
+    setCarried(ink: number | null): void {
+      const handedOver = (this.#carried === null) !== (ink === null);
+      this.#carried = ink === null ? null : Math.min(Math.max(ink, 0), 1);
+      this.toggleAttribute('data-carried', this.#carried !== null);
+      if (this.#carried === null) this.style.removeProperty('--vk-carry');
+      else this.style.setProperty('--vk-carry', this.#carried.toFixed(3));
+      // The lens materialises out rather than being removed, so taking the body back is one synchronous repaint.
+      if (handedOver) this.#glass?.setAppear(this.#carried === null ? 1 : 0);
     }
 
     connectedCallback(): void {
@@ -137,7 +151,8 @@ export function createControlElementClass(
       this.#control = null;
       this.#state = CONTROL_IDLE;
       this.#suppressClick = false;
-      for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-size']) this.removeAttribute(name);
+      this.#carried = null;
+      for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-size', 'data-carried']) this.removeAttribute(name);
       for (const name of Array.from(this.style)) if (name.startsWith('--vk-')) this.style.removeProperty(name);
       this.#presentation = null;
       this.#mode = null;
@@ -440,6 +455,7 @@ export function createControlElementClass(
           if (!session) return;
           this.#glass = session;
           if (this.#morph) session.setMorph(this.#morph);
+          if (this.#carried !== null) session.setAppear(0);
           if (this.#sample !== sample) session.setSample(this.#sample);
           this.#pushMaterial(true);
           this.dispatchEvent(new CustomEvent('vire-glass-ready'));
