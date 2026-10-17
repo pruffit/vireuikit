@@ -46,6 +46,34 @@ export function iconButtonSize(size: ControlSize): SizeSpec & { width: number } 
   return { ...spec, width: spec.height, paddingX: 0 };
 }
 
+export type MenuSizeSpec = {
+  /** Row height; the glyph sits centred in a square of it. */
+  row: number;
+  padding: number;
+  /** The active item's highlight. */
+  itemRadius: number;
+  /** Concentric with the highlight: its radius plus the padding. */
+  radius: number;
+  icon: number;
+  /** The label's inset in an item without a glyph. */
+  labelPad: number;
+};
+
+const MENU_PADDING = 0.3;
+
+export function menuSize(size: ControlSize): MenuSizeSpec {
+  const spec = BUTTON_SIZES[size];
+  const padding = Math.round(spec.height * MENU_PADDING);
+  return {
+    row: spec.height,
+    padding,
+    itemRadius: spec.radius,
+    radius: spec.radius + padding,
+    icon: spec.icon,
+    labelPad: spec.paddingX,
+  };
+}
+
 export function nestedRadius(outerRadius: number, inset: number, minimum = 0): number {
   return concentricRadius(outerRadius, inset, minimum);
 }

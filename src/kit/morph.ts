@@ -195,9 +195,9 @@ export const growthPhase = (state: GrowthState): GrowthPhase => ({
   grow: state.grow.x,
 });
 
-/** Durations are client-specific: this set is tuned for the capsule-to-menu transition, and an
- *  atom at a different scale (an icon opening into a sheet) isn't obligated to match it. The
- *  shape of the transition is shared regardless. */
+/** Durations are client-specific: the default is fitted to the menu growing out of its toolbar at
+ *  M 5:11 (docs/acceptance.md, N9), and an atom at a different scale (an icon opening into a sheet)
+ *  isn't obligated to match it. The shape of the transition is shared regardless. */
 export type GrowthTiming = {
   shrinkOpen: number;
   shrinkClose: number;
@@ -208,10 +208,10 @@ export type GrowthTiming = {
 };
 
 export const DEFAULT_GROWTH_TIMING: GrowthTiming = {
-  shrinkOpen: 0.38,
-  shrinkClose: 0.3,
-  growOpen: 0.46,
-  growClose: 0.4,
+  shrinkOpen: 0.21,
+  shrinkClose: 0.18,
+  growOpen: 0.38,
+  growClose: 0.275,
   growDampingOpen: 0.72,
 };
 
