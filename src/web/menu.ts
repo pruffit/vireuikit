@@ -23,7 +23,7 @@ import { sizeTier } from '../kit/adaptive/input';
 import type { Rect, Size } from '../kit/geometry';
 import { CONTROL_SIZES, menuSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
-import { effectiveInput, viewportSegments, watchInput, watchViewport } from './environment';
+import { effectiveInput, viewportSegments, watchPointerInput, watchViewport } from './environment';
 import { attachControlGlass, type GlassFrame, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
@@ -148,7 +148,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       }
       this.#hadStyle.host = this.hasAttribute('style');
       ensureStyles(this, options.nonce);
-      this.#cleanups.push(watchInput(() => this.#list && this.#refreshMode(true)));
+      this.#cleanups.push(watchPointerInput(() => this.#list && this.#refreshMode(true)));
       this.#cleanups.push(watchSystemA11y(() => this.#list && this.#refreshMode()));
       this.#cleanups.push(watchA11yOverride(() => this.#list && this.#refreshMode()));
       this.#awaitParts();

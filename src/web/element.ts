@@ -19,7 +19,7 @@ import {
 import { pressResponse } from '../kit/response';
 import { BUTTON_SIZES, CONTROL_SIZES, hitSlop, iconButtonSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
-import { effectiveInput, watchInput } from './environment';
+import { effectiveInput, watchPointerInput } from './environment';
 import { attachControlGlass, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
@@ -132,7 +132,7 @@ export function createControlElementClass(
       }
       this.#hadStyle.host = this.hasAttribute('style');
       ensureStyles(this, options.nonce);
-      this.#cleanups.push(watchInput(() => this.#onInputChange()));
+      this.#cleanups.push(watchPointerInput(() => this.#onInputChange()));
       this.#cleanups.push(watchSystemA11y(() => this.#refreshMode()));
       this.#cleanups.push(watchA11yOverride(() => this.#refreshMode()));
       this.#awaitControl();

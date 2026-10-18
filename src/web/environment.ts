@@ -57,7 +57,9 @@ const editable = (target: EventTarget | null) =>
 
 // An on-screen keyboard only types into a field, so a key pressed elsewhere is a hardware one.
 function onKey(e: KeyboardEvent): void {
-  if (keyboardSeen || e.isComposing || e.key === 'Unidentified' || e.key === 'Process' || editable(e.target)) return;
+  // The window sees a shadow host as the target; the path still starts at the field inside an open root.
+  const target = e.composedPath()[0] ?? e.target;
+  if (keyboardSeen || e.isComposing || e.key === 'Unidentified' || e.key === 'Process' || editable(target)) return;
   keyboardSeen = true;
   for (const listener of [...inputListeners]) listener();
 }
@@ -72,6 +74,19 @@ export function watchInput(onChange: () => void): () => void {
     for (const list of lists) list.removeEventListener('change', onChange);
     if (inputListeners.size === 0 && typeof window !== 'undefined') window.removeEventListener('keydown', onKey, true);
   };
+}
+
+const pointerLayers = ({ primary, anyCoarse, hover }: InputLayers) => `${primary} ${anyCoarse} ${hover}`;
+
+/** `watchInput` for the atoms: a keyboard sets neither their tier, their hit area nor their hover, so it stays silent. */
+export function watchPointerInput(onChange: () => void): () => void {
+  let last = pointerLayers(effectiveInput());
+  return watchInput(() => {
+    const next = pointerLayers(effectiveInput());
+    if (next === last) return;
+    last = next;
+    onChange();
+  });
 }
 
 /**

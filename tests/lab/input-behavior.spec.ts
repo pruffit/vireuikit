@@ -110,7 +110,15 @@ test.describe('a hardware keyboard', () => {
     });
     await page.locator('#field').pressSequentially('ab');
     expect(await page.evaluate(() => window.__lab.input().keyboard)).toBe(false);
-    await page.locator('#field').blur();
+    await page.evaluate(() => {
+      const host = document.createElement('div');
+      host.id = 'shadow-host';
+      host.attachShadow({ mode: 'open' }).append(document.createElement('input'));
+      document.body.append(host);
+    });
+    await page.locator('#shadow-host input').pressSequentially('cd');
+    expect(await page.evaluate(() => window.__lab.input().keyboard)).toBe(false);
+    await page.locator('#shadow-host input').blur();
     await page.keyboard.press('Tab');
     expect(await page.evaluate(() => window.__lab.input().keyboard)).toBe(true);
   });
