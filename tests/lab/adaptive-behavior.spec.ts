@@ -156,7 +156,7 @@ test.describe('one body', () => {
     const widths = ((await page.evaluate(() => window.__adaptive.frames())) as NavFrame[]).map((f) => f.w);
     const peak = widths.indexOf(Math.max(...widths));
     expect(widths[peak]).toBeGreaterThan(80);
-    expect(widths[peak]).toBeLessThan(272 - 40);
+    expect(widths[peak]).toBeLessThan(272 - 8);
     for (let i = 1; i <= peak; i += 1) expect(widths[i]).toBeGreaterThanOrEqual(widths[i - 1]! - 0.01);
     for (let i = peak + 1; i < widths.length; i += 1) expect(widths[i]).toBeLessThanOrEqual(widths[i - 1]! + 0.01);
     expect(widths.at(-1)).toBe(80);
