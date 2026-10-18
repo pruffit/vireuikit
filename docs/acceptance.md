@@ -348,6 +348,38 @@ Side-by-side: the vertical strip of a toolbar and of panes on the folding phone'
 5:56) against the stage's `preset=phone-landscape`. The sidebar flowing into the tab bar (I ≈1:25) and the tab bar's
 bottom accessory (H Tab bars) have no local frames yet.
 
+## Navigation
+
+The bar, the rail and the sidebar are one glass body; a change of form goes through the selection, which lifts into a
+lens, takes the old body in and grows the new one out (M 8:35–8:47, frame by frame at 15 fps). The selection on the
+bar is also a knob the finger drags (U 298–299.7 s, 15 fps). Behaviour tests are in `tests/lab/nav-behavior.spec.ts`.
+
+| # | Criterion | Check |
+|---|---|---|
+| NV1 | It works before the kit: a `<nav aria-label>` with a list of links, the current one `aria-current="page"`, an optional secondary list and search link; every link navigates and Tab walks them with no script and no glass. | behaviour "before the upgrade" |
+| NV2 | The upgrade keeps the markup's meaning: one `navigation` landmark on every form with the author's label, links stay links (no `tablist`, no `role` added to them, arrows not taken), `aria-current` stays the host's. Removing the element gives the markup back with nothing of its own left. | behaviour "roles", "removing the element gives the markup back" |
+| NV3 | The form is the model's (AD7–AD9): bar, rail or sidebar from the element's own box and input, the secondary list only in the sidebar, the search as a circle on the bar, an item on the rail and a field-like row in the sidebar; a `form` attribute fixes it. | behaviour per form and on the stage per preset (`data-form`, `data-search`) |
+| NV4 | The bar is a capsule centred at the bottom with 74 dp items, the icon over the label and a pill 3 dp inside the selected item; its search is a separate circle the bar's height with an 8 dp gap; the rail is a vertical capsule at the leading edge; the sidebar a 280 dp inset panel with rows beside their icons (U 4:45, t = 290 s; G Navigation rail; decision 4). | unit `navLayout`; behaviour (boxes measured) |
+| NV5 | The insets the content must clear are published on the parent (`--vire-nav-inset-bottom`, `--vire-nav-inset-start`) and in `vire-nav-layout`, and change with the form. | behaviour "the insets follow the form" |
+| NV6 | A change of form goes through the selection: the lens appears over the selected item, the body contracts until it is the lens (its area at the middle at most 1.1 × the lens's), the lens moves to the selection's place in the new form, the new body grows out of it and the lens settles into the pill; the body never jumps (no frame covers 40 % of the change, AD11) (M 8:36–8:37). | unit `navMorphFrame` (phases, boxes at the boundaries); behaviour, sampled frame by frame, canary "a navigation that swaps its form fails it" |
+| NV7 | Old content defocuses out before the middle and new content focuses in after it; at the middle no content shows but the lens's copy of the selected destination, so the selection never leaves sight. | unit (ink by phase); behaviour (ink sampled; the lens holds the selected label on every frame) |
+| NV8 | On the bar the search circle buds off the trailing end as the bar grows and merges back as it contracts: one lens with a second shape whose smoothing falls to 0 as they part (M 8:42). | unit (the second shape and its smoothing across the grow phase); behaviour (what the lens is handed) |
+| NV9 | The whole change takes about 0.8–0.9 s (M 8:36.2–8:37.0); turned back mid-way it runs back from where it is; a third form swaps the target while the body is still the lens and rebases from the current frame once it grows; under reduced motion the new form is there in the next frame (AD12, AD13). | unit (timing, reversal, third form, reduced motion); behaviour "turned back…", "reduced motion…" |
+| NV10 | Through a change of form the selected link, the focused link and the secondary list's scroll stay; focus is still on the same link after it (AD14). | behaviour "a change of form keeps the selection and the focus" |
+| NV11 | At rest there is one glass surface for the body and its search (plus the accessory's); the lens is glass only while it moves and is gone at rest, where the selection is a fill (no glass on glass at rest). | behaviour (lenses counted at rest and while moving, a recording stand-in for `vireglass/dom`) |
+| NV12 | Dragging on the bar lifts the selection into the lens under the finger; the lens follows the finger continuously (its centre within 2 px of the pointer, clamped to the bar), stretched along the motion; release settles it on the nearest item and activates that link exactly once; a cancelled press settles it back where it was (U 298–299.7 s). | unit `navDrag`; behaviour "the lens follows the finger…", "release activates the nearest…", canary "a lens that jumps from item to item fails it" |
+| NV13 | A tap is a plain link click: one click on the link, nothing prevented; the pill slides to the link the host marks `aria-current`, without a lift. | behaviour "a tap is a link click…", "the pill follows aria-current" |
+| NV14 | With `minimize="scroll"` the bar minimises after 24 dp scrolled down in its scroller and expands after 24 dp up, at the top, on a tap on it (which does not navigate) and when focus enters it; minimised, it is the selected icon's circle and the search circle, 44 dp each; only the bar minimises (U 5:07; H Tab bars). | unit `stepMinimize`; behaviour "scrolling minimises and expands the bar…" |
+| NV15 | The bottom accessory sits over the bar and its search, 48 dp high and 8 dp above; in the minimised bar's row between the circles; along the bottom of the content beside a rail or sidebar; it reshapes between them on springs and says where it is in `data-placement` (AD27; U 5:31–5:52; decision 3). | behaviour (boxes per placement, `data-placement`) |
+| NV16 | The sidebar's toggle collapses it into a rail and back: `aria-expanded` on the toggle, the `collapsed` attribute and `vire-nav-collapse`; the element stores nothing. An expandable rail on an expanded window opens the sidebar over the content with a scrim, and Escape, a press outside or a choice close it. | behaviour "the toggle…", "the rail opens over the content…" |
+| NV17 | Where the model gives a shortcut, `search-key` (default `/`) pressed outside a field activates the search link, and the link carries `aria-keyshortcuts`; nowhere else. | behaviour "the search shortcut…" |
+| NV18 | Hit areas: every destination meets 44 dp wherever any coarse input is present (AD2); sidebar rows are 44 dp on the touch tier and 36 dp on the pointer tier. | behaviour (hit areas measured with stubbed media queries) |
+| NV19 | With glass off, under reduced transparency and increased contrast every form stays readable and works: a plain or frosted body, a filled pill, the same geometry. | behaviour (modes); snapshots |
+| NV20 | The lab shows every form (bar, minimised bar, rail, sidebar) on every backdrop with glass on and off, and the stage draws the real navigation in place of its outline. | snapshots `nav-*`, `adaptive-*` |
+
+Side-by-side: the cycle at M 8:35–8:47 against the stage's sweep, and the drag at U 298–299.7 s against the gallery's
+bar.
+
 ## What is not covered
 
 - Switch, slider, segmented control, chip, field; the Android target (`src/native/` does not exist yet).

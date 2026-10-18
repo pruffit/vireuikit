@@ -139,6 +139,67 @@ input and posture. The kit holds it as data in, form out:
 
 Acceptance of the layer is the AD criteria in `docs/acceptance.md`.
 
+## The navigation
+
+The research (outside this repository: the navigation note of 18.10.2026, after the adaptive map) defines navigation by
+one thing: the bar, the rail and the sidebar are one glass body, and a change of form goes through the selection. At
+M 8:35–8:47 the selected item lifts into a lens, the old body contracts into it, the new form grows out of it and the
+lens settles into the new form's selection. The menu's growth is the same mechanism with the trigger as the anchor;
+here the anchor is the selected destination. `<vire-nav>` builds it:
+
+- **The first HTML is links.** A `<nav aria-label>` holding a `<ul>` of `<a>` destinations, the current one with
+  `aria-current="page"`; an optional second `<ul data-secondary>` (shown only in the sidebar, decision 6); an optional
+  `<a data-search>` (the search destination). Before the upgrade it is a list of links that works with no script.
+  Navigation between sections is navigation, not tabs: no `tablist`, no arrow keys, Tab walks the links (APG Tabs is
+  for panels of one page). An optional `[data-accessory]` child outside the `<nav>` is the bottom accessory, host content
+  that is not navigation.
+- **The form comes from the model.** The element covers its containing block (the shell), takes the adaptive context
+  of its own box with `watchAdaptiveContext` and asks `navigationForm` with the destinations it counts; a `form`
+  attribute fixes the form for a host that knows. It publishes what the content must clear as
+  `--vire-nav-inset-bottom` and `--vire-nav-inset-start` on its parent and fires `vire-nav-layout`.
+- **Forms.** The bar: a floating capsule centred at the bottom, items 74 dp wide with the icon over the label, a pill 3 dp
+  inside it marking the selection, and the search as its own circle the bar's height at its trailing end (U 4:45,
+  measured at t = 290 s). The rail: a floating vertical capsule at the leading edge with the bar's items and the search
+  as its last item; a toggle at its head when the model makes it expandable. The sidebar: a floating inset panel, 280
+  dp wide, rows with the icon beside the label, the secondary list under a separator, the search as a field-like row
+  at the top and the collapse toggle in its head. All three are glass; the content flows under them (D 12:34).
+- **One body, one lens.** The body is one glass surface; the bar's search circle is its second shape (`setMorph`), so
+  at rest a bar and its search are one lens with two silhouettes. A form change is `navMorphFrame` on one spring: the
+  selection lifts into a lens, the body contracts into it while its content defocuses, the lens travels to the
+  selection's place in the new form, the new body grows out of it while the new content comes into focus, and the lens
+  settles into the pill. The search circle buds off the bar's trailing end as it grows and merges back as it contracts
+  (M 8:42, the split of an organ, M 5:02). The DOM switches `data-form` at the middle, where the body is the lens and no
+  content shows; the lens carries a copy of the selected destination, magnified, so the selection is never out of
+  sight. Turning back runs the same frames backwards; a third form swaps the target while the body is still the lens,
+  and rebases from the current frame once it grows. Under reduced motion the new form is there in the next frame.
+- **The lens is the one exception to "no glass on glass".** While the selection travels or is dragged it is its own
+  glass over the body, as the reference draws it (its own rim, magnifying what is under it: U 298–299.7 s, M 8:36).
+  It exists only while it moves and lands back into the pill, which is a fill, not glass.
+- **Dragging on the bar.** A press on the bar lifts the selection into the lens under the finger; the lens follows the
+  finger continuously, stretched along the motion, clamped to the bar, the item under it tinted and magnified; release
+  settles it on the nearest item and activates that link once (U 298–299.7 s at 15 fps). A tap is a plain link click;
+  the pill slides to the new `aria-current` whenever the host moves it.
+- **Minimising.** With `minimize="scroll"` and a scroller (the `scroller` property or attribute), the bar minimises after
+  24 dp scrolled down and expands after 24 dp up, at the top, on a tap on it and when focus enters it (U 5:07; H Tab
+  bars). Minimised, the bar is a circle with the selected destination's icon at the leading end and the search circle at
+  the trailing end, both 44 dp; the transition is the same contraction into the selection. Only the bar minimises.
+- **The bottom accessory** is placed by `bottomAccessory`: a capsule over the bar and its search (48 dp high, 8 dp above),
+  in the minimised bar's row between the two circles, or along the bottom of the content beside a rail or sidebar. It
+  has its own glass and reshapes between placements by `formMorphFrame`; `data-placement` on it tells the host which
+  content to show (transport only when `in-bar`).
+- **The person's choices stay theirs.** The `collapsed` attribute is the sidebar collapsed into a rail: the toggle sets
+  and clears it and fires `vire-nav-collapse`; the host remembers it (a cookie, so the server renders the right form).
+  An expandable rail on an expanded window opens the sidebar over the content with a scrim and closes on Escape, a press
+  outside or a choice. The kit stores nothing.
+- **Search.** The model's search form decides where the search destination shows. Where the model gives a shortcut,
+  `search-key` (default `/`) pressed outside a field activates the search link, announced by `aria-keyshortcuts`. The
+  field itself is the search atom (order 7).
+- **Sizes and input.** Rows and items keep the 44 dp hit area wherever any coarse input is present (AD2); the sidebar's
+  rows are 44 dp on the touch tier and 36 dp on the pointer tier. Focus shows as a ring on the link; a morph keeps
+  focus on the same link.
+
+Acceptance is the NV criteria in `docs/acceptance.md`.
+
 ## Acceptance of an atom
 
 An atom is done when:
