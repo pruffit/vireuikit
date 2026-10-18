@@ -102,7 +102,8 @@ ${LINKS}:focus-visible,${NAV}>nav>button:focus-visible{outline:2px solid current
 ${LINKS}[data-lens-over]{background:color-mix(in srgb,currentColor 12%,transparent)}
 @media (hover:hover){${LINKS}:hover{background:color-mix(in srgb,currentColor 7%,transparent)}}
 ${NAV}[data-form=sidebar]>nav a{flex-direction:row;justify-content:flex-start;gap:12px;padding-inline:12px;font-size:15px;line-height:20px}
-${NAV}[data-form=sidebar]>nav>a[data-search]{background:color-mix(in srgb,currentColor 8%,transparent)}
+${NAV}[data-form=sidebar]>nav>a[data-search]{background:color-mix(in srgb,currentColor 4%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 18%,transparent)}
+${NAV}[data-contrast][data-form=sidebar]>nav>a[data-search]{box-shadow:inset 0 0 0 1px currentColor}
 ${NAV}[data-form=bar]>nav>a[data-search],${NAV}[data-minimized]>nav a{font-size:0;line-height:0;gap:0;padding-inline:0;justify-content:center}
 ${LINKS} [data-badge]{position:absolute;top:4px;inset-inline-start:calc(50% + 6px);min-width:16px;height:16px;box-sizing:border-box;padding:0 4px;
  border-radius:8px;background:var(--vire-nav-badge,#e5484d);color:#fff;font-size:11px;line-height:16px;text-align:center}
