@@ -9,10 +9,12 @@ export async function openCase(page: Page, query: string, path = '/'): Promise<v
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await page.waitForFunction(() => {
     if (window.__lab && !window.__lab.upgraded) return true;
-    return [...document.querySelectorAll<HTMLElement>('vire-button,vire-icon-button,vire-menu')].every((host) => {
+    return [...document.querySelectorAll<HTMLElement>('vire-button,vire-icon-button,vire-menu,vire-nav')].every((host) => {
       if (!host.hasAttribute('data-vk')) return false;
       if (host.dataset.glass !== 'on') return true;
-      const lens = host.querySelector<HTMLElement>(host.localName === 'vire-menu' ? ':scope > [popover]' : 'button');
+      const lens = host.querySelector<HTMLElement>(
+        host.localName === 'vire-menu' ? ':scope > [popover]' : host.localName === 'vire-nav' ? ':scope > nav' : 'button',
+      );
       return /url\(|blur/.test(lens?.style.backdropFilter ?? '');
     });
   });
