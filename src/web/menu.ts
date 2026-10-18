@@ -633,8 +633,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const phase = growthPhase(this.#growth);
       const f = menuSurfaceFrame(this.#from, this.#to, this.#anchor, phase);
       const settled = phase.shrink === 1 && phase.grow === 1;
+      // The ink as drawn decides it, so what shows in focus is what can be chosen.
+      const inkIn = Math.round(f.ink.incoming * 1000) / 1000;
       // Arrived: the content in focus and the surface no longer growing (past its overshoot).
-      if (this.#state.open && f.ink.incoming >= 1) {
+      if (this.#state.open && inkIn >= 1) {
         this.#inSince ??= performance.now();
         if (this.#growth.grow.v <= 0) this.#readySince ??= performance.now();
       }
@@ -643,7 +645,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const s = list.style;
       s.setProperty('--vk-cx', `${f.content.x.toFixed(2)}px`);
       s.setProperty('--vk-cy', `${f.content.y.toFixed(2)}px`);
-      s.setProperty('--vk-ink-in', f.ink.incoming.toFixed(3));
+      s.setProperty('--vk-ink-in', inkIn.toFixed(3));
       const body = menuBody(VIREGLASS_CONTROL_MATERIAL, f.activity, this.#presentation?.frost ?? false);
       s.setProperty('--vk-body-alpha', body.alpha.toFixed(3));
       s.setProperty('--vk-body-white', body.white.toFixed(3));
