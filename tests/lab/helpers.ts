@@ -95,3 +95,13 @@ export async function emulateInput(page: Page, input: MediaInput): Promise<void>
     };
   }, input);
 }
+
+/** Opens the adaptive stage with a viewport that holds its window. */
+export async function openStage(page: Page, query: string, size?: { width: number; height: number }): Promise<void> {
+  if (size) await page.setViewportSize({ width: Math.max(size.width + 24, 400), height: Math.max(size.height + 24, 400) });
+  await openCase(page, `view=adaptive&${query}`);
+  await page.waitForFunction(() => window.__adaptive?.ctx() !== null && window.__adaptive.settled());
+  await nextFrame(page);
+}
+
+export { nextFrame };
