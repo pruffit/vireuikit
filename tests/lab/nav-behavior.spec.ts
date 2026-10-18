@@ -497,8 +497,8 @@ test.describe('a change of form', () => {
     const samples = await sampleFrames(page, [{ at: 60, w: 700, h: 720 }]);
     const start = samples.find((s) => s.moving)!.now;
     const landed = samples.find((s) => s.moving && s.lens && s.now > start + 300 && s.lens.lift < 0.05)!.now;
-    expect(landed - start).toBeGreaterThan(600);
-    expect(landed - start).toBeLessThan(1100);
+    expect(landed - start).toBeGreaterThan(700);
+    expect(landed - start).toBeLessThan(1000);
   });
 
   test('turned back mid-way it runs back from where it is, and a third form swaps the target while the body is the lens', async ({ page }) => {
@@ -1536,5 +1536,210 @@ test.describe('forced states', () => {
     const lens = (await lensNow(page))!;
     expect(lens.dragging).toBe(true);
     expect(lens.centre).toBeCloseTo(bar.x - frame.x + bar.width / 2, 0);
+  });
+});
+
+// ---- later changes to the markup and the attributes ------------------------------------------------------------------
+
+const formIs = (page: Page, form: string) => page.waitForFunction((wanted) => document.querySelector('vire-nav')!.getAttribute('data-form') === wanted, form);
+
+test.describe('the selection under the finger, details', () => {
+  test('a press on the inset of the bar that ends without a drag settles the lens back on the selected item, not the neighbour', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    const nav = (await page.locator('vire-nav > nav').boundingBox())!;
+    const home = await linkBox(page, 'Home');
+    await page.mouse.move(nav.x + nav.width - 1.5, nav.y + nav.height / 2);
+    await page.mouse.down();
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-lens'));
+    await page.evaluate(() => {
+      const host = document.querySelector('vire-nav') as HTMLElement;
+      const lens = host.querySelector(':scope > [data-vk-lens]') as HTMLElement;
+      const out: number[] = ((window as unknown as { __c: number[] }).__c = []);
+      const tick = () => {
+        if (host.hasAttribute('data-lens')) out.push(parseFloat(lens.style.getPropertyValue('--vk-x')) + parseFloat(lens.style.getPropertyValue('--vk-w')) / 2);
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await page.mouse.up();
+    await settle(page);
+    const centres = await page.evaluate(() => (window as unknown as { __c: number[] }).__c);
+    const frame = await rect(page, '#frame');
+    expect(centres.length).toBeGreaterThan(5);
+    expect(centres[0]! - centres.at(-1)!).toBeGreaterThan(100);
+    for (let i = 1; i < centres.length; i += 1) expect(centres[i]!).toBeLessThanOrEqual(centres[i - 1]! + 0.5);
+    expect(centres.at(-1)!).toBeLessThan(home.cx - frame.x + 60);
+    expect(await clicks(page)).toEqual([]);
+    await expect(page.locator('vire-nav [aria-current]')).toHaveText('Home');
+  });
+
+  test('the copy in the lens follows the content of its link, and the nodes the element made changing replan nothing', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    const home = await linkBox(page, 'Home');
+    await page.mouse.move(home.cx, home.cy);
+    await page.mouse.down();
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-lens'));
+    await page.evaluate(() => {
+      const host = document.querySelector('vire-nav') as HTMLElement;
+      const w = window as unknown as { __probes: number };
+      w.__probes = 0;
+      new MutationObserver((records) => {
+        for (const r of records) for (const n of r.addedNodes) if ((n as Element).hasAttribute?.('data-vk-probe')) w.__probes += 1;
+      }).observe(host, { childList: true });
+    });
+    const probes = () => page.evaluate(() => (window as unknown as { __probes: number }).__probes);
+    await page.evaluate(() => {
+      const inner = document.querySelector('vire-nav > [data-vk-lens] > div')!;
+      inner.append(document.createElement('i'));
+      document.querySelector('vire-nav > nav [data-vk-pill]')!.setAttribute('data-x', '1');
+    });
+    await page.waitForTimeout(150);
+    expect(await probes()).toBe(0);
+    await page.evaluate(() => {
+      const link = [...document.querySelectorAll('vire-nav nav a')].find((a) => a.textContent === 'Home')!;
+      link.insertAdjacentHTML('beforeend', '<span data-badge>9</span>');
+    });
+    await page.waitForTimeout(150);
+    expect(await probes()).toBeGreaterThan(0);
+    expect((await page.locator('vire-nav > [data-vk-lens]').textContent())!).toContain('9');
+    await page.evaluate(() => {
+      const link = [...document.querySelectorAll('vire-nav nav a')].find((a) => a.textContent!.startsWith('Home'))!;
+      ([...link.childNodes].find((n) => n.nodeType === 3) as Text).data = 'Start';
+    });
+    await page.waitForTimeout(150);
+    expect((await page.locator('vire-nav > [data-vk-lens]').textContent())!).toContain('Start');
+    await page.mouse.up();
+  });
+
+  test('the bottom safe area lifts the bar: the value the probe reads is the bottom inset', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    const gap = async () => {
+      const frame = await rect(page, '#frame');
+      const nav = await rect(page, 'vire-nav > nav');
+      return frame.y + frame.height - (nav.y + nav.height);
+    };
+    expect(await gap()).toBe(16);
+    await page.addStyleTag({ content: '[data-vk-probe]{padding-bottom:34px !important}' });
+    await resize(page, 431, 720);
+    await settle(page);
+    expect(await gap()).toBe(34);
+    expect(await page.locator('vire-nav [data-vk-probe]').count()).toBe(0);
+  });
+});
+
+test.describe('attributes changed at runtime', () => {
+  test('form can be set and removed: the form follows, and goes back to the one the window asks for', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 1280, 800);
+    await page.evaluate(() => document.querySelector('vire-nav')!.setAttribute('form', 'bar'));
+    await formIs(page, 'bar');
+    await settle(page);
+    await page.evaluate(() => document.querySelector('vire-nav')!.setAttribute('form', 'rail'));
+    await formIs(page, 'rail');
+    await settle(page);
+    await page.evaluate(() => document.querySelector('vire-nav')!.removeAttribute('form'));
+    await formIs(page, 'sidebar');
+    await settle(page);
+  });
+
+  test('removing minimize while the bar is minimised expands it', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    await scrollTo(page, 100);
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-minimized'));
+    await settle(page);
+    await page.evaluate(() => document.querySelector('vire-nav')!.removeAttribute('minimize'));
+    await page.waitForFunction(() => !document.querySelector('vire-nav')!.hasAttribute('data-minimized'));
+    await settle(page);
+    expect((await rect(page, 'vire-nav > nav')).width).toBe(4 * 74 + 6);
+    await scrollTo(page, 400);
+    await page.waitForTimeout(100);
+    expect(await attr(page, 'data-minimized')).toBeNull();
+  });
+
+  test('glass toggled detaches and reattaches the glass of the body and changes nothing else', async ({ page }) => {
+    await stubGlass(page);
+    await openNav(page, 'accessory=0', 430, 720);
+    const alive = async () => (await lenses(page)).filter((l) => l.alive).map((l) => l.kind);
+    expect(await alive()).toEqual(['body']);
+    const before = await rect(page, 'vire-nav > nav');
+    await page.evaluate(() => document.querySelector('vire-nav')!.removeAttribute('glass'));
+    await expect.poll(alive).toEqual([]);
+    await expect(page.locator('vire-nav')).toHaveAttribute('data-glass', 'off');
+    expect(await rect(page, 'vire-nav > nav')).toEqual(before);
+    expect(await attr(page, 'data-form')).toBe('bar');
+    await page.evaluate(() => document.querySelector('vire-nav')!.setAttribute('glass', ''));
+    await expect.poll(alive).toEqual(['body']);
+    await expect(page.locator('vire-nav')).toHaveAttribute('data-glass', 'on');
+    expect(await rect(page, 'vire-nav > nav')).toEqual(before);
+  });
+
+  test('collapsed set and removed by the host holds the large window as a rail and lets it go', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 1280, 800);
+    await page.evaluate(() => document.querySelector('vire-nav')!.setAttribute('collapsed', ''));
+    await formIs(page, 'rail');
+    await settle(page);
+    await expect(page.locator('vire-nav button[data-vk-toggle]')).toHaveAttribute('aria-expanded', 'false');
+    await page.evaluate(() => document.querySelector('vire-nav')!.removeAttribute('collapsed'));
+    await formIs(page, 'sidebar');
+    await settle(page);
+    await expect(page.locator('vire-nav button[data-vk-toggle]')).toHaveAttribute('aria-expanded', 'true');
+    expect((await log(page)).filter((line) => line.startsWith('collapse:'))).toEqual([]);
+  });
+});
+
+test.describe('markup replaced at runtime', () => {
+  test('links added, removed and reordered by a re-render: the plan follows, the pill follows aria-current, the removed links keep nothing', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    await page.evaluate(() => {
+      const w = window as unknown as { __old: Element[] };
+      w.__old = [...document.querySelectorAll('vire-nav nav li, vire-nav nav li a')];
+    });
+    await page.evaluate(() => {
+      const icon = document.querySelector('vire-nav nav a svg')!.outerHTML;
+      const items: [string, string, boolean, string][] = [
+        ['Friends', '/friends', true, ''],
+        ['Home', '/', false, ''],
+        ['Library', '/library', false, '<span data-badge>2</span><span data-badge-label>, 2 new</span>'],
+        ['Fresh', '/fresh', false, ''],
+      ];
+      const lists = document.querySelectorAll('vire-nav nav > ul');
+      lists[0]!.innerHTML = items.map(([label, href, current, extra]) => '<li><a href="' + href + '"' + (current ? ' aria-current="page"' : '') + '>' + icon + label + extra + '</a></li>').join('');
+      lists[1]!.innerHTML = '';
+    });
+    await settle(page);
+    const links = page.locator('vire-nav nav > ul:not([data-secondary]) a');
+    await expect(links).toHaveCount(4);
+    const boxes = await links.evaluateAll((els) => els.map((el) => ({ text: el.textContent!.trim(), x: el.getBoundingClientRect().x, w: el.getBoundingClientRect().width })));
+    expect(boxes.map((b) => b.text.replace(/[0-9]+, [0-9]+ new$/, ''))).toEqual(['Friends', 'Home', 'Library', 'Fresh']);
+    for (let i = 1; i < boxes.length; i += 1) expect(boxes[i]!.x).toBeGreaterThan(boxes[i - 1]!.x + boxes[i - 1]!.w - 1);
+    const pill = (await page.locator('[data-vk-pill]').boundingBox())!;
+    expect(pill.x).toBeCloseTo(boxes[0]!.x, 0);
+    await expect(page.getByRole('link', { name: /^Library ?, 2 new$/ })).toHaveCount(1);
+    const leftovers = await page.evaluate(() =>
+      (window as unknown as { __old: HTMLElement[] }).__old.map((el) => [el.hasAttribute('hidden'), (el.getAttribute('style') ?? '').includes('--vk-'), el.hasAttribute('data-lens-over')]),
+    );
+    expect(leftovers.flat().some(Boolean)).toBe(false);
+    await page.mouse.click(boxes[2]!.x + 30, (await rect(page, 'vire-nav > nav')).y + 28);
+    expect(await clicks(page)).toEqual(['click:Library']);
+    await reform(page, 1280, 800, 'sidebar');
+    await expect(page.locator('vire-nav nav a:visible')).toHaveCount(4 + 1);
+  });
+
+  test('aria-current moving during a change of form: it lands with the pill on the new link and the copy in the lens shows it', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    await resize(page, 700, 720);
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-lens'));
+    await page.waitForTimeout(150);
+    await page.evaluate(() => {
+      document.querySelector('vire-nav [aria-current]')!.removeAttribute('aria-current');
+      [...document.querySelectorAll('vire-nav nav a')].find((a) => a.textContent === 'Friends')!.setAttribute('aria-current', 'page');
+    });
+    const samples = await sampleFrames(page, []);
+    expect(samples.some((s) => s.lens?.text === 'Friends')).toBe(true);
+    expect(samples.at(-1)!.lens).toBeNull();
+    expect(await attr(page, 'data-form')).toBe('rail');
+    const link = await linkBox(page, 'Friends');
+    const pill = (await page.locator('[data-vk-pill]').boundingBox())!;
+    expect(pill.y).toBeCloseTo(link.y + 3, 0);
+    expect(pill.x).toBeCloseTo(link.x + 3, 0);
   });
 });

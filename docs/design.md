@@ -203,6 +203,8 @@ here the anchor is the selected destination. `<vire-nav>` builds it:
   a `[data-badge-label]` in the link says it and is visually hidden, not hidden from the tree.
 - **A rail taller than its window** stops at the window's edge like the sidebar, and its rows (the search item too) scroll
   inside the body at rest (`data-scroll`); each of the rail and the sidebar remembers its own offset.
+- **Safe area.** `bottomInset` of the model comes from `env(safe-area-inset-bottom)`, read through a probe the element
+  keeps in itself only while it reads; the bar sits above it (never closer than its 16 dp margin).
 - **Sizes and input.** Rows and items keep the 44 dp hit area wherever any coarse input is present (AD2); the sidebar's
   rows are 44 dp on the touch tier and 36 dp on the pointer tier. Focus shows as a ring on the link; a morph keeps
   focus on the same link while that link stays shown, and a link the new form hides hands it to the selected link (or

@@ -76,11 +76,13 @@ type Slot = {
   session: GlassSession | null;
   token: number;
   key: string;
-  last: { material: string; morph: string; geometry: string };
+  last: { material: string; morph: MorphKey; geometry: string };
   appear: number;
 };
 
-type Press = { id: number; startX: number; left: number; dragging: boolean; last: number };
+type MorphKey = GlassMorph | 'none' | '-' | '';
+
+type Press = { id: number; startX: number; left: number; dragging: boolean; last: number; onLink: boolean };
 
 export interface VireNavElement extends HTMLElement {
   a11y: A11yOverride;
@@ -94,12 +96,35 @@ export type NavElementOptions = { nonce?: string | undefined };
 const px = (v: number) => `${v.toFixed(2)}px`;
 const round = Math.round;
 const clamp01 = (v: number) => Math.min(Math.max(v, 0), 1);
-const emptyLast = () => ({ material: '', morph: '', geometry: '' });
+const emptyLast = (): Slot['last'] => ({ material: '', morph: '', geometry: '' });
+const sameMorph = (a: MorphKey, b: MorphKey): boolean => {
+  if (typeof a === 'string' || typeof b === 'string') return a === b;
+  const p = a.shape;
+  const q = b.shape;
+  return (
+    a.smoothing === b.smoothing &&
+    p?.offsetX === q?.offsetX &&
+    p?.offsetY === q?.offsetY &&
+    p?.width === q?.width &&
+    p?.height === q?.height &&
+    p?.cornerRadius === q?.cornerRadius
+  );
+};
 const newSlot = (el: HTMLElement): Slot => ({ el, session: null, token: 0, key: '', last: emptyLast(), appear: -1 });
 const isCurrent = (link: Element) => {
   const value = link.getAttribute('aria-current');
   return value !== null && value !== 'false';
 };
+
+function restoreAria(badge: Element, was: string | null): void {
+  if (was === null) badge.removeAttribute('aria-hidden');
+  else badge.setAttribute('aria-hidden', was);
+}
+
+function stripPlacement(link: HTMLElement, hadStyle: boolean): void {
+  for (const name of Array.from(link.style)) if (name.startsWith('--vk-')) link.style.removeProperty(name);
+  dropEmptyStyle(link, hadStyle);
+}
 
 function dropEmptyStyle(el: Element, hadStyle: boolean): void {
   if (!hadStyle && el.getAttribute('style') === '') el.removeAttribute('style');
@@ -139,7 +164,6 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     #scrim: HTMLElement | null = null;
     #accessory: HTMLElement | null = null;
     #cleanups: (() => void)[] = [];
-    #restore: (() => void)[] = [];
     #hadStyle = { host: false, nav: false, parent: false };
     #linkStyle = new Map<HTMLElement, boolean>();
     #hiddenWas = new Map<HTMLElement, boolean>();
@@ -147,6 +171,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     #mine = new Set<Node>();
     #own: A11yOverride = {};
     #mode: A11yMode | null = null;
+    #modeKey = '';
     #presentation: Presentation | null = null;
     #glassBroken = false;
     #body: Slot | null = null;
@@ -255,17 +280,10 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       if (this.#accessory) dropEmptyStyle(this.#accessory, this.#accessoryHadStyle);
       for (const [el, was] of this.#hiddenWas) el.toggleAttribute('hidden', was);
       this.#hiddenWas.clear();
-      for (const [badge, was] of this.#badgeWas) {
-        if (was === null) badge.removeAttribute('aria-hidden');
-        else badge.setAttribute('aria-hidden', was);
-      }
+      for (const [badge, was] of this.#badgeWas) restoreAria(badge, was);
       this.#badgeWas.clear();
-      for (const [link, had] of this.#linkStyle) {
-        for (const name of Array.from(link.style)) if (name.startsWith('--vk-')) link.style.removeProperty(name);
-        dropEmptyStyle(link, had);
-      }
+      for (const [link, had] of this.#linkStyle) stripPlacement(link, had);
       this.#linkStyle.clear();
-      for (const restore of this.#restore.splice(0).reverse()) restore();
       for (const node of [this.#pill, this.#lens, this.#toggle, this.#scrim]) node?.remove();
       if (this.#navEl) {
         for (const name of Array.from(this.#navEl.style)) if (name.startsWith('--vk-')) this.#navEl.style.removeProperty(name);
@@ -302,14 +320,18 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#lensFor = null;
       this.#lastKey = '';
       this.#mine.clear();
+      this.#probe = null;
+      this.#safeBottom = 0;
       this.#linkStyle = new Map();
       this.#presentation = null;
       this.#mode = null;
+      this.#modeKey = '';
       this.#frame = 0;
       this.#lastFrame = 0;
     }
 
     attributeChangedCallback(name: string): void {
+      if (name === FORCE_ATTRIBUTE) this.#forcedState = parseForced(this.getAttribute(name));
       if (!this.#navEl) return;
       if (name === 'glass') this.#refreshMode(true);
       else if (name === FORCE_ATTRIBUTE) this.#applyForced();
@@ -382,9 +404,14 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#listen(nav, toggle);
       const markup = new MutationObserver((records) => {
         let changed = false;
+        const selected = this.#plan?.order[this.#plan.selected] ?? null;
         for (const record of records) {
+          if (this.#isOwn(record.target)) continue;
           if (record.type === 'attributes') {
             this.#lensFor = null;
+            changed = true;
+          } else if (record.type === 'characterData' || (selected && selected.contains(record.target))) {
+            if (selected?.contains(record.target)) this.#lensFor = null;
             changed = true;
           } else if (![...record.addedNodes, ...record.removedNodes].every((node) => this.#mine.has(node))) {
             changed = true;
@@ -393,10 +420,11 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         if (this.#syncScroller()) changed = true;
         if (changed) this.#scheduleReplan();
       });
-      markup.observe(this, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-current'] });
+      markup.observe(this, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['aria-current'] });
       this.#cleanups.push(() => markup.disconnect());
 
       this.#mode = null;
+      this.#modeKey = '';
       this.#refreshMode();
       this.#bindScroller();
       this.#cleanups.push(
@@ -405,6 +433,10 @@ export function createNavElementClass(options: NavElementOptions = {}) {
           this.#replan();
         }),
       );
+    }
+
+    #isOwn(node: Node): boolean {
+      return node === this.#pill || [this.#lens, this.#toggle, this.#scrim, this.#probe].some((own) => own?.contains(node));
     }
 
     #scheduleReplan(): void {
@@ -498,6 +530,32 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       return { lists, secondaryList, primary, secondary, search };
     }
 
+    /** What the element did to a node that has left the navigation is undone and forgotten, so nothing retains it. */
+    #forgetGone(): void {
+      const nav = this.#navEl;
+      if (!nav) return;
+      const gone = (node: Node) => node !== this.#accessory && !nav.contains(node);
+      for (const [el, was] of this.#hiddenWas) {
+        if (!gone(el)) continue;
+        el.toggleAttribute('hidden', was);
+        this.#hiddenWas.delete(el);
+      }
+      for (const [badge, was] of this.#badgeWas) {
+        if (!gone(badge)) continue;
+        restoreAria(badge, was);
+        this.#badgeWas.delete(badge);
+      }
+      for (const [link, had] of this.#linkStyle) {
+        if (!gone(link)) continue;
+        stripPlacement(link, had);
+        this.#linkStyle.delete(link);
+      }
+      if (this.#hovered && gone(this.#hovered)) {
+        this.#hovered.removeAttribute('data-lens-over');
+        this.#hovered = null;
+      }
+    }
+
     /** A badge is a picture; what it says reaches a screen reader through a [data-badge-label] the author puts in the link. */
     #hideBadges(): void {
       for (const badge of this.#navEl!.querySelectorAll<HTMLElement>('a [data-badge]')) {
@@ -505,6 +563,27 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         if (badge.getAttribute('aria-hidden') !== 'true') badge.setAttribute('aria-hidden', 'true');
       }
     }
+
+    /** The bottom safe area, read through a probe that is in the element only while it is read. */
+    #readSafeBottom(): number {
+      const probe = (this.#probe ??= this.#makeProbe());
+      this.append(probe);
+      const value = parseFloat(getComputedStyle(probe).paddingBottom);
+      probe.remove();
+      return Number.isFinite(value) ? Math.max(value, 0) : 0;
+    }
+
+    #makeProbe(): HTMLElement {
+      const probe = this.ownerDocument.createElement('div');
+      probe.setAttribute('data-vk-probe', '');
+      probe.setAttribute('aria-hidden', 'true');
+      probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;width:0;height:0;padding-bottom:env(safe-area-inset-bottom,0px)';
+      this.#mine.add(probe);
+      return probe;
+    }
+
+    #probe: HTMLElement | null = null;
+    #safeBottom = 0;
 
     #tier(): 'touch' | 'pointer' {
       return sizeTier(effectiveInput()) === 'touch' ? 'touch' : 'pointer';
@@ -525,7 +604,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       const resting = nav;
       if (over) nav = fixedNavigationForm(nav, 'sidebar');
       if (as.form) nav = fixedNavigationForm(nav, as.form);
-      const order = [...primary.slice(0, nav.primary), ...primary.slice(nav.primary), ...secondary];
+      const order = [...primary, ...secondary];
       const selected = order.findIndex(isCurrent);
       const layout = this.#layoutOf(ctx, nav, selected, as.minimized);
       const rail = over ? this.#layoutOf(ctx, resting, selected, as.minimized) : layout;
@@ -553,18 +632,23 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         tier: this.#tier(),
         toggle: nav.collapsible || nav.expandable !== null,
         accessory: this.#accessory !== null,
+        bottomInset: this.#safeBottom,
       });
     }
 
+    #forcedState: Forced | null = null;
+
     #forced(): Forced | null {
-      return parseForced(this.getAttribute(FORCE_ATTRIBUTE));
+      return this.#forcedState;
     }
 
     #replan(): void {
       const ctx = this.#ctx;
       if (!this.#navEl || !ctx) return;
       this.#syncScroller();
+      this.#forgetGone();
       this.#hideBadges();
+      this.#safeBottom = this.#readSafeBottom();
       const forced = this.#forced();
       const minimized = forced?.kind === 'minimized' || this.#minState.minimized;
       const plan = this.#makePlan(ctx, { minimized, over: this.#over });
@@ -848,7 +932,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     }
 
     #syncKeyShortcut(plan: Plan): void {
-      const link = plan.search && plan.nav.search?.shortcut ? plan.search : null;
+      const link = plan.search && plan.nav.search?.shortcut && plan.layout.search ? plan.search : null;
       if (link !== this.#shortcut) this.#releaseShortcut();
       if (!link) return;
       if (!this.#shortcut) {
@@ -1095,7 +1179,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         for (const withId of Array.from(inner.querySelectorAll('[id]'))) withId.removeAttribute('id');
       }
       if (this.#presentation?.glass && !this.#glassBroken) {
-        const key = JSON.stringify(this.#mode);
+        const key = this.#modeKey;
         if (slot.key !== key) this.#attach(slot, key, () => this.#lensMaterial(0), lens.box);
         const step = round(clamp01(lens.lift) * MATERIAL_STEPS) / MATERIAL_STEPS;
         if (slot.session) {
@@ -1205,15 +1289,15 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       const geometry = { width: round(box.width), height: round(box.height), cornerRadius: round(box.radius) };
       const key = {
         material: materialKey,
-        morph: lens === undefined ? '-' : lens ? JSON.stringify(lens) : 'none',
+        morph: (lens === undefined ? '-' : (lens ?? 'none')) as MorphKey,
         geometry: `${geometry.width}x${geometry.height}r${geometry.cornerRadius}`,
       };
       const last = slot.last;
-      if (key.material === last.material && key.morph === last.morph && key.geometry === last.geometry) return;
+      if (key.material === last.material && sameMorph(key.morph, last.morph) && key.geometry === last.geometry) return;
       const next: Parameters<GlassSession['frame']>[0] = {};
       if (key.geometry !== last.geometry) next.geometry = geometry;
       if (key.material !== last.material) next.material = material();
-      if (lens !== undefined && key.morph !== last.morph) next.morph = lens;
+      if (lens !== undefined && !sameMorph(key.morph, last.morph)) next.morph = lens;
       slot.last = key;
       session.frame(next);
     }
@@ -1232,6 +1316,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       if (this.#glassBroken && next.glass) next = { ...next, glass: false, surface: next.frost ? 'frosted' : 'plain' };
       const changed = force || !this.#mode || !sameA11y(this.#mode, mode) || next.surface !== this.#presentation?.surface;
       this.#mode = mode;
+      this.#modeKey = JSON.stringify(mode);
       this.#presentation = next;
       this.setAttribute('data-surface', next.surface);
       this.toggleAttribute('data-contrast', next.contrastBorder);
@@ -1252,7 +1337,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     #ensureGlass(): void {
       const layout = this.#plan?.layout;
       if (!layout) return;
-      const key = this.#presentation?.glass && this.#mode ? JSON.stringify(this.#mode) : '';
+      const key = this.#presentation?.glass && this.#mode ? this.#modeKey : '';
       if (this.#body) this.#attach(this.#body, key, () => this.#bodyMaterial(false), layout.body);
       if (this.#accSlot && layout.accessory) this.#attach(this.#accSlot, key, () => this.#bodyMaterial(false), layout.accessory);
     }
@@ -1268,7 +1353,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       const left = this.getBoundingClientRect().left;
       pressNavDrag(this.#drag, layout, e.clientX - left);
       if (!this.#drag.active) return;
-      this.#press = { id: e.pointerId, startX: e.clientX, left, dragging: false, last: e.timeStamp };
+      this.#press = { id: e.pointerId, startX: e.clientX, left, dragging: false, last: e.timeStamp, onLink: target?.closest('a') != null };
       const win = this.ownerDocument.defaultView!;
       const move = (ev: PointerEvent) => this.#pressMove(ev);
       const up = (ev: PointerEvent) => this.#pressUp(ev, false);
@@ -1320,7 +1405,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       }
       if (!plan) return;
       const bar = layout !== null && layout.form === 'bar' && !layout.minimized;
-      if (cancelled || !bar) {
+      if (cancelled || !bar || (!press.dragging && !press.onLink)) {
         cancelNavDrag(this.#drag, layout ?? plan.layout, plan.selected);
       } else {
         const index = releaseNavDrag(this.#drag, layout);
