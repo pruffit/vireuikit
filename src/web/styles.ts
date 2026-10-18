@@ -88,6 +88,7 @@ ${NAV}>nav{pointer-events:auto;touch-action:pan-y;user-select:none;-webkit-user-
 ${NAV}>[data-accessory]{pointer-events:auto;overflow:clip}
 ${NAV}>nav ul{position:absolute;inset:0;margin:0;padding:0;list-style:none;overflow:clip;border-radius:inherit;pointer-events:none}
 ${NAV}>nav li{display:block;height:0;margin:0;padding:0}
+${NAV}>nav [hidden],${NAV}>[data-accessory][hidden]{display:none!important}
 ${NAV}[data-scroll]>nav{overflow-x:clip;overflow-y:auto}
 ${NAV}[data-scroll]>nav ul{position:static;overflow:visible}
 ${LINKS},${NAV}>nav>a{position:absolute;left:calc(var(--vk-lx,0px) - var(--vk-x,0px));top:calc(var(--vk-ly,0px) - var(--vk-y,0px));

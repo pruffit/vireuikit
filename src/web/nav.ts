@@ -184,6 +184,8 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     #scrollTop = 0;
     #dirty = false;
     #swallow: (() => void) | null = null;
+    #tapping = false;
+    #tapTimer = 0;
 
     get a11y(): A11yOverride {
       return this.#own;
@@ -231,6 +233,8 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       cancelAnimationFrame(this.#frame);
       this.#frame = 0;
       this.#swallow?.();
+      window.clearTimeout(this.#tapTimer);
+      this.#tapping = false;
       this.#unbindScroller?.();
       this.#unbindScroller = null;
       for (const slot of [this.#body, this.#lensSlot, this.#accSlot]) if (slot) this.#detach(slot);
@@ -407,13 +411,21 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       };
       const doc = this.ownerDocument;
 
-      on<PointerEvent>(nav, 'pointerdown', (e) => this.#pressDown(e));
+      on<PointerEvent>(nav, 'pointerdown', (e) => {
+        // A tap focuses the link before it clicks; focus that comes with a press is not the keyboard arriving.
+        this.#tapping = true;
+        window.clearTimeout(this.#tapTimer);
+        this.#tapTimer = window.setTimeout(() => (this.#tapping = false), 600);
+        this.#pressDown(e);
+      });
+      on<PointerEvent>(nav, 'pointercancel', () => (this.#tapping = false));
       on<Event>(nav, 'dragstart', (e) => e.preventDefault());
       on<MouseEvent>(
         nav,
         'click',
         (e) => {
           const link = e.target instanceof Element ? e.target.closest('a') : null;
+          this.#tapping = false;
           if (!link || this.#forced()) return;
           const plan = this.#plan;
           if (plan && plan.layout.minimized && plan.visible.has(link as HTMLAnchorElement) && link !== plan.search) {
@@ -427,7 +439,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         true,
       );
       on<FocusEvent>(nav, 'focusin', () => {
-        if (!this.#minState.minimized || this.#forced()) return;
+        if (!this.#minState.minimized || this.#forced() || this.#tapping) return;
         expandMinimize(this.#minState);
         this.#replan();
       });
