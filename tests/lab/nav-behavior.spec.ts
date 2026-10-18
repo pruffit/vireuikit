@@ -1063,6 +1063,80 @@ test.describe('the toggle', () => {
   });
 });
 
+// ---- focus through a change ----------------------------------------------------------------------------------------
+
+const focusedName = (page: Page) =>
+  page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    return !el || el === document.body ? 'body' : el.matches('a') ? (el.textContent ?? '').trim().replace(/\d+$/, '') : el.localName;
+  });
+
+test.describe('a link the form hides', () => {
+  test('hands focus to the selected link when the bar minimises', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    await page.getByRole('link', { name: 'Friends' }).focus();
+    await scrollTo(page, 100);
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-minimized'));
+    await settle(page);
+    expect(await focusedName(page)).toBe('Home');
+    expect(await attr(page, 'data-minimized')).toBe('');
+  });
+
+  test('hands focus to the toggle on a rail, or to the first link where there is none, when the selected link is hidden too', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 1280, 800);
+    await page.evaluate(() => {
+      for (const a of document.querySelectorAll('vire-nav [aria-current]')) a.removeAttribute('aria-current');
+      [...document.querySelectorAll('vire-nav nav a')].find((a) => a.textContent === 'Feed')!.setAttribute('aria-current', 'page');
+    });
+    await settle(page);
+    await page.getByRole('link', { name: 'Feed' }).focus();
+    await reform(page, 900, 720, 'rail');
+    expect(await focusedName(page)).toBe('button');
+    await expect(page.locator('vire-nav button[data-vk-toggle]')).toBeFocused();
+    await page.getByRole('link', { name: 'Library' }).focus();
+    await reform(page, 1280, 800, 'sidebar');
+    await page.getByRole('link', { name: 'Dashboard' }).focus();
+    await reform(page, 430, 720, 'bar');
+    expect(await focusedName(page)).toBe('Home');
+  });
+
+  test('keeps focus on the same link while that link stays shown', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 1280, 800);
+    await page.getByRole('link', { name: 'Library' }).focus();
+    await reform(page, 430, 720, 'bar');
+    expect(await focusedName(page)).toBe('Library');
+  });
+
+  for (const how of ['Escape', 'the scrim'] as const) {
+    test(`closing the sidebar over the content by ${how} returns focus to the toggle that opened it`, async ({ page }) => {
+      await openNav(page, 'glass=0&accessory=0', 1000, 720);
+      const frame = await rect(page, '#frame');
+      const toggle = page.locator('vire-nav button[data-vk-toggle]');
+      await toggle.click();
+      await page.waitForFunction(() => document.querySelector('vire-nav')!.getAttribute('data-form') === 'sidebar');
+      await settle(page);
+      await page.getByRole('link', { name: 'Feed' }).focus();
+      if (how === 'Escape') await page.keyboard.press('Escape');
+      else await page.mouse.click(frame.x + 700, frame.y + 400);
+      await page.waitForFunction(() => document.querySelector('vire-nav')!.getAttribute('data-form') === 'rail');
+      await settle(page);
+      await expect(toggle).toBeFocused();
+    });
+  }
+
+  test('closing it leaves focus alone when it was outside the navigation', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 1000, 720);
+    await page.locator('vire-nav button[data-vk-toggle]').click();
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.getAttribute('data-form') === 'sidebar');
+    await settle(page);
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.getAttribute('data-form') === 'rail');
+    await settle(page);
+    expect(await focusedName(page)).toBe('body');
+  });
+});
+
 // ---- the search shortcut -------------------------------------------------------------------------------------------
 
 test.describe('the search shortcut', () => {

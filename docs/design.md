@@ -198,7 +198,9 @@ here the anchor is the selected destination. `<vire-nav>` builds it:
   field itself is the search atom (order 7).
 - **Sizes and input.** Rows and items keep the 44 dp hit area wherever any coarse input is present (AD2); the sidebar's
   rows are 44 dp on the touch tier and 36 dp on the pointer tier. Focus shows as a ring on the link; a morph keeps
-  focus on the same link.
+  focus on the same link while that link stays shown, and a link the new form hides hands it to the selected link (or
+  the toggle) without scrolling. Closing the sidebar opened over the content by Escape or the scrim returns focus to the
+  toggle that opened it; there is no focus trap and no `aria-modal`.
 
 Acceptance is the NV criteria in `docs/acceptance.md`.
 

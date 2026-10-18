@@ -225,8 +225,9 @@ and changes form through the selected destination.
   in a form are `hidden`. The host carries `data-form` (`bar`, `rail`, `sidebar`), `data-search` (`button`, `item`,
   `field`) and `data-minimized`.
 - A change of form goes through the selection: it lifts into a lens, the old body contracts into it, the new body grows
-  out of it and the lens settles into the pill. The lens is glass only while it moves. Focus and the selected link stay.
-  Reduced motion lands the new form in one frame.
+  out of it and the lens settles into the pill. The lens is glass only while it moves. Focus stays on the same link
+  while that link stays shown; a link the new form hides (minimising, a link moving to the secondary list) hands focus to
+  the selected link, or to the toggle. Reduced motion lands the new form in one frame.
 - On the bar a press lifts the selection into a lens under the finger; a drag moves it, and releasing activates the
   nearest link once. A tap is a plain click on the link.
 - Attributes: `form` (`bar`, `rail` or `sidebar`: fixes the form), `collapsed` (the sidebar held as a rail; the toggle
@@ -243,8 +244,8 @@ and changes form through the selected destination.
   clear, and fires `vire-nav-layout` with `{ form, minimized, insets, accessoryPlacement }` whenever any changes.
 - Toggle: in the sidebar a button in its head collapses it into a rail (`collapsed`, and `vire-nav-collapse` with
   `{ collapsed: true }`); an expandable rail beside the content clears it (`{ collapsed: false }`); on an expanded window
-  a rail opens the sidebar over the content behind a scrim, closed by Escape, a press on the scrim or a link chosen.
-  The element stores nothing.
+  a rail opens the sidebar over the content behind a scrim, closed by Escape, a press on the scrim or a link chosen;
+  Escape and the scrim return focus to the toggle if it was inside the navigation. The element stores nothing.
 - Where the model gives a shortcut (a large window, or a keyboard in use), `search-key` pressed outside a field clicks
   the search link, which carries `aria-keyshortcuts` only then.
 - Every link keeps a 44 dp hit area wherever a coarse input is present, without changing the layout. A `[data-badge]`

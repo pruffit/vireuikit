@@ -233,6 +233,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       cancelAnimationFrame(this.#frame);
       this.#frame = 0;
       this.#swallow?.();
+      this.#unhold?.();
       window.clearTimeout(this.#tapTimer);
       this.#tapping = false;
       this.#unbindScroller?.();
@@ -439,7 +440,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         true,
       );
       on<FocusEvent>(nav, 'focusin', () => {
-        if (!this.#minState.minimized || this.#forced() || this.#tapping) return;
+        if (this.#handing || !this.#minState.minimized || this.#forced() || this.#tapping) return;
         expandMinimize(this.#minState);
         this.#replan();
       });
@@ -452,7 +453,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       on<KeyboardEvent>(doc, 'keydown', (e) => {
         if (e.key === 'Escape' && this.#over) {
           e.preventDefault();
-          this.#setOver(false);
+          this.#closeOver();
           return;
         }
         const plan = this.#plan;
@@ -739,13 +740,54 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.dispatchEvent(new CustomEvent('vire-nav-collapse', { bubbles: true, detail: { collapsed } }));
     }
 
+    /** Closing by Escape or the scrim hands focus back to the toggle that opened the sidebar. */
+    #closeOver(pressed = false): void {
+      const inside = this.#navEl?.contains(this.#activeElement()) ?? false;
+      this.#setOver(false);
+      if (!inside || !this.#toggle || this.#toggle.hidden) return;
+      this.#focusQuietly(this.#toggle);
+      if (pressed) this.#holdFocus();
+    }
+
+    // The scrim is gone by the time the press's mousedown lands on the content, whose default would blur the toggle.
+    #holdFocus(): void {
+      this.#unhold?.();
+      const doc = this.ownerDocument;
+      const hold = (e: Event) => e.preventDefault();
+      const timer = window.setTimeout(() => off(), 300);
+      const off = () => {
+        doc.removeEventListener('mousedown', hold, true);
+        window.clearTimeout(timer);
+        this.#unhold = null;
+      };
+      doc.addEventListener('mousedown', hold, { capture: true, once: true });
+      this.#unhold = off;
+    }
+
+    #unhold: (() => void) | null = null;
+
+    #activeElement(): Element | null {
+      return (this.getRootNode() as Document | ShadowRoot).activeElement;
+    }
+
+    #focusQuietly(el: HTMLElement): void {
+      this.#handing = true;
+      try {
+        el.focus({ preventScroll: true });
+      } finally {
+        this.#handing = false;
+      }
+    }
+
+    #handing = false;
+
     #setOver(open: boolean, replan = true): void {
       if (this.#over === open) return;
       this.#over = open;
       if (open && this.#navEl) {
         const scrim = this.ownerDocument.createElement('div');
         scrim.setAttribute('data-vk-scrim', '');
-        scrim.addEventListener('pointerdown', () => this.#setOver(false));
+        scrim.addEventListener('pointerdown', () => this.#closeOver(true));
         this.#mine.add(scrim);
         this.insertBefore(scrim, this.#navEl);
         this.#scrim = scrim;
@@ -821,6 +863,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#shown = shown;
       const { layout, nav } = shown;
       const { lists, secondaryList, primary, secondary, search } = this.#collect();
+      const focused = this.#navEl?.contains(this.#activeElement()) ? (this.#activeElement() as HTMLElement) : null;
       this.setAttribute('data-form', layout.form);
       if (nav.search) this.setAttribute('data-search', nav.search.form);
       else this.removeAttribute('data-search');
@@ -848,6 +891,21 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       const last = layout.items[layout.items.length - 1];
       const bottom = last ? last.y + last.height + 8 : 0;
       this.#fits = layout.form !== 'sidebar' || bottom <= layout.body.y + layout.body.height;
+      if (focused && this.#loses(focused, shown)) this.#handFocus(shown);
+    }
+
+    #loses(el: HTMLElement, shown: Plan): boolean {
+      if (el === this.#toggle) return shown.layout.toggle === null;
+      if (el === shown.search) return shown.layout.search === null;
+      return shown.order.includes(el as HTMLAnchorElement) && !shown.visible.has(el as HTMLAnchorElement);
+    }
+
+    /** A link the form hides hands focus to the selected link, else the toggle, else the first link shown. */
+    #handFocus(shown: Plan): void {
+      const selected = shown.order[shown.selected];
+      const first = shown.order.find((link) => shown.visible.has(link));
+      const target = selected && shown.visible.has(selected) ? selected : shown.layout.toggle ? this.#toggle : (first ?? null);
+      if (target) this.#focusQuietly(target);
     }
 
     #fits = true;
