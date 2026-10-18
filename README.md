@@ -257,7 +257,7 @@ and changes form through the selected destination.
   inside a link is a count (or a dot, when empty) at the icon's corner, and only a picture: the element sets
   `aria-hidden="true"` on it and restores the attribute on removal. To say it, put a `[data-badge-label]` in the link;
   it is visually hidden but stays in the link's name:
-  `<a href="/messages"><svg>…</svg>Messages<span data-badge>3</span><span data-badge-label>, 3 new</span></a>`. `sample` and `a11y` work as on the buttons. The bar clears the bottom safe area
+  `<a href="/messages"><svg>…</svg>Messages<span data-badge>3</span><span data-badge-label>3 new</span></a>`, read as "Messages 3 new". `sample` and `a11y` work as on the buttons. The bar clears the bottom safe area
   (`env(safe-area-inset-bottom)`, read once per layout; 0 where unsupported).
 - The element adds nodes inside `<vire-nav>`, so call `defineVireElements()` after a framework has hydrated the markup
   (in an effect, say), not before. The lens's copy follows the selected link's content, and a link that leaves the markup
