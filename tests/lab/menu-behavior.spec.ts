@@ -397,15 +397,30 @@ test.describe('input that began on the trigger', () => {
     expect(await isOpen(page)).toBe(true);
   });
 
-  test('a deliberate Enter chooses as soon as the content shows, before the surface has settled', async ({ page }) => {
-    await slowTime(page, 0.1);
+  // Judged inside the first frame the content shows, while the surface still grows towards its overshoot.
+  test('a key chooses as soon as the content shows, where a pointer click there still waits for the menu', async ({ page }) => {
     await openCase(page, 'view=menu');
     await page.locator('#more-trigger').focus();
     await page.keyboard.press('Enter');
-    await page.waitForFunction(() => document.getElementById('more-list')!.style.getPropertyValue('--vk-ink-in') === '1.000');
-    expect(await page.locator('#more').getAttribute('data-phase')).toBe('moving');
-    await page.keyboard.press('Enter');
-    expect(await log(page)).toEqual(['click:copy']);
+    const seen = await page.evaluate(
+      () =>
+        new Promise<{ phase: string | null; afterPointer: string; afterKey: string }>((resolve) => {
+          const list = document.getElementById('more-list')!;
+          const read = () => document.getElementById('log')!.textContent!.trim();
+          const step = () => {
+            if (list.style.getPropertyValue('--vk-ink-in') !== '1.000') return requestAnimationFrame(step);
+            const item = document.activeElement as HTMLElement;
+            const phase = document.getElementById('more')!.getAttribute('data-phase');
+            item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+            const afterPointer = read();
+            // What Enter does on a focused button: a click with no pointer behind it.
+            item.click();
+            resolve({ phase, afterPointer, afterKey: read() });
+          };
+          requestAnimationFrame(step);
+        }),
+    );
+    expect(seen).toEqual({ phase: 'moving', afterPointer: '', afterKey: 'click:copy' });
   });
 
   test('a click after the content has arrived still chooses', async ({ page }) => {
@@ -905,6 +920,7 @@ test.describe('glass and its absence', () => {
     await expect(menu).toHaveAttribute('data-glass', 'off');
     await expect(menu).toHaveAttribute('data-surface', 'plain');
     await page.locator('#more-trigger').click();
+    await openNow(page);
     await page.getByRole('menuitem', { name: 'Rename' }).click();
     expect(await log(page)).toEqual(['click:rename']);
     expect(errors).toEqual([]);
@@ -969,6 +985,7 @@ test.describe('upgrade while the page is parsed', () => {
       document.getElementById('early-list')!.append(late);
     });
     await expect(page.getByRole('menuitem', { name: 'Three' })).toHaveAttribute('tabindex', '-1');
+    await openNow(page, 'early-menu');
     await page.getByRole('menuitem', { name: 'Two' }).click();
     expect(await log(page)).toEqual(['click:Two']);
   });
