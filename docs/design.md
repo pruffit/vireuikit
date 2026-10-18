@@ -213,6 +213,85 @@ here the anchor is the selected destination. `<vire-nav>` builds it:
 
 Acceptance is the NV criteria in `docs/acceptance.md`.
 
+## Sheet and popover
+
+The research (outside this repository: the sheet and popover note of 18.10.2026) and the adaptive map decide what a
+transient surface becomes on each class (`presentationForm`); this is how it sits, moves and closes. A surface is one
+body: it grows out of the control that presents it and runs back into it on close (U 6:56–7:20: sheets "morph out of
+buttons that present them"; D 6:54: the action sheet "springs from the action itself"), and a class change reshapes it
+while it stays open.
+
+- **The first HTML is the platform's.** Each kind keeps the semantics it has without the kit:
+  - `<vire-popover>`: a `<button popovertarget>` and a `popover` (auto). Light dismiss, Escape and focus return are
+    the platform's; several picks keep it open, so it is not a menu.
+  - `<vire-sheet>` modal (`modal-sheet`, `picker`, `dialog`, `alert`): a `<dialog>` opened by
+    `<button commandfor command="show-modal">` and closed by `command="close"`. The background is inert, Escape closes,
+    focus moves in and comes back, all by the browser.
+  - `<vire-sheet>` supplementary (`sheet`, beside a parallel task): a `popover="manual"` toggled by its
+    `popovertarget`. The page stays usable and nothing closes it but the person.
+
+  The kind comes from the markup; a `kind` attribute overrides it. After the upgrade the element runs the show and the
+  hide itself, as the menu does, so the growth can run back before the surface leaves the top layer: it intercepts the
+  `command` and `cancel` events and the popover's toggles, and gives them back on disconnect.
+- **The form is the model's.** `presentationForm(kind, ctx, source)` on the window the element lives in. A popover is a
+  bottom sheet grown from its source below 600 dp. A supplementary sheet is a bottom sheet below 840 dp (at most 640
+  wide, centred), a side sheet that narrows the content from 840 dp and a third pane from 1600 dp. A modal task or
+  picker is a bottom sheet below 600 dp and a centred sheet from 600 dp. A dialog with fields is full screen below
+  600 dp; an alert is an alert everywhere. Every bottom or centred sheet is full screen on a compact height.
+- **Below 600 dp a popover stays a popover.** Its sheet form carries a scrim to say where the surface is, and a press
+  on the scrim is the popover's own light dismiss. It is not made modal: a `popover` cannot be, and its task is
+  supplementary.
+- **The bottom sheet sits by its height** (U at t = 392, 400, 411 s, measured):
+  - Detents are fractions of the window: `medium` is half of it, `large` leaves 56 dp at the top, and an optional
+    `peek` is the content's own height. The detents a sheet has come from its kind or the `detents` attribute, and the
+    current one is reflected in `detent`.
+  - The side and bottom inset shrinks as the sheet rises: 12 dp up to 30 % of the window, 6 dp at 55 %, flush from
+    90 % (`sheetInset`). The radius is 32 dp while inset and 28 dp when flush; a flush sheet runs its bottom corners
+    past the window's edge.
+  - The body is glass up to 55 % of the window and opaque from 90 %, blended with the height as it rises (U 407.0 s:
+    about 0.47 s, opaque by the large detent).
+  - The background only dims; it is never scaled or moved.
+- **The grabber** shows whenever a sheet has more than one detent or closes by a swipe. It is a 32 × 4 dp line with a
+  44 dp hit area and `role="slider"`: `aria-valuetext` names the detent, the arrows change it, and a tap moves to the
+  next one.
+- **Dragging.**
+  - While the finger is down the box follows it with no spring, and past the largest detent it meets resistance (a
+    125 dp dampening zone).
+  - On release it springs to the detent chosen by position and velocity (56 dp and 125 dp/s to leave the current one,
+    from Material as starting values), at about 0.4 s with at most 2 % overshoot (U 403.6 and 407.0 s: 0.35 to 0.47 s).
+  - Below the lowest detent by the same thresholds it closes, unless `persistent` is set.
+  - Content scrolls first. Only from its top does a downward drag move the sheet, and the content's scroller takes
+    `overscroll-behavior: contain`.
+- **Growth and closing.** A surface with a trigger grows out of it and runs back into it, and the trigger hands its
+  body over while the surface is out (`setCarried`), as with the menu:
+  - A popover takes the menu's growth (`growthFrame`, the drop included, `DEFAULT_GROWTH_TIMING`).
+  - A sheet grows straight from the trigger's body into its box with no drop, on the growth's springs slowed by a
+    quarter, because the path is longer.
+  - A sheet without a trigger rises from the bottom edge on the detent spring; a centred one without a trigger comes in
+    from 96 % scale.
+  - Content comes into focus near size, as in the menu.
+- **Changes of form** reshape the one body on `FORM_MORPH_TIMING` (`formMorphFrame`): popover ↔ bottom sheet at 600,
+  bottom ↔ side sheet at 840, side sheet ↔ third pane at 1600, sheet ↔ full screen on a compact height. The content,
+  its scroll, the focus, the selection and the detent survive; a sheet that left its detent for full screen comes back
+  to it. Reduced motion lands every change in one frame.
+- **Layers.**
+  - The side sheet: 360 dp wide (280 to 400, at most a third of the window), inset 8 dp from the top, trailing and
+    bottom edges with radius 24. It is glass, and the element publishes `--vire-sheet-inset-end` on its parent for the
+    content it narrows.
+  - From 1600 dp it is a third pane: the content layer, opaque, never glass (decision 3).
+  - Centred sheets and basic dialogs are `min(560, window − 48)` wide, alerts `min(320, window − 48)`; they are as tall
+    as their content up to the window minus 48, with the content scrolling inside.
+  - Full-screen forms are opaque and flush.
+- **The scrim** dims at 32 % black under a modal surface and under a popover's sheet form. A press on it closes a
+  bottom sheet or a popover, never a centred sheet, a dialog or an alert, and never a `persistent` surface.
+- **The keyboard.** When a field in a bottom sheet takes focus and the visual viewport shrinks, the sheet moves to its
+  largest detent and keeps its bottom above the keyboard. When the keyboard leaves, the sheet goes back to the detent the
+  person had, if they did not move it.
+- **Glass budget.** An open surface is one glass surface: its trigger has handed its body over, and the side pane and
+  full-screen forms are not glass.
+
+Acceptance is the SH criteria in `docs/acceptance.md`.
+
 ## Acceptance of an atom
 
 An atom is done when:

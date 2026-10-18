@@ -381,6 +381,38 @@ bar is also a knob the finger drags (U 298–299.7 s, 15 fps). Behaviour tests a
 Side-by-side: the cycle at M 8:35–8:47 against the stage's sweep, and the drag at U 298–299.7 s against the gallery's
 bar.
 
+## Sheet and popover
+
+A surface grows out of the control that presents it and runs back into it, and a class change reshapes it while it
+stays open (U 6:56–7:20; D 6:54–7:10). A partial-height sheet is inset glass, and it becomes opaque and flush as it
+rises (U 6:12–6:35, measured at t = 392, 400 and 411 s). Behaviour tests are in `tests/lab/sheet-behavior.spec.ts`.
+
+| # | Criterion | Check |
+|---|---|---|
+| SH1 | It works before the kit. A popover is a `popovertarget` button and a `popover`: light dismiss, Escape and focus return. A modal sheet is a `<dialog>` opened by `command="show-modal"` and closed by `command="close"`: an inert background, Escape, focus moved in and returned. A supplementary sheet is a `popover="manual"` its button toggles, and the page stays usable. | behaviour "before the upgrade" (each kind) |
+| SH2 | The upgrade keeps that meaning. No role is added to the surface but the grabber's `slider`, the dialog keeps its name from `aria-labelledby`, and removing the element gives the markup back with nothing of its own left. | behaviour "roles", "removing the element gives the markup back" |
+| SH3 | The form is `presentationForm`'s on every class (AD16–AD20), with `kind` overriding the markup's. | behaviour per kind and window (`data-form`) |
+| SH4 | A popover grows out of its trigger the way the menu does: the trigger's body, a drop, the panel with a small overshoot, the content focusing near size. It closes back into the trigger. It never has an arrow and stays in its trigger's segment. | unit (frames); behaviour, sampled frame by frame |
+| SH5 | Below 600 dp an open popover becomes a bottom sheet grown from its source, with a scrim, still a non-modal popover: a press on the scrim closes it, and the page behind is not inert. | behaviour "a popover becomes a sheet below 600…" |
+| SH6 | Detents are fractions of the window: `medium` is 0.5, `large` leaves 56 dp at the top, and `peek` is the content's height. The current one is reflected in `detent`, and the host can set it. | unit `sheetDetents`; behaviour (boxes measured) |
+| SH7 | The inset shrinks as the sheet rises: 12 dp up to 30 %, 6 dp at 55 %, flush from 90 %. The radius is 32 inset and 28 flush. The body is glass up to 55 % and opaque from 90 %, blended with the height (U t = 392–411 s). | unit `sheetInset`, `sheetOpacity`; behaviour (boxes at each detent); snapshots |
+| SH8 | The grabber shows whenever there is more than one detent or a swipe closes the sheet. It is a 32 × 4 dp line in a 44 dp hit area, `role="slider"` with `aria-valuetext` naming the detent; the arrow keys and a tap change the detent. | behaviour "the grabber…" |
+| SH9 | While dragged, the sheet follows the finger with no spring and meets resistance past the largest detent. On release it springs to the detent position and velocity choose (56 dp, 125 dp/s), in about 0.4 s with at most 2 % overshoot. Below the lowest detent it closes, unless `persistent` is set. | unit `sheetDrag`; behaviour "the sheet follows the finger…", "release…", "persistent…" |
+| SH10 | The content scrolls first: only from its top does a downward drag move the sheet, and its scroller has `overscroll-behavior: contain`. | behaviour "scroll before drag" |
+| SH11 | A sheet with a trigger grows straight out of the trigger's body (no drop) into its box and runs back into it. Without a trigger, a bottom sheet rises from the bottom edge and a centred one comes in from 96 % scale. While the surface is out its trigger draws no lens, body or rim. | unit (frames); behaviour, sampled frame by frame |
+| SH12 | A class change keeps the surface open and reshapes it on springs: popover ↔ sheet at 600, bottom ↔ side at 840, side sheet ↔ third pane at 1600, sheet ↔ full screen on a compact height. The content, its scroll, the focus, the selection and the detent survive, and the detent comes back after a stay in full screen. | behaviour "an open sheet changes form…" (widths measured, state checked) |
+| SH13 | The side sheet is 360 dp wide (280–400, at most a third of the window), inset 8 dp with radius 24, glass, and publishes `--vire-sheet-inset-end` on its parent. From 1600 dp the third pane is opaque and not glass (decision 3). | behaviour (boxes, inset); snapshots |
+| SH14 | Centred sheets and basic dialogs are `min(560, window − 48)` wide, alerts `min(320, window − 48)`. They are as tall as their content up to the window minus 48, and taller content scrolls inside. Full-screen forms are opaque and flush. | unit; behaviour (boxes) |
+| SH15 | The scrim dims at 32 % under a modal surface and under a popover's sheet form. A press on it closes a bottom sheet or a popover, never a centred sheet, a dialog, an alert or a `persistent` surface. The background is never scaled or moved. | behaviour "the scrim…" |
+| SH16 | A field focused in a bottom sheet with a shrunken visual viewport takes the sheet to its largest detent with its bottom above the keyboard. The sheet goes back when the keyboard leaves, unless the person moved it. | behaviour (stubbed visual viewport) |
+| SH17 | Every close runs the growth back first. A popover's Escape and outside press, a dialog's `cancel` and `command="close"`, a drag past the lowest detent and a scrim press all leave the top layer only after the retraction, and focus returns to the trigger. | behaviour "closing retraces the growth…" |
+| SH18 | Reduced motion lands opening, closing and every change of form in one frame. Reduced transparency and increased contrast make every form opaque and readable with the same geometry. Glass off works everywhere. | behaviour (modes); snapshots |
+| SH19 | One glass surface per open surface: the trigger has handed its body over, and the third pane and full-screen forms attach no glass. | behaviour (lenses counted, a recording stand-in for `vireglass/dom`) |
+| SH20 | The lab shows every kind and form (popover, popover as sheet, bottom sheet at each detent, side sheet, third pane, centred sheet, full screen, dialog, alert) on two backdrops with glass on and off, and the stage draws the real surface in place of its outline. | snapshots `sheet-*`, `adaptive-*` |
+
+Side-by-side: the detents at U 6:12–6:35 (t = 392–411 s) against the gallery's bottom sheet, and the action sheet at
+D 6:54–7:10 against the popover's growth.
+
 ## What is not covered
 
 - Switch, slider, segmented control, chip, field; the Android target (`src/native/` does not exist yet).
