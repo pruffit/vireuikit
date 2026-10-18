@@ -89,12 +89,14 @@ same growth run backwards, and it closes after a choice. How the web element get
   attribute fixes the corner for a host that knows its layout.
 - **A menu does not flip.** Larger elements adapt but do not switch between light and dark (M 15:29), so the backdrop
   is read once as the menu opens (or taken from the host's `sample`) and held while it is out.
-- **Disabled items follow the WAI-ARIA APG**: focusable, not activatable. The arrows and typeahead reach them and a
-  choice is refused; the element turns `disabled` into `aria-disabled="true"` (a disabled button cannot take focus) and
-  back on disconnect.
-- **The press that opened the menu does not choose.** The first item grows in under the pointer, so a click counts
-  only once the menu has arrived (content in focus, surface past its overshoot) and its press began after that; the
-  second click of a double click and held keys never count. A choice is taken in the capture phase, so it closes the
+- **Disabled stays the author's.** The element never rewrites `disabled` or `aria-disabled`, so either can be set and
+  cleared at any time (React clears `disabled` with `removeAttribute`). A native disabled button cannot take focus, so
+  the arrows, typeahead and the pointer pass over it; an `aria-disabled="true"` item is the WAI-ARIA APG's variant,
+  reached by all of them. Neither can be chosen. A focused item that turns natively disabled hands focus to the menu.
+- **The press that opened the menu does not choose.** The first item grows in under the pointer, so a pointer click
+  counts only once the menu has arrived (content in focus, surface past its overshoot) and its press began after that; a
+  deliberate key, which is not under the pointer, counts once the content is in focus. The second click of a double
+  click and held keys never count. A choice is taken in the capture phase, so it closes the
   menu even when an item's handler stops the click.
 - **A closed shadow root hides the menu from the document**, so a press outside is judged in the innermost tree that
   can see it, one listener per tree from the element's root out to the document.

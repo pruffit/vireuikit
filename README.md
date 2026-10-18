@@ -49,7 +49,7 @@ too, so every target shares its keyboard, where it sits and what its surface is 
 ```ts
 import { MENU_CLOSED, menuPlacement, menuSurfaceFrame, stepMenu } from 'vireuikit';
 
-const step = stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, items); // items: { label, disabled }[]
+const step = stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, items); // items: { label, disabled, focusable? }[]
 // step.focus says where focus goes; a choice always closes the menu.
 const { rect, anchor } = menuPlacement(triggerRect, menuSize, viewport);
 const surface = menuSurfaceFrame(triggerBox, { ...rect, radius }, anchor, growthPhase(state));
@@ -130,11 +130,11 @@ setA11yOverride({ reduceTransparency: true });
   together with their keyboard: Enter, Space or ArrowDown open on the first item and ArrowUp on the last; the arrows,
   Home, End and typeahead move over the items; Escape and a choice return focus to the trigger; Tab closes and moves
   on. A pointer opens it with focus on the menu. Removing the element restores the markup.
-- A disabled item follows the WAI-ARIA APG: it stays focusable and cannot be chosen. The element turns its `disabled`
-  into `aria-disabled="true"`; after the upgrade, change it with `aria-disabled` (setting `disabled` again is turned
-  into it too).
-- The press that opened the menu chooses nothing: a click on an item counts once the menu has arrived, and neither
-  the second click of a double click nor a held key ever counts.
+- Disabled items are yours to set and clear at any time; the element never rewrites them. A `disabled` item cannot take
+  focus, so the keyboard passes over it; an `aria-disabled="true"` item stays focusable, the WAI-ARIA APG way. Neither can
+  be chosen.
+- The press that opened the menu chooses nothing: a pointer click on an item counts once the menu has arrived, a key
+  once its content shows, and neither the second click of a double click nor a held key ever counts.
 - The list's own `beforetoggle` and `toggle` events fire when it leaves the top layer, after the growth has run back;
   `aria-expanded` turns false as the closing begins.
 - The menu grows out of its trigger and covers it: the trigger's body contracts into a drop, the drop grows into the

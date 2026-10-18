@@ -16,8 +16,10 @@ motion; the old ink window is not kept.
   the list leaves the top layer. Attributes `glass`, `size`, `corner`; property `sample`. `MENU_TAG` and the
   `VireMenuElement` type are exported from `vireuikit/web`.
 - **The press that opened the menu chooses nothing.** The first item grows in under the pointer, so an item click
-  counts only once the menu has arrived and its press began after that; the second click of a double click and a held
-  Enter or Space never count. Disabled items follow the WAI-ARIA APG (focusable, `aria-disabled`, never chosen). A
+  counts only once the menu has arrived and its press began after that (a key, once the content shows); the second
+  click of a double click and a held Enter or Space never count. `disabled` and `aria-disabled` stay the author's: a
+  native disabled item is passed over by the keyboard, an `aria-disabled` one is reached (WAI-ARIA APG), neither is
+  chosen. A
   choice closes the menu even when an item's own handler stops the click, and a press outside is seen inside a closed
   shadow root too. The list's `toggle` event fires after the growth has run back.
 - **The menu's model.** `stepMenu` (the menu-button keyboard as a pure state machine, typeahead included),
