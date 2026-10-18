@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0
 
 **Changed behaviour.** The web elements no longer decide everything from one `(pointer: coarse)` query. The hit area
 now reaches 44 dp wherever any coarse input is present (`any-pointer: coarse`), so a laptop with a touch screen gets it
