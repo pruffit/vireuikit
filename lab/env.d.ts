@@ -8,6 +8,7 @@ declare global {
       input: typeof import('vireuikit/web').effectiveInput;
       define: () => void;
       upgraded: boolean;
+      nav?: { frame: HTMLElement; resize(width: number, height: number): void; scrollOnDocument(): void };
     };
   }
 }

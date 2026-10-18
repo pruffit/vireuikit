@@ -1,5 +1,5 @@
-// The adaptive stage: a resizable window in which the real atoms take their adaptive forms and the patterns not built
-// yet (navigation, panes, sheets, the toolbar) are outlines placed by the model. Every view is addressable by URL.
+// The adaptive stage: a resizable window in which the real atoms and the real navigation take their adaptive forms and
+// the patterns not built yet (panes, sheets, the toolbar) are outlines placed by the model. Every view is addressable by URL.
 import {
   INPUT_MIXED,
   INPUT_POINTER,
@@ -8,13 +8,11 @@ import {
   POSTURE_FLAT,
   SUPPORTING_PANE_MAX_WIDTH,
   SURFACE_KINDS,
-  bottomAccessory,
   classifyWindow,
   createFormMorph,
   formMorphFrame,
   halfOpen,
   hitTarget,
-  navigationForm,
   paneLayout,
   presentationForm,
   rebaseFormMorph,
@@ -33,9 +31,10 @@ import {
 } from '../src/kit/adaptive';
 import type { Rect } from '../src/kit/geometry';
 import { BUTTON_SIZES } from '../src/kit/sizes';
-import { setInputOverride, setViewportOverride, watchAdaptiveContext } from 'vireuikit/web';
+import { setInputOverride, setViewportOverride, watchAdaptiveContext, type VireNavElement } from 'vireuikit/web';
 import { paintBackdrop, type Backdrop } from './backdrops';
 import { GLYPHS, makeMenu, type MenuItemSpec } from './menu';
+import { ensureCss as ensureNavCss, makeNav } from './nav';
 
 export type InputName = 'touch' | 'pointer' | 'mixed' | 'tablet-keyboard';
 export type PostureName = 'flat' | 'book' | 'tabletop';
@@ -87,16 +86,9 @@ type App = {
   sidebarCollapsed: boolean;
 };
 
-const SECTIONS = ['Home', 'Library', 'People', 'Inbox'];
-const SECONDARY = ['Activity', 'Studio'];
+const SECTIONS = ['Home', 'Library', 'Friends', 'Messages'];
 const ROWS = 30;
 const PAD = 8;
-const RAIL_W = 80;
-const SIDEBAR_W = 272;
-const BAR_H = 64;
-const BAR_ITEM_W = 76;
-const SEARCH_D = 64;
-const ACC_H = 48;
 const HEADER_H = 60;
 
 const TOOLBAR_ITEMS: ToolbarItem[] = [
@@ -137,28 +129,7 @@ const CSS = `
 #window .detail-body input{font:inherit;padding:8px 10px;border-radius:10px;border:1px solid color-mix(in srgb,currentColor 30%,transparent);background:Canvas;color:CanvasText}
 #window .placeholder{flex:1;display:grid;place-items:center;opacity:.6}
 #window .back{font:inherit;border:0;background:transparent;color:inherit;cursor:pointer;padding:6px}
-#nav{position:absolute;box-sizing:border-box;z-index:3;border:1.5px dashed color-mix(in srgb,currentColor 55%,transparent);background:color-mix(in srgb,Canvas 55%,transparent);display:flex;gap:4px;padding:8px}
-#nav>.tag{position:absolute;left:12px;top:-1px;transform:translateY(-50%);padding:0 5px;font:600 10px/16px ui-monospace,monospace;background:color-mix(in srgb,Canvas 85%,transparent);color:CanvasText;border-radius:4px;white-space:nowrap}
-#nav .items{display:flex;gap:4px;flex:1;min-width:0;filter:blur(calc((1 - var(--ink,1))*6px));opacity:var(--ink,1)}
-#nav .dest{font:500 11px system-ui;color:inherit;border:0;border-radius:14px;background:transparent;cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 8px;white-space:nowrap}
-#nav .dest svg{width:20px;height:20px;flex:none}
-#nav .dest[aria-current=page]{background:color-mix(in srgb,currentColor 14%,transparent)}
-#nav .secondary,#nav .search-field,#nav .collapse{display:none}
-#nav[data-form=bar] .items{flex-direction:row;justify-content:space-around;align-items:center}
-#nav[data-form=bar] .dest{flex-direction:column;gap:2px;flex:1;padding:4px 0}
-#nav[data-form=rail] .items{flex-direction:column;align-items:stretch;padding-top:32px}
-#nav[data-form=rail] .dest{flex-direction:column;gap:2px;padding:8px 0}
-#nav[data-form=sidebar] .items{flex-direction:column;align-items:stretch;padding-top:28px}
-#nav[data-form=sidebar] .secondary{display:flex}
-#nav[data-form=sidebar] .collapse,#nav[data-expand=beside] .collapse{display:flex}
-#nav[data-search=field][data-form=sidebar] .search-field{display:block}
-#nav .search-field{margin:0 0 6px;padding:8px 10px;border-radius:12px;border:1px dashed color-mix(in srgb,currentColor 40%,transparent);font:12px system-ui;opacity:.8}
-#nav .search-button{position:absolute;display:none;box-sizing:border-box;width:${SEARCH_D}px;height:${SEARCH_D}px;border-radius:50%;border:1.5px dashed color-mix(in srgb,currentColor 55%,transparent);background:color-mix(in srgb,Canvas 55%,transparent);align-items:center;justify-content:center;font:600 10px ui-monospace,monospace}
-#nav[data-search=button] .search-button{display:flex;left:calc(100% + ${PAD}px);top:0}
-#nav[data-search=item] .search-item{display:flex}
-#nav .search-item{display:none}
-#nav[data-minimized] .dest:not([aria-current=page]),#nav[data-minimized] .search-button{display:none}
-#accessory{z-index:2;display:flex;align-items:center;justify-content:flex-end;padding:0 4px;background:color-mix(in srgb,Canvas 55%,transparent)}
+#window>vire-nav{z-index:3}
 #toolbar{border:0;z-index:1}
 #toolbar>.cap{position:absolute;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:0;border:1.5px dashed color-mix(in srgb,currentColor 55%,transparent);background:color-mix(in srgb,Canvas 60%,transparent);font:600 10px ui-monospace,monospace}
 #toolbar>.cap[data-kind=primary]{background:color-mix(in srgb,#3a7bff 30%,Canvas)}
@@ -178,16 +149,22 @@ const CSS = `
 #app[data-chrome='0'] #readout{display:none}
 `;
 
-const svg = (d: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
-const NAV_GLYPHS = [
-  svg('<path d="M4 11l8-7 8 7v9H4z"/>'),
-  svg('<path d="M5 4h4v16H5zM11 4h4v16h-4zM17 5l3 1-3 14"/>'),
-  svg('<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5M16 11a3 3 0 1 0 0-6M21 20c0-2-1.5-4-4-4.6"/>'),
-  svg('<path d="M4 6h16v12H4zM4 7l8 6 8-6"/>'),
-];
-const SEARCH_GLYPH = svg('<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>');
-
+/** One frame of the navigation's body: the form it shows, the form it is going to, its box, and whether it is still the first body. */
 type Frame = { form: string; target: string; x: number; y: number; w: number; h: number; navs: number; id: string; morphing: boolean };
+
+/** What the element says about itself: the stage reads it and decides nothing for it. */
+type NavReadout = {
+  form: string;
+  target: string;
+  search: string;
+  minimized: boolean;
+  collapsed: boolean;
+  accessory: string;
+  moving: boolean;
+  insets: { bottom: number; start: number };
+};
+
+type NavLayoutDetail = { form: string; minimized: boolean; accessoryPlacement: string | null; insets: { bottom: number; start: number } };
 
 declare global {
   interface Window {
@@ -201,6 +178,7 @@ declare global {
       record(): void;
       frames(): Frame[];
       settled(): boolean;
+      nav(): NavReadout;
     };
   }
 }
@@ -349,6 +327,8 @@ export async function adaptiveStage(
   const controls = el('div', { id: 'adaptive-controls' });
   const body = el('div', { id: 'adaptive-body' });
   const win = el('div', { id: 'window' });
+  win.style.width = `${sim.w}px`;
+  win.style.height = `${sim.h}px`;
   const readout = el('dl', { id: 'readout' });
   body.append(win, readout);
   if (options.chrome) (document.getElementById('bar') ?? rows).after(controls);
@@ -393,21 +373,13 @@ export async function adaptiveStage(
   const placeholder = el('div', { class: 'placeholder' }, 'Nothing selected');
   detail.append(detailHeader, detailBody, placeholder);
 
-  const nav = el('nav', { id: 'nav', 'aria-label': 'Sections' });
-  const navTag = el('span', { class: 'tag' });
-  const items = el('div', { class: 'items' });
-  const searchField = el('div', { class: 'search-field' }, 'Search  ⌘K');
-  items.append(searchField);
-  SECTIONS.forEach((name, i) => items.append(el('button', { class: 'dest', type: 'button', 'data-section': String(i) }, `${NAV_GLYPHS[i]}<span>${name}</span>`)));
-  items.append(el('button', { class: 'dest search-item', type: 'button', 'data-search': '' }, `${SEARCH_GLYPH}<span>Search</span>`));
-  SECONDARY.forEach((name) => items.append(el('button', { class: 'dest secondary', type: 'button' }, `<span>${name}</span>`)));
-  const collapse = el('button', { class: 'dest collapse', type: 'button' }, '<span>⇤ Collapse</span>');
-  items.append(collapse);
-  const searchButton = el('div', { class: 'search-button', 'aria-hidden': 'true' }, SEARCH_GLYPH);
-  nav.append(navTag, items, searchButton);
-
-  const accessory = el('div', { id: 'accessory', class: 'ol' }, '<span class="tag"></span>');
-  accessory.append(menu('accessory-more', 'Options'));
+  ensureNavCss();
+  const nav = makeNav({ id: 'nav', glass: options.glass, sample: null, current: app.section, accessory: true, attrs: { minimize: 'scroll' } });
+  nav.querySelectorAll<HTMLElement>(':scope > nav > ul:not([data-secondary]) a').forEach((link, i) => (link.dataset.section = String(i)));
+  (nav as VireNavElement).scroller = listScroll;
+  const accessory = nav.querySelector<HTMLElement>(':scope > [data-accessory]')!;
+  accessory.id = 'accessory';
+  accessory.querySelector('.acc')!.append(makeMenu({ id: 'accessory-more', size: '', glass: '0', sample: null, trigger: { kind: 'icon', label: 'Options', glyph: 'more' }, items: MENU_ITEMS }));
   const supporting = el('aside', { id: 'supporting', class: 'ol' }, '<span class="tag"></span><span>supporting pane</span>');
   const toolbar = el('div', { id: 'toolbar', class: 'ol' }, '<span class="tag"></span>');
   const surface = el('div', { id: 'surface', class: 'ol' }, '<span class="tag"></span><span class="what"></span>');
@@ -416,19 +388,16 @@ export async function adaptiveStage(
   const scrim = el('div', { id: 'scrim' });
   const fold = el('div', { id: 'fold' });
   const handle = el('div', { id: 'handle', title: 'Drag to resize' });
-  win.append(list, detail, toolbar, supporting, accessory, nav, scrim, surface, fold, handle);
 
-  const navMorph = new BodyMorph();
   const surfaceMorph = new BodyMorph();
   let ctx: AdaptiveContext | null = null;
   let decisions: ReturnType<typeof decide> | null = null;
   let frame = 0;
   let lastTime = 0;
   let recording: Frame[] | null = null;
+  let navLayout: NavLayoutDetail | null = null;
+  let navBody: Element | null = null;
   let toolbarNow: ReturnType<typeof toolbarLayout> | null = null;
-
-  const navId = 'nav-body';
-  (nav as HTMLElement & { __body?: string }).__body = navId;
 
   function listState() {
     return { selected: app.selected !== null, showing: app.showing } as const;
@@ -436,14 +405,11 @@ export async function adaptiveStage(
 
   function decide(c: AdaptiveContext) {
     const panes = paneLayout(c, listState());
-    const navForm = navigationForm(c, { primary: SECTIONS.length, secondary: SECONDARY.length, search: true, sidebarCollapsed: app.sidebarCollapsed, panes: panes.panes });
     const placement = toolbarPlacement(c);
     const surfaces = Object.fromEntries(SURFACE_KINDS.map((k) => [k, presentationForm(k, c, sourceRect())])) as Record<SurfaceKind, PresentationForm>;
     return {
       classes: classifyWindow(c.window),
       panes,
-      nav: navForm,
-      accessory: bottomAccessory(navForm, { barMinimized: app.barMinimized }),
       supporting: supportingPane(c, { pinned: app.pinned, open: app.supportingOpen }),
       placement,
       tier: sizeTier(c.input),
@@ -461,19 +427,6 @@ export async function adaptiveStage(
     return { x: r.x - w.x, y: r.y - w.y, width: r.width, height: r.height };
   }
 
-  function navBox(form: string, c: AdaptiveContext): MorphBox {
-    const { width: W, height: H } = c.window;
-    if (form === 'bar') {
-      const d = decisions!;
-      if (app.barMinimized) return { x: 16, y: H - 16 - BAR_H, width: BAR_H, height: BAR_H, radius: BAR_H / 2 };
-      const search = d.nav.search?.form === 'button' ? SEARCH_D + PAD : 0;
-      const barW = Math.max(BAR_H, Math.min(W - 32 - search, d.nav.primary * BAR_ITEM_W + 16));
-      return { x: (W - barW - search) / 2, y: H - 16 - BAR_H, width: barW, height: BAR_H, radius: BAR_H / 2 };
-    }
-    if (form === 'rail') return { x: PAD, y: PAD, width: RAIL_W, height: H - 2 * PAD, radius: 28 };
-    return { x: PAD, y: PAD, width: SIDEBAR_W, height: H - 2 * PAD, radius: 28 };
-  }
-
   function render(): void {
     if (!ctx) return;
     const c = ctx;
@@ -483,22 +436,21 @@ export async function adaptiveStage(
     const segments = d.segments;
     const tierH = BUTTON_SIZES[d.tier].height;
 
-    navMorph.aim(d.nav.form, (f) => navBox(f, c));
-    nav.dataset.target = d.nav.form;
-    nav.dataset.search = d.nav.search?.form ?? 'none';
-    nav.toggleAttribute('data-minimized', d.nav.form === 'bar' && app.barMinimized);
-    if (d.nav.expandable) nav.dataset.expand = d.nav.expandable;
-    else delete nav.dataset.expand;
-    collapse.innerHTML = d.nav.form === 'sidebar' ? '<span>⇤ Collapse</span>' : '<span>⇥</span>';
-    navTag.textContent = `navigation · ${d.nav.form}${d.nav.search ? ` · search ${d.nav.search.form}` : ''}`;
-    for (const b of items.querySelectorAll<HTMLElement>('[data-section]')) {
-      if (Number(b.dataset.section) === app.section) b.setAttribute('aria-current', 'page');
-      else b.removeAttribute('aria-current');
+    const panesNow = String(d.panes.panes);
+    if (nav.getAttribute('panes') !== panesNow) nav.setAttribute('panes', panesNow);
+    nav.toggleAttribute('collapsed', app.sidebarCollapsed);
+    if (app.barMinimized) nav.setAttribute('data-vire-force-state', 'minimized');
+    else nav.removeAttribute('data-vire-force-state');
+    for (const link of nav.querySelectorAll<HTMLElement>('[data-section]')) {
+      const current = Number(link.dataset.section) === app.section;
+      if (current !== (link.getAttribute('aria-current') === 'page')) {
+        if (current) link.setAttribute('aria-current', 'page');
+        else link.removeAttribute('aria-current');
+      }
     }
 
-    const lead = d.nav.form === 'bar' ? 0 : PAD + (d.nav.form === 'rail' ? RAIL_W : SIDEBAR_W);
-    const barStack = d.nav.form === 'bar' ? 16 + BAR_H + (d.accessory.placement === 'above-bar' ? PAD + ACC_H : 0) + PAD : 0;
-    const bottom = d.nav.form === 'bar' ? barStack : ACC_H + 2 * PAD;
+    const lead = navLayout?.insets.start ?? 0;
+    const bottom = (navLayout?.insets.bottom ?? 0) + PAD;
     const sheet = app.surface ? d.surfaces[app.surface] : null;
     const sideSheet = sheet && (sheet.form === 'side-sheet' || sheet.form === 'side-pane');
     const sheetW = sideSheet ? Math.min(sheet!.maxWidth ?? 400, Math.round((W - lead) * 0.34)) : 0;
@@ -507,7 +459,7 @@ export async function adaptiveStage(
     let right = W - PAD - strip;
     if (sideSheet) right -= sheetW + PAD;
     if (d.supporting.form === 'beside') right -= supW + PAD;
-    const area: Rect = { x: lead + PAD, y: PAD, width: right - lead - PAD, height: H - PAD - bottom };
+    const area: Rect = { x: Math.max(lead, PAD), y: PAD, width: right - Math.max(lead, PAD), height: H - PAD - bottom };
 
     let listBox: Rect = area;
     let detailBox: Rect = area;
@@ -540,18 +492,6 @@ export async function adaptiveStage(
       else row.removeAttribute('aria-current');
     }
     list.dataset.box = `${Math.round(listBox.width)}`;
-
-    // Bottom accessory.
-    const accTag = accessory.querySelector<HTMLElement>('.tag')!;
-    accTag.textContent = `bottom accessory · ${d.accessory.placement}`;
-    accessory.dataset.placement = d.accessory.placement;
-    if (d.accessory.placement === 'content-bottom') place(accessory, { x: lead + PAD, y: H - PAD - ACC_H, width: W - lead - 2 * PAD, height: ACC_H }, ACC_H / 2);
-    else {
-      const bar = navBox('bar', c);
-      const search = d.nav.search?.form === 'button' && !app.barMinimized ? SEARCH_D + PAD : 0;
-      if (d.accessory.placement === 'in-bar') place(accessory, { x: bar.x + bar.width + PAD, y: bar.y + (BAR_H - ACC_H) / 2, width: W - 16 - (bar.x + bar.width + PAD), height: ACC_H }, ACC_H / 2);
-      else place(accessory, { x: bar.x, y: bar.y - PAD - ACC_H, width: bar.width + search, height: ACC_H }, ACC_H / 2);
-    }
 
     // Supporting pane.
     const supTag = supporting.querySelector<HTMLElement>('.tag')!;
@@ -676,31 +616,10 @@ export async function adaptiveStage(
   }
 
   function paintMorphs(): void {
-    if (navMorph.to) {
-      const f = navMorph.frame();
-      place(nav, f.box, f.box.radius);
-      nav.dataset.form = navMorph.shown();
-      nav.toggleAttribute('data-morphing', navMorph.moving());
-      items.style.setProperty('--ink', String(f.showing === 'from' ? f.ink.outgoing : f.ink.incoming));
-    }
     if (surfaceMorph.to && !surface.hidden) {
       const f = surfaceMorph.frame();
       place(surface, f.box, f.box.radius);
       surface.dataset.shown = surfaceMorph.shown();
-    }
-    if (recording) {
-      const r = nav.getBoundingClientRect();
-      recording.push({
-        form: nav.dataset.form ?? '',
-        target: nav.dataset.target ?? '',
-        x: r.x,
-        y: r.y,
-        w: r.width,
-        h: r.height,
-        navs: win.querySelectorAll('nav').length,
-        id: (win.querySelector('nav') as (HTMLElement & { __body?: string }) | null)?.__body ?? '',
-        morphing: nav.hasAttribute('data-morphing'),
-      });
     }
   }
 
@@ -715,10 +634,48 @@ export async function adaptiveStage(
     const dt = lastTime ? Math.min((now - lastTime) / 1000, 0.05) : 1 / 60;
     lastTime = now;
     const instant = ctx?.reduceMotion ?? false;
-    const a = navMorph.to ? navMorph.step(dt, instant) : false;
     const b = surfaceMorph.to ? surfaceMorph.step(dt, instant) : false;
     paintMorphs();
-    if (a || b || recording) frame = requestAnimationFrame(tick);
+    if (b) frame = requestAnimationFrame(tick);
+  }
+
+  function navReadout(): NavReadout {
+    return {
+      form: nav.getAttribute('data-form') ?? '',
+      target: navLayout?.form ?? '',
+      search: nav.getAttribute('data-search') ?? 'none',
+      minimized: nav.hasAttribute('data-minimized'),
+      collapsed: nav.hasAttribute('collapsed'),
+      accessory: nav.querySelector('[data-accessory]')?.getAttribute('data-placement') ?? '',
+      moving: nav.hasAttribute('data-moving') || nav.querySelector(':scope > [data-accessory][data-moving]') !== null,
+      insets: navLayout?.insets ?? { bottom: 0, start: 0 },
+    };
+  }
+
+  function navSummary(): string {
+    const n = navReadout();
+    if (!navLayout) return 'not upgraded';
+    return `${n.target}${n.form !== n.target ? ` (drawing ${n.form})` : ''}${n.minimized ? ' · minimised' : ''} · search ${n.search}${n.collapsed ? ' · collapsed' : ''} · clears ${n.insets.start} start / ${n.insets.bottom} bottom`;
+  }
+
+  function sampleBody(): void {
+    if (!recording) return;
+    const body = nav.querySelector(':scope > nav');
+    if (body) {
+      const r = body.getBoundingClientRect();
+      recording.push({
+        form: nav.getAttribute('data-form') ?? '',
+        target: navLayout?.form ?? '',
+        x: r.x,
+        y: r.y,
+        w: r.width,
+        h: r.height,
+        navs: win.querySelectorAll('vire-nav').length,
+        id: body === navBody && win.querySelector('vire-nav') === nav ? 'nav-body' : 'other',
+        morphing: nav.hasAttribute('data-moving'),
+      });
+    }
+    requestAnimationFrame(sampleBody);
   }
 
   function writeReadout(c: AdaptiveContext, d: NonNullable<typeof decisions>): void {
@@ -731,10 +688,10 @@ export async function adaptiveStage(
       ['segments', d.segments.map((s) => JSON.stringify(roundRect(s))).join('\n')],
       ['input', `primary ${c.input.primary} · any coarse ${yes(c.input.anyCoarse)} · hover ${yes(c.input.hover)} · keyboard ${yes(c.input.keyboard)}`],
       ['atoms', `tier ${d.tier} · hit area ${d.hit} dp · hover by the event`],
-      ['navigation', `${d.nav.form} · ${d.nav.edge} · ${d.nav.primary} primary · ${d.nav.secondary} secondary ${d.nav.secondaryVisible ? 'shown' : 'hidden'}${d.nav.search ? ` · search ${d.nav.search.form} in ${d.nav.search.place}${d.nav.search.shortcut ? ' + shortcut' : ''}` : ''}${d.nav.expandable ? ` · expands ${d.nav.expandable}` : ''}`],
+      ['navigation', navSummary()],
       ['panes', `${d.panes.panes} · ${d.panes.visible.join(' + ')}${d.panes.split ? ` · ${d.panes.split.kind}` : ''}${d.panes.back ? ' · back' : ''}${d.panes.placeholder ? ' · placeholder' : ''}${d.panes.selectionShown ? ' · selection shown' : ''}`],
       ['supporting', `${d.supporting.form}${d.supporting.remembered ? ' · remembered' : ''}`],
-      ['accessory', d.accessory.placement],
+      ['accessory', navLayout?.accessoryPlacement ?? '-'],
       ['toolbar', `${d.placement.edge} · ${d.placement.orientation}${Number.isFinite(d.placement.maxGroups) ? ` · ≤ ${d.placement.maxGroups} groups` : ''}`],
       ['toolbar layout', toolbarNow ? `${toolbarNow.stage} : ${toolbarNow.capsules.map((c) => c.items.join('+')).join(' | ')}${toolbarNow.overflow.length ? ` : overflow ${toolbarNow.overflow.join(', ')}` : ''}${toolbarNow.aside.length ? ` : text row ${toolbarNow.aside.join(', ')}` : ''}` : 'no detail shown'],
       ['surfaces', SURFACE_KINDS.map((k) => `${k} → ${d.surfaces[k].form}`).join('\n')],
@@ -753,9 +710,15 @@ export async function adaptiveStage(
     win.style.width = `${next.w}px`;
     win.style.height = `${next.h}px`;
     const input = INPUTS[next.input];
-    setInputOverride({ ...input, keyboard: next.keyboard ?? input.keyboard });
     const posture = postureOf(next);
+    // The navigation replans the moment the window changes, so the pane count arrives with it: a window that grows takes its
+    // panes after the width, one that shrinks before, and no moment pairs the new width with the old count.
+    const wanted = paneLayout({ window: { width: next.w, height: next.h }, input, posture, reduceMotion: false }, listState()).panes;
+    const grows = wanted > (Number(nav.getAttribute('panes')) || 1);
+    if (!grows) nav.setAttribute('panes', String(wanted));
+    setInputOverride({ ...input, keyboard: next.keyboard ?? input.keyboard });
     setViewportOverride({ root: win, segments: foldAware ? windowSegments({ window: { width: next.w, height: next.h }, posture }) : undefined });
+    if (grows) nav.setAttribute('panes', String(wanted));
     if (ctx && !foldAware) ctx = { ...ctx, posture };
     if (ctx) render();
   }
@@ -789,18 +752,25 @@ export async function adaptiveStage(
     app.showing = 'list';
     render();
   });
-  items.addEventListener('click', (e) => {
-    const dest = (e.target as Element).closest<HTMLElement>('[data-section]');
-    if (dest) {
-      app.section = Number(dest.dataset.section);
+  nav.addEventListener('click', (e) => {
+    const link = (e.target as Element).closest<HTMLElement>('a');
+    if (!link || !nav.contains(link) || e.defaultPrevented) return;
+    e.preventDefault();
+    if (link.dataset.section !== undefined) {
+      app.section = Number(link.dataset.section);
       render();
     }
   });
-  collapse.addEventListener('click', () => {
-    app.sidebarCollapsed = !app.sidebarCollapsed;
+  nav.addEventListener('vire-nav-layout', (e) => {
+    navLayout = (e as CustomEvent<NavLayoutDetail>).detail;
     render();
   });
-  document.getElementById('filters')!.addEventListener('click', () => {
+  nav.addEventListener('vire-nav-collapse', (e) => {
+    app.sidebarCollapsed = (e as CustomEvent<{ collapsed: boolean }>).detail.collapsed;
+    syncControls();
+    render();
+  });
+  listHeader.querySelector('#filters')!.addEventListener('click', () => {
     app.surface = app.surface === 'popover' ? null : 'popover';
     render();
   });
@@ -834,6 +804,8 @@ export async function adaptiveStage(
     surface: app.surface,
     pinned: app.pinned,
     collapsed: app.sidebarCollapsed,
+    current: nav.querySelector('[aria-current=page]')?.getAttribute('href') ?? '',
+    focus: nav.contains(document.activeElement) ? (document.activeElement?.getAttribute('href') ?? '') : '',
   });
   const frames = (n: number) =>
     new Promise<void>((resolve) => {
@@ -873,7 +845,8 @@ export async function adaptiveStage(
   async function run(name: ScenarioName, opts: { hold?: number } = {}): Promise<StepLog[]> {
     const before = snapshot();
     const log: StepLog[] = [];
-    const firstNav = win.querySelector('nav');
+    const firstNav = win.querySelector('vire-nav');
+    const firstBody = firstNav?.querySelector(':scope > nav');
     for (const step of SCENARIOS[name]()) {
       apply({ ...current, ...step.sim });
       await frames(opts.hold ?? (name === 'sweep' ? 1 : 3));
@@ -887,13 +860,13 @@ export async function adaptiveStage(
         posture: ctx?.posture.kind ?? '',
         width: d.classes.width,
         height: d.classes.height,
-        nav: d.nav.form,
+        nav: navLayout?.form ?? '',
         panes: d.panes.panes,
         tier: d.tier,
         hit: d.hit,
         preserved: lost.length === 0,
         lost,
-        sameNav: win.querySelector('nav') === firstNav && win.querySelectorAll('nav').length === 1,
+        sameNav: win.querySelector('vire-nav') === firstNav && win.querySelectorAll('vire-nav').length === 1 && nav.querySelector(':scope > nav') === firstBody,
         surface: surface.hidden ? null : (surface.dataset.form ?? null),
       });
     }
@@ -981,14 +954,18 @@ export async function adaptiveStage(
     state: () => snapshot(),
     run,
     record: () => {
+      const first = recording === null;
       recording = [];
-      kick();
+      navBody = nav.querySelector(':scope > nav');
+      if (first) requestAnimationFrame(sampleBody);
     },
     frames: () => recording ?? [],
-    settled: () => !navMorph.moving() && !surfaceMorph.moving(),
+    settled: () => nav.hasAttribute('data-vk') && !navReadout().moving && !surfaceMorph.moving(),
+    nav: navReadout,
   };
 
   apply(sim);
+  win.append(list, detail, toolbar, supporting, nav, scrim, surface, fold, handle);
   watchAdaptiveContext(win, (next) => {
     ctx = foldAware ? next : { ...next, posture: postureOf(current) };
     render();

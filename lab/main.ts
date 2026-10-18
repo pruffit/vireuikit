@@ -5,6 +5,7 @@ import { adaptiveStage } from './adaptive';
 import { BACKDROPS, paintBackdrop, type Backdrop } from './backdrops';
 import { MENU_STATES, menuGallery, menuSandbox, type MenuLabState } from './menu';
 import { menuReference } from './menu-reference';
+import { NAV_FORMS, navGallery, navSandbox, type NavLabForm, type NavSandboxHandle } from './nav';
 import { referenceControl } from './reference-controls';
 import { REFERENCE_STAGE, paintReferenceStage } from './reference-stage';
 
@@ -27,9 +28,10 @@ const flag = (name: string): boolean | undefined => {
   return v === '1' ? true : v === '0' ? false : undefined;
 };
 
-const VIEWS = ['gallery', 'sandbox', 'menu', 'reference', 'menu-reference', 'adaptive'] as const;
+const VIEWS = ['gallery', 'sandbox', 'menu', 'nav', 'reference', 'menu-reference', 'adaptive'] as const;
 const view = pick('view', VIEWS, 'gallery');
-const atomParam = pick('atom', ['all', ...ATOMS, 'menu'] as const, 'all');
+const atomParam = pick('atom', ['all', ...ATOMS, 'menu', 'nav'] as const, 'all');
+const navForm = pick('form', NAV_FORMS, 'bar') as NavLabForm;
 const stateParam = pick('state', ['all', ...FORCEABLE_STATES, ...MENU_STATES] as const, 'all');
 const backdrop = pick('backdrop', BACKDROPS, 'light') as Backdrop;
 const glass = pick('glass', ['1', '0', 'touch'] as const, '1');
@@ -82,6 +84,10 @@ function gallery(): void {
   if (atomParam === 'menu') {
     const wanted = (MENU_STATES as readonly string[]).includes(stateParam) ? [stateParam as MenuLabState] : MENU_STATES;
     menuGallery(rows, wanted, { size, glass, sample: upgrade ? sample : null });
+    return;
+  }
+  if (atomParam === 'nav') {
+    navGallery(stage, rows, navForm, { glass, sample: upgrade ? sample : null, force: params.get('state') });
     return;
   }
   const atoms = atomParam === 'all' ? ATOMS : [atomParam];
@@ -151,11 +157,32 @@ async function reference(): Promise<void> {
   const height = BUTTON_SIZES[size].height;
   const src = `/__reference/file?path=${encodeURIComponent(control.file)}`;
   sample = await paintReferenceStage(stage, control, height, src);
-  const atom = atomParam === 'all' || atomParam === 'menu' ? control.atom : atomParam;
+  const atom = atomParam === 'all' || atomParam === 'menu' || atomParam === 'nav' ? control.atom : atomParam;
   rows.append(make(atom, stateParam === 'all' ? (control.state ?? 'rest') : stateParam));
 }
 
+let navHandle: NavSandboxHandle | undefined;
+const dp = (name: string, fallback: number) => Number(params.get(name)) || fallback;
+const navAttrs = Object.fromEntries(
+  ['form', 'collapsed', 'panes', 'minimize', 'scroller', 'search-key', 'toggle-label']
+    .map((name) => [name, params.get(`nav-${name}`)] as const)
+    .filter((pair): pair is readonly [string, string] => pair[1] !== null),
+);
+
 if (view === 'sandbox') sandbox();
+else if (view === 'nav') {
+  stage.style.width = 'max-content';
+  navHandle = navSandbox(document.getElementById('rows')!, note, {
+    glass,
+    sample: upgrade ? sample : null,
+    width: dp('w', 390),
+    height: dp('h', 720),
+    attrs: navAttrs,
+    search: params.get('search') !== '0',
+    accessory: params.get('accessory') !== '0',
+    extra: dp('extra', 0),
+  });
+}
 else if (view === 'menu') menuSandbox(document.getElementById('rows')!, note, { size, glass, sample: upgrade ? sample : null });
 else if (view === 'reference') await reference();
 else if (view === 'menu-reference') await menuReference(stage, document.getElementById('rows')!);
@@ -172,7 +199,7 @@ function buildChrome(): void {
     `<label><input type="checkbox" data-flag="${name}"${params.get(name) === '1' ? ' checked' : ''}>${label}</label>`;
   bar.innerHTML = [
     select('view', VIEWS, view),
-    select('atom', ['all', ...ATOMS, 'menu'], atomParam),
+    select('atom', ['all', ...ATOMS, 'menu', 'nav'], atomParam),
     select('state', ['all', ...(atomParam === 'menu' ? MENU_STATES : FORCEABLE_STATES)], stateParam),
     select('backdrop', BACKDROPS, backdrop),
     select('glass', ['1', '0', 'touch'], glass),
@@ -239,5 +266,12 @@ if (chrome) {
   void buildReference();
 }
 
-window.__lab = { setA11yOverride, setInputOverride, input: effectiveInput, define: () => defineVireElements(), upgraded: upgrade };
+window.__lab = {
+  setA11yOverride,
+  setInputOverride,
+  input: effectiveInput,
+  define: () => defineVireElements(),
+  upgraded: upgrade,
+  ...(navHandle ? { nav: navHandle } : {}),
+};
 document.documentElement.dataset.ready = '1';

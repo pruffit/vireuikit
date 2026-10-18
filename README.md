@@ -195,6 +195,74 @@ setA11yOverride({ reduceTransparency: true });
   stays in its trigger's half, every frame of its growth included, and scrolls if it is taller. `sample` works as on the buttons; without one, the backdrop
   under the menu is read once as it opens and held while it is out.
 
+### Navigation
+
+`<vire-nav>` upgrades a `<nav>` of links into one glass body that is a bar, a rail or a sidebar by the window it covers,
+and changes form through the selected destination.
+
+```html
+<vire-nav glass minimize="scroll" scroller="content">
+  <nav aria-label="Sections">
+    <ul>
+      <li><a href="/" aria-current="page"><svg>…</svg>Home</a></li>
+      <li><a href="/library"><svg>…</svg>Library</a></li>
+    </ul>
+    <ul data-secondary>
+      <li><a href="/feed"><svg>…</svg>Feed</a></li>
+    </ul>
+    <a href="/search" data-search><svg>…</svg>Search</a>
+  </nav>
+  <div data-accessory>…host content, such as a mini player…</div>
+</vire-nav>
+```
+
+- Before the upgrade it is a list of links. After it the element covers its containing block (give that a position): its
+  own box is the window it classifies, so it needs no breakpoints from the host. Only the body, the search, the toggle,
+  the scrim and the accessory take the pointer. Links stay links: no `tablist`, no arrow keys, Tab walks them, and
+  `aria-current` is the host's to set and move; the pill slides to it. Removing the element restores the markup.
+- The form comes from `navigationForm`: a bar on a compact width, a rail on medium and expanded windows, a sidebar from
+  large. Destinations beyond the bar's slots move to the secondary list, which shows only in the sidebar; links not shown
+  in a form are `hidden`. The host carries `data-form` (`bar`, `rail`, `sidebar`), `data-search` (`button`, `item`,
+  `field`) and `data-minimized`.
+- A change of form goes through the selection: it lifts into a lens, the old body contracts into it, the new body grows
+  out of it and the lens settles into the pill. The lens is glass only while it moves. Focus stays on the same link
+  while that link stays shown; a link the new form hides (minimising, a link moving to the secondary list) hands focus to
+  the selected link, or to the toggle. Reduced motion lands the new form in one frame. A press that starts on the bar's inset or between items and ends
+  without a drag settles the lens back on the selected item.
+- On the bar a press lifts the selection into a lens under the finger; a drag moves it, and releasing activates the
+  nearest link once. A tap is a plain click on the link.
+- Attributes: `form` (`bar`, `rail` or `sidebar`: fixes the form), `collapsed` (the sidebar held as a rail; the toggle
+  sets and clears it and the host remembers it), `panes` (panes the content shows; two on a medium window take the bar),
+  `minimize="scroll"` with `scroller` (the id of the scrolling element, resolved in the element's root; or set the
+  `scroller` property to an element), `search-key` (default `/`), `toggle-label` (the toggle's name, default "Sidebar";
+  it never changes, `aria-expanded` says whether the sidebar is shown), `glass` (empty or `present`: glass; otherwise a plain body).
+- Minimising: the bar becomes a circle with the selected icon, and the search a second circle, after 24 dp scrolled
+  down in the scroller, and expands after 24 dp up, at the top, on a tap on it and when focus enters it. Giving the
+  bar another scroller expands it. The element looks the id up again on each change: a node that left the document, or
+  that the id no longer names, is let go and the bar expands. The document itself works as a scroller
+  (`document.documentElement`, `document.body` or `document.scrollingElement`, listened to on the window), and a
+  bounce past either end of the scroll range counts as the end. A step back of less than 4 dp does not break a run.
+- `[data-accessory]` is the bottom accessory. It sits over the bar, in the minimised bar's row, or along the bottom of
+  the content beside a rail or sidebar, and says which in its `data-placement` (`above-bar`, `in-bar`,
+  `content-bottom`): show the transport only when `in-bar`.
+- Insets: the element sets `--vire-nav-inset-bottom` and `--vire-nav-inset-start` (px) on its parent for the content to
+  clear, and fires `vire-nav-layout` with `{ form, minimized, insets, accessoryPlacement }` whenever any changes.
+- Toggle: in the sidebar a button in its head collapses it into a rail (`collapsed`, and `vire-nav-collapse` with
+  `{ collapsed: true }`); an expandable rail beside the content clears it (`{ collapsed: false }`); on an expanded window
+  a rail opens the sidebar over the content behind a scrim (`aria-expanded` is true then too), closed by Escape, a press on the scrim or a link chosen;
+  Escape and the scrim return focus to the toggle if it was inside the navigation. The element stores nothing.
+- Where the model gives a shortcut (a large window, or a keyboard in use), `search-key` pressed outside a field clicks
+  the search link, which carries `aria-keyshortcuts` while it is shown (the shortcut still works for a link the form hides).
+- Every link keeps a 44 dp hit area wherever a coarse input is present, without changing the layout. A `[data-badge]`
+  inside a link is a count (or a dot, when empty) at the icon's corner, and only a picture: the element sets
+  `aria-hidden="true"` on it and restores the attribute on removal. To say it, put a `[data-badge-label]` in the link;
+  it is visually hidden but stays in the link's name:
+  `<a href="/messages"><svg>…</svg>Messages<span data-badge>3</span><span data-badge-label>3 new</span></a>`, read as "Messages 3 new". `sample` and `a11y` work as on the buttons. The bar clears the bottom safe area
+  (`env(safe-area-inset-bottom)`, read once per layout; 0 where unsupported).
+- The element adds nodes inside `<vire-nav>`, so call `defineVireElements()` after a framework has hydrated the markup
+  (in an effect, say), not before. The lens's copy follows the selected link's content, and a link that leaves the markup
+  is left as the author wrote it.
+
 Sizes, behaviour state machines and accessibility modes are exported from `vireuikit` and shared by every
 target. How an atom is accepted:
 [design](https://github.com/pruffit/vireuikit/blob/main/docs/design.md),
