@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
 **Changed behaviour of exported defaults (released as a minor).** Code that calls the growth model without passing
 its own timing moves differently after this release: `DEFAULT_GROWTH_TIMING` has new values, so `stepGrowth`, which
