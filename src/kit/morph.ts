@@ -84,8 +84,9 @@ const NECK_GAIN = 0.3;
 const NECK_RAMP = 4;
 const CORNER_EASE_START = 0.55;
 const INK_OUT_END = 0.4;
-const INK_IN_START = 0.45;
-const INK_IN_END = 0.95;
+// M 5:11: nothing of the menu shows until it is at 95 % of its height, and it is sharp by the overshoot.
+const INK_IN_START = 0.9;
+const INK_IN_END = 1;
 
 export function growthInk(phase: GrowthPhase): GrowthInk {
   const a = Math.min(Math.max(phase.shrink, 0), 1);
@@ -195,9 +196,9 @@ export const growthPhase = (state: GrowthState): GrowthPhase => ({
   grow: state.grow.x,
 });
 
-/** Durations are client-specific: this set is tuned for the capsule-to-menu transition, and an
- *  atom at a different scale (an icon opening into a sheet) isn't obligated to match it. The
- *  shape of the transition is shared regardless. */
+/** Durations are client-specific: the default is fitted to the menu growing out of its toolbar at
+ *  M 5:11 (docs/acceptance.md, N9), and an atom at a different scale (an icon opening into a sheet)
+ *  isn't obligated to match it. The shape of the transition is shared regardless. */
 export type GrowthTiming = {
   shrinkOpen: number;
   shrinkClose: number;
@@ -208,9 +209,9 @@ export type GrowthTiming = {
 };
 
 export const DEFAULT_GROWTH_TIMING: GrowthTiming = {
-  shrinkOpen: 0.38,
-  shrinkClose: 0.3,
-  growOpen: 0.46,
+  shrinkOpen: 0.21,
+  shrinkClose: 0.14,
+  growOpen: 0.38,
   growClose: 0.4,
   growDampingOpen: 0.72,
 };

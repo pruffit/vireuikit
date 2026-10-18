@@ -2,6 +2,8 @@ import { BUTTON_SIZES, CONTROL_SIZES, type ControlSize } from '../src/kit/sizes'
 import type { BackdropSample } from 'vireglass';
 import { defineVireElements, setA11yOverride, type VireControlElement } from 'vireuikit/web';
 import { BACKDROPS, paintBackdrop, type Backdrop } from './backdrops';
+import { MENU_STATES, menuGallery, menuSandbox, type MenuLabState } from './menu';
+import { menuReference } from './menu-reference';
 import { referenceControl } from './reference-controls';
 import { REFERENCE_STAGE, paintReferenceStage } from './reference-stage';
 
@@ -24,9 +26,10 @@ const flag = (name: string): boolean | undefined => {
   return v === '1' ? true : v === '0' ? false : undefined;
 };
 
-const view = pick('view', ['gallery', 'sandbox', 'reference'] as const, 'gallery');
-const atomParam = pick('atom', ['all', ...ATOMS] as const, 'all');
-const stateParam = pick('state', ['all', ...FORCEABLE_STATES] as const, 'all');
+const VIEWS = ['gallery', 'sandbox', 'menu', 'reference', 'menu-reference'] as const;
+const view = pick('view', VIEWS, 'gallery');
+const atomParam = pick('atom', ['all', ...ATOMS, 'menu'] as const, 'all');
+const stateParam = pick('state', ['all', ...FORCEABLE_STATES, ...MENU_STATES] as const, 'all');
 const backdrop = pick('backdrop', BACKDROPS, 'light') as Backdrop;
 const glass = pick('glass', ['1', '0', 'touch'] as const, '1');
 const size = pick('size', CONTROL_SIZES, 'touch') as ControlSize;
@@ -47,7 +50,13 @@ if (upgrade) {
 }
 
 const stage = document.getElementById('stage')!;
-let sample: BackdropSample | null = view === 'reference' ? null : await paintBackdrop(stage, backdrop);
+let sample: BackdropSample | null = view.includes('reference') ? null : await paintBackdrop(stage, backdrop);
+
+const log = document.getElementById('log')!;
+const note = (text: string) => {
+  log.textContent += `${text}\n`;
+  log.dataset.count = String(log.textContent!.split('\n').filter(Boolean).length);
+};
 
 function make(atom: Atom, state: string | null): HTMLElement {
   const host = document.createElement(TAGS[atom]);
@@ -69,8 +78,13 @@ function make(atom: Atom, state: string | null): HTMLElement {
 
 function gallery(): void {
   const rows = document.getElementById('rows')!;
+  if (atomParam === 'menu') {
+    const wanted = (MENU_STATES as readonly string[]).includes(stateParam) ? [stateParam as MenuLabState] : MENU_STATES;
+    menuGallery(rows, wanted, { size, glass, sample: upgrade ? sample : null });
+    return;
+  }
   const atoms = atomParam === 'all' ? ATOMS : [atomParam];
-  const states = stateParam === 'all' ? FORCEABLE_STATES : [stateParam];
+  const states = (FORCEABLE_STATES as readonly string[]).includes(stateParam) ? [stateParam] : FORCEABLE_STATES;
   for (const atom of atoms) {
     const row = document.createElement('div');
     row.className = 'row';
@@ -96,11 +110,6 @@ function gallery(): void {
 
 function sandbox(): void {
   const rows = document.getElementById('rows')!;
-  const log = document.getElementById('log')!;
-  const note = (text: string) => {
-    log.textContent += `${text}\n`;
-    log.dataset.count = String(log.textContent!.split('\n').filter(Boolean).length);
-  };
   const form = document.createElement('form');
   form.className = 'sandbox';
   form.addEventListener('submit', (e) => {
@@ -141,11 +150,14 @@ async function reference(): Promise<void> {
   const height = BUTTON_SIZES[size].height;
   const src = `/__reference/file?path=${encodeURIComponent(control.file)}`;
   sample = await paintReferenceStage(stage, control, height, src);
-  rows.append(make(atomParam === 'all' ? control.atom : atomParam, stateParam === 'all' ? (control.state ?? 'rest') : stateParam));
+  const atom = atomParam === 'all' || atomParam === 'menu' ? control.atom : atomParam;
+  rows.append(make(atom, stateParam === 'all' ? (control.state ?? 'rest') : stateParam));
 }
 
 if (view === 'sandbox') sandbox();
+else if (view === 'menu') menuSandbox(document.getElementById('rows')!, note, { size, glass, sample: upgrade ? sample : null });
 else if (view === 'reference') await reference();
+else if (view === 'menu-reference') await menuReference(stage, document.getElementById('rows')!);
 else gallery();
 
 function buildChrome(): void {
@@ -157,9 +169,9 @@ function buildChrome(): void {
   const check = (name: string, label: string) =>
     `<label><input type="checkbox" data-flag="${name}"${params.get(name) === '1' ? ' checked' : ''}>${label}</label>`;
   bar.innerHTML = [
-    select('view', ['gallery', 'sandbox', 'reference'], view),
-    select('atom', ['all', ...ATOMS], atomParam),
-    select('state', ['all', ...FORCEABLE_STATES], stateParam),
+    select('view', VIEWS, view),
+    select('atom', ['all', ...ATOMS, 'menu'], atomParam),
+    select('state', ['all', ...(atomParam === 'menu' ? MENU_STATES : FORCEABLE_STATES)], stateParam),
     select('backdrop', BACKDROPS, backdrop),
     select('glass', ['1', '0', 'touch'], glass),
     select('size', CONTROL_SIZES, size),

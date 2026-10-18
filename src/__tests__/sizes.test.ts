@@ -7,9 +7,40 @@ import {
   defaultSize,
   hitSlop,
   iconButtonSize,
+  menuSize,
   minTarget,
   nestedRadius,
 } from '../index';
+
+describe('menu sizes', () => {
+  it('rows are as tall as the tier, the padding is 0.3 of a row', () => {
+    for (const size of CONTROL_SIZES) {
+      const menu = menuSize(size);
+      expect(menu.row).toBe(BUTTON_SIZES[size].height);
+      expect(menu.padding).toBe(Math.round(0.3 * menu.row));
+      expect(menu.icon).toBe(BUTTON_SIZES[size].icon);
+    }
+  });
+
+  it('the menu is concentric with its highlighted item', () => {
+    for (const size of CONTROL_SIZES) {
+      const menu = menuSize(size);
+      expect(menu.itemRadius).toBe(BUTTON_SIZES[size].radius);
+      expect(nestedRadius(menu.radius, menu.padding)).toBe(menu.itemRadius);
+    }
+  });
+
+  // M 5:11: rows 44.9 dp apart, the first glyph's centre 34.6 dp down and 33.8 dp in, the label at 58.8 dp, a 37 dp corner.
+  it('the touch tier lands within 2 dp of the reference menu', () => {
+    const menu = menuSize('touch');
+    expect(menu).toMatchObject({ row: 44, padding: 13, radius: 35 });
+    const glyphCentre = menu.padding + menu.row / 2;
+    expect(Math.abs(glyphCentre - 34.6)).toBeLessThanOrEqual(2);
+    expect(Math.abs(glyphCentre - 33.8)).toBeLessThanOrEqual(2);
+    expect(Math.abs(menu.padding + menu.row - 58.8)).toBeLessThanOrEqual(2);
+    expect(Math.abs(menu.radius - 37)).toBeLessThanOrEqual(2);
+  });
+});
 
 describe('sizes', () => {
   it('every tier is at least the pointer target floor, and the finger tier meets the touch floor', () => {

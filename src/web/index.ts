@@ -1,11 +1,14 @@
 import { createControlElementClass } from './element';
+import { createMenuElementClass } from './menu';
 
 export { getA11yOverride, setA11yOverride, systemA11y } from './a11y';
 export type { VireControlElement } from './element';
+export type { VireMenuElement } from './menu';
 export { STYLES } from './styles';
 
 export const BUTTON_TAG = 'vire-button';
 export const ICON_BUTTON_TAG = 'vire-icon-button';
+export const MENU_TAG = 'vire-menu';
 
 export type DefineOptions = {
   /** CSP nonce for the stylesheet the elements inject. Alternatively, ship `STYLES` yourself. */
@@ -24,4 +27,5 @@ export function defineVireElements(options: DefineOptions = {}): void {
   for (const [tag, kind] of pairs) {
     if (!registry.get(tag)) registry.define(tag, createControlElementClass(kind, { nonce: options.nonce }));
   }
+  if (!registry.get(MENU_TAG)) registry.define(MENU_TAG, createMenuElementClass({ nonce: options.nonce }));
 }

@@ -113,3 +113,48 @@ function measureInPage(arg: { url: string; at: Footprint }): Promise<Measure> {
 export function measureImage(page: Page, bytes: Buffer, mime: 'png' | 'jpeg', at: Footprint): Promise<Measure> {
   return page.evaluate(measureInPage, { url: `data:image/${mime};base64,${bytes.toString('base64')}`, at });
 }
+
+export type RegionStats = { L: number; C: number };
+export type Region = { x: number; y: number; width: number; height: number };
+
+/** Median OKLab lightness and chroma over a rectangle of an image, in image pixels. Self-contained like `measureInPage`. */
+function regionInPage(arg: { url: string; region: Region }): Promise<RegionStats> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onerror = () => reject(new Error('image did not decode'));
+    img.onload = () => {
+      const { region } = arg;
+      const cv = document.createElement('canvas');
+      cv.width = img.naturalWidth;
+      cv.height = img.naturalHeight;
+      const g = cv.getContext('2d', { willReadFrequently: true })!;
+      g.drawImage(img, 0, 0);
+      const x0 = Math.max(0, Math.round(region.x));
+      const y0 = Math.max(0, Math.round(region.y));
+      const data = g.getImageData(x0, y0, Math.max(1, Math.round(region.width)), Math.max(1, Math.round(region.height))).data;
+      const lin = (u: number) => {
+        const v = u / 255;
+        return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      };
+      const Ls: number[] = [];
+      const Cs: number[] = [];
+      for (let i = 0; i < data.length; i += 4) {
+        const r = lin(data[i]!);
+        const gg = lin(data[i + 1]!);
+        const b = lin(data[i + 2]!);
+        const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * gg + 0.0514459929 * b);
+        const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * gg + 0.1073969566 * b);
+        const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * gg + 0.6299787005 * b);
+        Ls.push(0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s);
+        Cs.push(Math.hypot(1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s));
+      }
+      const median = (a: number[]) => [...a].sort((p, q) => p - q)[Math.floor(a.length / 2)]!;
+      resolve({ L: median(Ls), C: median(Cs) });
+    };
+    img.src = arg.url;
+  });
+}
+
+export function regionStats(page: Page, png: Buffer, region: Region): Promise<RegionStats> {
+  return page.evaluate(regionInPage, { url: `data:image/png;base64,${png.toString('base64')}`, region });
+}

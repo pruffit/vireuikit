@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+**Changed behaviour of exported defaults (released as a minor).** Code that calls the growth model without passing
+its own timing moves differently after this release: `DEFAULT_GROWTH_TIMING` has new values, so `stepGrowth`, which
+uses it by default, opens and closes faster, and `growthFrame(...).ink.incoming` (via `growthInk`) now stays at 0 until
+the growth is at 0.9 and reaches 1 at 1.0, where it used to run from 0.45 to 0.95. Pass the old timing
+(`{ shrinkOpen: 0.38, shrinkClose: 0.3, growOpen: 0.46, growClose: 0.4, growDampingOpen: 0.72 }`) to keep the old
+motion; the old ink window is not kept.
+
+- **`<vire-menu>`.** Upgrades a platform popover menu (a `popovertarget` trigger, bare or inside `<vire-button>` or
+  `<vire-icon-button>`, and a `popover` list of item buttons) that already works without the element. After the
+  upgrade it adds the menu-button roles with their keyboard, grows its glass out of the trigger through the core's
+  `setMorph`, closes after a choice, Escape, a press outside or Tab, and runs the growth back into the trigger before
+  the list leaves the top layer. Attributes `glass`, `size`, `corner`; property `sample`. `MENU_TAG` and the
+  `VireMenuElement` type are exported from `vireuikit/web`.
+- **The press that opened the menu chooses nothing.** The first item grows in under the pointer, so an item click
+  counts only once the menu has arrived and its press began after that; the second click of a double click and a held
+  Enter or Space never count. Disabled items follow the WAI-ARIA APG (focusable, `aria-disabled`, never chosen). A
+  choice closes the menu even when an item's own handler stops the click, and a press outside is seen inside a closed
+  shadow root too. The list's `toggle` event fires after the growth has run back.
+- **The menu's model.** `stepMenu` (the menu-button keyboard as a pure state machine, typeahead included),
+  `menuPlacement` and `menuCorner` (pinned to the trigger's corner, flipped or slid into the viewport),
+  `menuSurfaceFrame` (the surface's box, the lens's second shape and the content's offset per growth frame),
+  `menuActivity`, `menuMaterial`, `menuBody`, `menuGlass`, `MENU_DROP_BODY`, `menuItemFill`, and `menuSize` for rows,
+  padding and a radius concentric with the items. Sizes, timing, the body and the drop are measured against Apple's
+  reference of a menu growing out of its toolbar (`docs/acceptance.md`, "Menu").
+- **The growth is refitted to that reference.** `DEFAULT_GROWTH_TIMING` is now `shrinkOpen` 0.21, `shrinkClose` 0.14,
+  `growOpen` 0.38, `growClose` 0.4 (the drop forms at 0.10 s instead of 0.18 s, the overshoot comes at 0.37 s instead of
+  0.51 s), and `growthInk` brings the incoming ink in over the last tenth of the growth instead of from 0.45.
+- **`setCarried` on `<vire-button>` and `<vire-icon-button>`.** A menu growing out of the control carries its body:
+  the control drops its lens (by modulating it out), its body and its rim, takes no pointer events, and its glyph
+  defocuses with the growth; `null` takes the body back, to no lens at rest for `glass="touch"`. Both elements now
+  remove a `style` attribute they emptied on disconnect.
+- The lab gains `atom=menu` (the menu's states on every backdrop), `view=menu`, `early-menu.html` and
+  `view=menu-reference`, which puts frames of the reference next to our menu at the same moment. `check:lab` holds the
+  menu's behaviour, its growth sampled frame by frame and its body measured like the reference, with canaries;
+  `check:lab:visual` has its baselines.
+
 ## 0.6.0
 
 - **On `vireglass` 3.** The peer range is `^3.0.0`. The rim is the core's: its strength now follows the surround, within
