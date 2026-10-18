@@ -1,6 +1,6 @@
 import { BUTTON_SIZES, CONTROL_SIZES, type ControlSize } from '../src/kit/sizes';
 import type { BackdropSample } from 'vireglass';
-import { defineVireElements, setA11yOverride, type VireControlElement } from 'vireuikit/web';
+import { defineVireElements, effectiveInput, setA11yOverride, setInputOverride, type VireControlElement } from 'vireuikit/web';
 import { BACKDROPS, paintBackdrop, type Backdrop } from './backdrops';
 import { MENU_STATES, menuGallery, menuSandbox, type MenuLabState } from './menu';
 import { menuReference } from './menu-reference';
@@ -237,5 +237,5 @@ if (chrome) {
   void buildReference();
 }
 
-window.__lab = { setA11yOverride, define: () => defineVireElements(), upgraded: upgrade };
+window.__lab = { setA11yOverride, setInputOverride, input: effectiveInput, define: () => defineVireElements(), upgraded: upgrade };
 document.documentElement.dataset.ready = '1';

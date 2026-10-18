@@ -17,12 +17,14 @@ import {
   type MenuState,
   type RoundedRect,
 } from '../kit/menu';
-import type { Rect, Size } from '../kit/geometry';
 import { createGrowthState, growthPhase, stepGrowth, type GrowthPhase, type GrowthPoint } from '../kit/morph';
-import { CONTROL_SIZES, defaultSize, menuSize, type ControlSize } from '../kit/sizes';
+import { segmentOf } from '../kit/adaptive/context';
+import { sizeTier } from '../kit/adaptive/input';
+import type { Rect, Size } from '../kit/geometry';
+import { CONTROL_SIZES, menuSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
+import { effectiveInput, viewportSegments, watchInput, watchViewport } from './environment';
 import { attachControlGlass, type GlassFrame, type GlassSession } from './glass';
-import { isCoarsePointer, watchCoarsePointer } from './input';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
@@ -89,6 +91,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #from: RoundedRect | null = null;
     #to: RoundedRect | null = null;
     #anchor: GrowthPoint | null = null;
+    #region: Rect | null = null;
     #natural: Size | null = null;
     #out = false;
     #viaPointer = false;
@@ -145,7 +148,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       }
       this.#hadStyle.host = this.hasAttribute('style');
       ensureStyles(this, options.nonce);
-      this.#cleanups.push(watchCoarsePointer(() => this.#list && this.#refreshMode(true)));
+      this.#cleanups.push(watchInput(() => this.#list && this.#refreshMode(true)));
       this.#cleanups.push(watchSystemA11y(() => this.#list && this.#refreshMode()));
       this.#cleanups.push(watchA11yOverride(() => this.#list && this.#refreshMode()));
       this.#awaitParts();
@@ -177,7 +180,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#state = MENU_CLOSED;
       this.#growth = createGrowthState();
       this.#out = false;
-      this.#from = this.#to = this.#anchor = null;
+      this.#from = this.#to = this.#anchor = this.#region = null;
       this.#natural = null;
       this.#held = null;
       this.#readySince = null;
@@ -441,7 +444,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         );
         on(root, 'scroll', (e: Event) => this.#follow(e), true);
       });
-      on(window, 'resize', (e: Event) => this.#follow(e));
+      this.#cleanups.push(watchViewport(() => this.#follow()));
       // A trigger inside an element that upgrades after this one changes size under the menu.
       if (typeof ResizeObserver !== 'undefined') {
         const resized = new ResizeObserver(() => this.#out && this.#follow());
@@ -547,9 +550,11 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const spec = menuSize(this.#size());
       this.#natural ??= this.#measure();
       const natural = this.#natural;
-      const viewport = { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight };
       const trigger = this.#triggerBox();
-      const placement = menuPlacement(trigger, natural, viewport, { corner: this.#corner(), margin: VIEWPORT_MARGIN });
+      const { viewport, segments } = viewportSegments();
+      const region = segmentOf(trigger, segments) ?? viewport;
+      this.#region = region;
+      const placement = menuPlacement(trigger, natural, region, { corner: this.#corner(), margin: VIEWPORT_MARGIN });
       this.#from = trigger;
       this.#to = { ...placement.rect, radius: spec.radius };
       this.#anchor = placement.anchor;
@@ -621,7 +626,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.removeAttribute('data-phase');
       this.#out = false;
       this.#held = null;
-      this.#from = this.#to = this.#anchor = null;
+      this.#from = this.#to = this.#anchor = this.#region = null;
       this.#glass?.setSample(this.#sample);
       this.#carrier?.setCarried?.(null);
     }
@@ -630,7 +635,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const list = this.#list;
       if (!list || !this.#out || !this.#from || !this.#to || !this.#anchor) return;
       const phase = growthPhase(this.#growth);
-      const f = menuSurfaceFrame(this.#from, this.#to, this.#anchor, phase);
+      const f = menuSurfaceFrame(this.#from, this.#to, this.#anchor, phase, this.#region ?? undefined);
       const settled = phase.shrink === 1 && phase.grow === 1;
       // The ink as drawn decides it, so what shows in focus is what can be chosen.
       const inkIn = Math.round(f.ink.incoming * 1000) / 1000;
@@ -719,7 +724,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #size(): ControlSize {
       const wanted = this.getAttribute('size');
       if (wanted && (CONTROL_SIZES as readonly string[]).includes(wanted)) return wanted as ControlSize;
-      return defaultSize({ touch: isCoarsePointer() });
+      return sizeTier(effectiveInput());
     }
 
     #wantsGlass(): boolean {

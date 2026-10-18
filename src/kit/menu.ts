@@ -2,7 +2,7 @@
 // trigger, and what its glass surface is on each frame of the growth. Boxes are in dp.
 import { VIREGLASS_SHEET_MATERIAL, type VireGlassMaterial, type VireGlassMorph } from 'vireglass';
 import { ATOM_AT_REST, atomBody, atomMaterial, type AtomBody } from './atom';
-import type { Rect, Size } from './geometry';
+import { intersectRect, type Rect, type Size } from './geometry';
 import { growthFrame, type GrowthInk, type GrowthPhase, type GrowthPoint } from './morph';
 
 /**
@@ -217,11 +217,14 @@ export function menuActivity(phase: GrowthPhase): number {
   return shrink * (1 - grow);
 }
 
+/** `bounds`, the menu's region, holds every frame inside it: the overshoot runs away from the anchor and could
+ *  otherwise reach over a fold for a few frames. */
 export function menuSurfaceFrame(
   trigger: RoundedRect,
   menu: RoundedRect,
   anchor: GrowthPoint,
   phase: GrowthPhase,
+  bounds?: Rect,
 ): MenuSurfaceFrame {
   const frame = growthFrame(
     { geometry: { width: trigger.width, height: trigger.height, cornerRadius: trigger.radius }, center: center(trigger) },
@@ -230,16 +233,24 @@ export function menuSurfaceFrame(
     phase,
   );
   const { geometry, center: c } = frame.body;
-  const box = {
+  let box = {
     x: c.x - geometry.width / 2,
     y: c.y - geometry.height / 2,
     width: geometry.width,
     height: geometry.height,
     radius: geometry.cornerRadius,
   };
+  let morph = frame.merge;
+  const held = bounds ? intersectRect(box, bounds) : null;
+  if (held && (held.width < box.width || held.height < box.height)) {
+    const was = center(box);
+    const now = center(held);
+    box = { ...held, radius: Math.min(box.radius, held.width / 2, held.height / 2) };
+    if (morph) morph = { ...morph, offsetX: morph.offsetX + was.x - now.x, offsetY: morph.offsetY + was.y - now.y };
+  }
   return {
     box,
-    morph: frame.merge,
+    morph,
     content: { x: menu.x - box.x, y: menu.y - box.y },
     ink: frame.ink,
     activity: menuActivity(phase),

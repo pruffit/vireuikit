@@ -21,6 +21,7 @@ import {
   hitTarget,
   hoversWith,
   menuPlacement,
+  menuSurfaceFrame,
   minTarget,
   navigationForm,
   paneLayout,
@@ -411,6 +412,28 @@ describe('menu placement in a segment', () => {
     expect(inSegment.rect.x + inSegment.rect.width).toBeLessThanOrEqual(410);
     const whole = menuPlacement(trigger, menu, window);
     expect(whole.rect.x + whole.rect.width).toBeGreaterThan(431);
+  });
+
+  it('every frame of the growth stays in the region, the overshoot included, and the lens keeps its second shape where it was', () => {
+    const posture = halfOpen('tabletop', window, { band: 0 });
+    const [, bottom] = windowSegments({ window, posture }) as [Rect, Rect];
+    const trigger = { x: 700, y: 600, width: 44, height: 44, radius: 22 };
+    const menu = { width: 220, height: 290 };
+    const { rect, anchor } = menuPlacement(trigger, menu, bottom);
+    const target = { ...rect, radius: 35 };
+    let escaped = false;
+    for (const grow of [0, 0.3, 0.6, 0.9, 1, 1.02, 1.035, 1.05]) {
+      const free = menuSurfaceFrame(trigger, target, anchor, { shrink: 1, grow });
+      if (free.box.y < bottom.y) escaped = true;
+      const held = menuSurfaceFrame(trigger, target, anchor, { shrink: 1, grow }, bottom);
+      expect(rectContains(bottom, held.box, 1e-9), String(grow)).toBe(true);
+      expect(held.box.radius).toBeLessThanOrEqual(Math.min(held.box.width, held.box.height) / 2);
+      if (free.morph && held.morph) {
+        const freeAt = free.box.y + free.box.height / 2 + free.morph.offsetY;
+        expect(held.box.y + held.box.height / 2 + held.morph.offsetY).toBeCloseTo(freeAt, 9);
+      }
+    }
+    expect(escaped).toBe(true);
   });
 
   it('a menu opened in either half of a folded window never crosses the fold', () => {
