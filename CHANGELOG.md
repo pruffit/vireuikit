@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+**Changed behaviour.** The web elements no longer decide everything from one `(pointer: coarse)` query. The hit area
+now reaches 44 dp wherever any coarse input is present (`any-pointer: coarse`), so a laptop with a touch screen gets it
+where it had 24 dp; hover now comes from the pointer that entered, so a mouse on a touch-first tablet hovers where it
+did not. The default size still follows the primary pointer.
+
+- **The adaptive model** (`vireuikit`). `AdaptiveContext` (the window in dp, the input in three layers, the posture of a
+  folding screen, reduced motion) with `adaptiveContext`, `halfOpen`, the `INPUT_*` presets, `windowSegments`,
+  `postureFromSegments`, `segmentOf` and `surfaceRegion`; `classifyWindow`, `widthClass` and `heightClass` with every
+  threshold (600, 840, 1200, 1600; 480, 900). From it: `navigationForm` and `bottomAccessory`, `presentationForm`,
+  `paneLayout`, `supportingPane` and `postureSplit`, `toolbarPlacement` and `toolbarLayout`, `sizeTier`, `hitTarget` and
+  `hoversWith`, and `formMorph` with `createFormMorph`, `stepFormMorph`, `formMorphFrame` and `rebaseFormMorph`.
+  `docs/acceptance.md` holds the AD criteria, `docs/design.md` the layer and the new order: navigation, sheet and
+  popover, toolbar and search field come before switch, slider, segmented control and chip.
+- **A menu stays in its trigger's segment.** `menuPlacement` and `menuCorner` take a region with an origin (a size
+  alone still works as a region at the origin); `<vire-menu>` passes its trigger's segment of the window, so on a
+  folding screen it opens in its half and scrolls if it is taller. `menuSurfaceFrame` takes optional bounds that hold
+  every frame of the growth inside the region, the overshoot included. `Rect` and `Size` now live in `geometry.ts`,
+  exported under the same names with `intersectRect` and `rectContains`.
+- **The web collects the context** (`vireuikit/web`): `systemInput` and `effectiveInput` (the input layers from media
+  queries, a keyboard from a key pressed outside a field), `setInputOverride` and `getInputOverride`,
+  `setViewportOverride` (an element as the window, with its own segments) and `viewportSegments` (from the Viewport
+  Segments API), and `watchAdaptiveContext(root, …)` for a shell.
+- The lab gains `?view=adaptive`: a resizable window with presets from a folded phone to an ultrawide desktop, a
+  simulated fold and input, the real atoms in their forms, the unbuilt patterns as outlines placed by the model, a
+  readout of every decision and scripted scenarios. `check:lab` holds the atoms' input layers (a fine pointer with
+  touch present through stubbed media queries), a menu on a real fold (the DevTools display feature) and the stage,
+  with canaries for a single coarse flag, a menu that ignores the fold and a navigation that swaps instead of morphing;
+  `check:lab:visual` has six stage baselines.
+
 ## 0.7.0
 
 **Changed behaviour of exported defaults (released as a minor).** Code that calls the growth model without passing

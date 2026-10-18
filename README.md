@@ -51,9 +51,54 @@ import { MENU_CLOSED, menuPlacement, menuSurfaceFrame, stepMenu } from 'vireuiki
 
 const step = stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, items); // items: { label, disabled, focusable? }[]
 // step.focus says where focus goes; a choice always closes the menu.
-const { rect, anchor } = menuPlacement(triggerRect, menuSize, viewport);
+const { rect, anchor } = menuPlacement(triggerRect, menuSize, segment); // the trigger's segment of the window, or the viewport
 const surface = menuSurfaceFrame(triggerBox, { ...rect, radius }, anchor, growthPhase(state));
 ```
+
+## Adaptive model
+
+What every atom and pattern becomes across window classes, input and posture is one pure model, so every target
+decides the same way. The context is the window in dp, the input in three layers (the primary pointer, any coarse
+input, hover, a keyboard), the posture of a folding screen and reduced motion; the functions turn it into forms.
+
+```ts
+import { adaptiveContext, halfOpen, INPUT_MIXED, navigationForm, paneLayout, presentationForm } from 'vireuikit';
+
+const window = { width: 673, height: 841 };
+const ctx = adaptiveContext({ window, input: INPUT_MIXED, posture: halfOpen('book', window) });
+
+navigationForm(ctx, { primary: 4, secondary: 2, search: true }).form; // 'rail'
+paneLayout(ctx, { selected: true, showing: 'detail' }).split; // { kind: 'fold', gap }: the panes split at the fold
+presentationForm('sheet', ctx).form; // 'bottom-sheet'; a side sheet from 840 dp
+```
+
+- `classifyWindow` holds every threshold: widths 600, 840, 1200 and 1600 dp, heights 480 and 900.
+- `navigationForm`: a bar on a compact width and in tabletop, a rail on medium, expanded and a compact height, a
+  sidebar from large; the same primary destinations on every form, at most five bar slots with search, no "More".
+  `bottomAccessory` places a strip above the bar, in its row or along the content.
+- `presentationForm` for a menu, picker, popover, sheet, modal sheet, alert or dialog: a popover is a sheet grown from
+  its source below 600, a supplementary sheet is a bottom sheet below 840 and a side sheet from there, sheets fill
+  the window on a compact height, and every surface lives in one segment, never across the fold.
+- `paneLayout` (list-detail: one pane below 840, a 360 or 412 dp list beside the detail, split at the fold in book
+  posture), `supportingPane` (beside the content from large, over it on expanded, remembered), `postureSplit`.
+- `toolbarLayout` fits a toolbar into its container: neighbours merge, then the lowest priority goes into "…";
+  badged items and the main action stay. `toolbarPlacement` says where the window puts it.
+- `sizeTier` follows the primary pointer and `hitTarget` any coarse input, so a laptop with a touch screen gets the
+  pointer tier with a 44 dp hit area.
+- `formMorph`, `stepFormMorph` and `formMorphFrame` flow one body into its new form on the growth's springs; turned
+  back mid-way it runs back from where it is, and under reduced motion it lands in one frame.
+
+On the web the elements collect their part of the context themselves. A shell that lays itself out from the model
+watches its root:
+
+```ts
+import { setInputOverride, setViewportOverride, watchAdaptiveContext } from 'vireuikit/web';
+
+const stop = watchAdaptiveContext(shell, (ctx) => render(ctx)); // told now and on every change
+```
+
+`setInputOverride` lets a host that knows its input better decide the layers, and `setViewportOverride` makes an
+element the window, with its own segments; the lab's adaptive stage simulates devices with both.
 
 ## Web elements
 
@@ -78,9 +123,10 @@ setA11yOverride({ reduceTransparency: true });
 - `<vire-icon-button>` lifts into the glass under the finger; the lens response is visible while the
   press is held.
 - Attributes: `glass` (empty or `present`: a lens at rest; `touch`: a lens only under the finger; absent: no
-  glass), `size` (`touch`, `small`, `medium`, `large`, `xlarge`; by default `touch` on a coarse pointer and
-  `medium` otherwise), `disabled`.
-- On a coarse pointer every size keeps a hit area of at least 44 dp without changing layout.
+  glass), `size` (`touch`, `small`, `medium`, `large`, `xlarge`; by default `touch` when the primary pointer is
+  coarse and `medium` otherwise), `disabled`.
+- Wherever a coarse input is present, a touch screen on a laptop too, every size keeps a hit area of at least 44 dp
+  without changing layout. Hover comes from the pointer that entered: a mouse on a tablet hovers, a finger never does.
 - The lens reads the backdrop from declared colours and cannot see an image, a video or a canvas. A host that knows
   what lies under the control sets the element's `sample` (a `BackdropSample` from `vireglass`), at any time; `null`
   hands it back to the probe.
@@ -145,7 +191,8 @@ setA11yOverride({ reduceTransparency: true });
   `<vire-icon-button>`), so there is never glass on glass.
 - Attributes: `glass` (empty, `present` or `touch`: the surface is a lens; absent or anything else: an opaque surface), `size` (as for the buttons; rows are as tall
   as the tier), `corner` (`top-left`, `top-right`, `bottom-left`, `bottom-right`: the trigger corner the menu pins to;
-  by default the one facing the nearest viewport corner). `sample` works as on the buttons; without one, the backdrop
+  by default the one facing the nearest corner of the trigger's segment of the window). On a folding screen the menu
+  stays in its trigger's half, every frame of its growth included, and scrolls if it is taller. `sample` works as on the buttons; without one, the backdrop
   under the menu is read once as it opens and held while it is out.
 
 Sizes, behaviour state machines and accessibility modes are exported from `vireuikit` and shared by every
