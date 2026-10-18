@@ -728,7 +728,7 @@ test.describe('dragging on the bar', () => {
     await expect(page.locator('vire-nav [aria-current]')).toHaveText('Home');
   });
 
-  test('a press that does not move 6 px is a tap: the link\'s own click, once, with nothing prevented', async ({ page }) => {
+  test('a tap is a link click: a press that does not move 6 px clicks the link once, with nothing prevented', async ({ page }) => {
     await openNav(page, 'glass=0&accessory=0', 430, 720);
     await page.evaluate(() => {
       const w = window as unknown as { __clicks: { prevented: boolean }[] };

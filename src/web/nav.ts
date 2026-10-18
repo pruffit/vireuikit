@@ -443,6 +443,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         expandMinimize(this.#minState);
         this.#replan();
       });
+      this.#cleanups.push(() => this.#endPress?.());
       on<MouseEvent>(toggle, 'click', () => this.#toggleClick());
       on<Event>(nav, 'scroll', () => {
         if (this.hasAttribute('data-scroll')) this.#scrollTop = nav.scrollTop;
@@ -1183,7 +1184,6 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         win.removeEventListener('pointercancel', cancel);
         this.#endPress = null;
       };
-      this.#cleanups.push(() => this.#endPress?.());
       this.#run();
     }
 
