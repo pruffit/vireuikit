@@ -53,7 +53,7 @@ export type ToolbarPlacement = { edge: 'bottom' | 'top' | 'trailing'; orientatio
 /** The window decides where a toolbar sits; its layout then follows its own container. */
 export function toolbarPlacement(ctx: AdaptiveContext): ToolbarPlacement {
   const { width, height } = classifyWindow(ctx.window);
-  if (height === 'compact' && ctx.window.width > ctx.window.height) {
+  if (height === 'compact') {
     return { edge: 'trailing', orientation: 'vertical', maxGroups: Number.POSITIVE_INFINITY };
   }
   if (width === 'compact') return { edge: 'bottom', orientation: 'horizontal', maxGroups: 3 };

@@ -78,12 +78,6 @@ function baseForm(kind: SurfaceKind, ctx: AdaptiveContext): Base {
 export function presentationForm(kind: SurfaceKind, ctx: AdaptiveContext, source?: Rect): PresentationForm {
   const base = baseForm(kind, ctx);
   const side = base.form === 'side-sheet' || base.form === 'side-pane';
-  let region: Rect;
-  if (side) {
-    const segments = windowSegments(ctx);
-    region = ctx.posture.kind === 'book' ? segments[segments.length - 1]! : { x: 0, y: 0, ...ctx.window };
-  } else {
-    region = surfaceRegion(ctx, source);
-  }
+  const region = side && ctx.posture.kind === 'book' ? windowSegments(ctx).at(-1)! : surfaceRegion(ctx, source);
   return { ...base, region };
 }

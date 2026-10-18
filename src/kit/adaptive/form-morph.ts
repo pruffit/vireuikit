@@ -35,9 +35,9 @@ export function formMorph(change: FormChange, ctx: Pick<AdaptiveContext, 'reduce
 export const FORM_MORPH_TIMING = { response: DEFAULT_GROWTH_TIMING.growOpen, damping: 1 } as const;
 
 /** 0 is the form it comes from, 1 the form it goes to. */
-export type FormMorphState = { t: Spring };
+export type FormMorphState = { t: Spring; fromInk?: number };
 
-export const createFormMorph = (): FormMorphState => ({ t: { x: 0, v: 0, target: 0 } });
+export const createFormMorph = (): FormMorphState => ({ t: { x: 0, v: 0, target: 0 }, fromInk: 1 });
 
 /** Steps toward a form; true while still moving. Called with the other end mid-way, it turns back from where it is. */
 export function stepFormMorph(state: FormMorphState, dt: number, toward: 0 | 1, instant = false): boolean {
@@ -69,12 +69,22 @@ export function formMorphFrame(from: MorphBox, to: MorphBox, state: FormMorphSta
       height: mix(from.height, to.height),
       radius: mix(from.radius, to.radius),
     },
-    ink: { outgoing: 1 - smoothstep(0, OUT_END, t), incoming: smoothstep(IN_START, 1, t) },
+    ink: inkAt(state, t),
     showing: t < 0.5 ? 'from' : 'to',
   };
 }
 
-/** A third form while a morph is under way: the box it is in now becomes the new start, so nothing jumps. */
+function inkAt(state: FormMorphState, t: number): FormMorphFrame['ink'] {
+  return { outgoing: (state.fromInk ?? 1) * (1 - smoothstep(0, OUT_END, t)), incoming: smoothstep(IN_START, 1, t) };
+}
+
+/**
+ * A third form while a morph is under way: the box it is in now becomes the new start and the content showing now
+ * leaves from the ink it has, so nothing jumps. A rebased start is a moment, not a form; the morph only goes on from it.
+ */
 export function rebaseFormMorph(state: FormMorphState): void {
+  const t = Math.min(Math.max(state.t.x, 0), 1);
+  const ink = inkAt(state, t);
+  state.fromInk = t < 0.5 ? ink.outgoing : ink.incoming;
   state.t = { x: 0, v: 0, target: 0 };
 }

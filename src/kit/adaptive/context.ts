@@ -99,8 +99,8 @@ export function windowSegments(ctx: Pick<AdaptiveContext, 'window' | 'posture'>)
 }
 
 /**
- * The posture two viewport segments describe. The web has no hinge angle, so two segments count as half-open
- *; anything but two is flat.
+ * The posture two viewport segments describe. The web has no hinge angle, so two segments count as half-open;
+ * anything but two is flat.
  */
 export function postureFromSegments(window: Size, segments: readonly Rect[]): Posture {
   if (segments.length !== 2) return POSTURE_FLAT;

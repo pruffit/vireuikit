@@ -215,7 +215,8 @@ describe('navigation', () => {
     expect(form(at(800, 360))).toBe('rail');
     expect(form(at(560, 400))).toBe('rail');
     expect(form(at(1400, 450))).toBe('sidebar');
-    expect(form(at(450, 470))).toBe('bar');
+    expect(form(at(450, 470))).toBe('rail');
+    expect(form(at(470, 450))).toBe('rail');
   });
 
   it('tabletop takes the bar on every width', () => {
@@ -328,6 +329,18 @@ describe('presentation', () => {
       expect(form.region, kind).toEqual(expected);
     }
     expect(presentationForm('menu', at(841, 701), left).region).toEqual({ x: 0, y: 0, ...window });
+  });
+
+  it('in tabletop a side sheet stays in its source\'s half like every other surface', () => {
+    const window = { width: 1000, height: 701 };
+    const tabletop = halfOpen('tabletop', window, { band: 20 });
+    const [top, bottom] = windowSegments({ window, posture: tabletop });
+    const ctx = at(1000, 701, { posture: tabletop });
+    expect(presentationForm('sheet', ctx).form).toBe('side-sheet');
+    for (const kind of SURFACE_KINDS) {
+      expect(presentationForm(kind, ctx, { x: 900, y: 20, width: 44, height: 44 }).region, kind).toEqual(top);
+      expect(presentationForm(kind, ctx, { x: 900, y: 600, width: 44, height: 44 }).region, kind).toEqual(bottom);
+    }
   });
 });
 

@@ -121,6 +121,7 @@ describe('toolbar layout', () => {
     expect(toolbarPlacement(adaptiveContext({ window: { width: 700, height: 900 } }))).toMatchObject({ edge: 'top', orientation: 'horizontal' });
     expect(toolbarPlacement(adaptiveContext({ window: { width: 1440, height: 900 } }))).toMatchObject({ edge: 'top' });
     expect(toolbarPlacement(adaptiveContext({ window: { width: 915, height: 412 } }))).toMatchObject({ edge: 'trailing', orientation: 'vertical' });
+    expect(toolbarPlacement(adaptiveContext({ window: { width: 450, height: 470 } }))).toMatchObject({ edge: 'trailing', orientation: 'vertical' });
   });
 });
 
@@ -193,12 +194,19 @@ describe('form morph', () => {
     expect(formMorphFrame(bar, rail, state).ink).toEqual({ outgoing: 0, incoming: 0 });
   });
 
-  it('a third form mid-way starts from where the body is', () => {
-    const state = createFormMorph();
-    run(state, 1, 6);
-    const now = formMorphFrame(bar, rail, state).box;
-    rebaseFormMorph(state);
+  it('a third form mid-way starts from where the body is, and the content showing keeps the ink it had', () => {
     const sidebar: MorphBox = { x: 8, y: 8, width: 264, height: 884, radius: 24 };
-    expect(formMorphFrame(now, sidebar, state).box).toEqual(now);
+    for (const at of [0.3, 0.5, 0.7]) {
+      const state = createFormMorph();
+      state.t = { x: at, v: 0, target: 1 };
+      const before = formMorphFrame(bar, rail, state);
+      const shown = before.showing === 'from' ? before.ink.outgoing : before.ink.incoming;
+      rebaseFormMorph(state);
+      const after = formMorphFrame(before.box, sidebar, state);
+      expect(after.box).toEqual(before.box);
+      expect(after.ink.outgoing, `at ${at}`).toBeCloseTo(shown, 9);
+      stepFormMorph(state, 1 / 60, 1);
+      expect(formMorphFrame(before.box, sidebar, state).ink.outgoing).toBeLessThanOrEqual(shown);
+    }
   });
 });

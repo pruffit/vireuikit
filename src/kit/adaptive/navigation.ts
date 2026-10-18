@@ -46,8 +46,8 @@ function formFor(ctx: AdaptiveContext, spec: NavigationSpec): NavigationFormKind
   const { width, height } = classifyWindow(ctx.window);
   if (ctx.posture.kind === 'tabletop') return 'bar';
   if (widthAtLeast(width, 'large')) return spec.sidebarCollapsed ? 'rail' : 'sidebar';
-  // A bottom bar would take the height a landscape phone has least of; a sidebar would not, hence below large only.
-  if (height === 'compact' && ctx.window.width > ctx.window.height) return 'rail';
+  // A bottom bar would take the height a compact window has least of; a sidebar would not, hence below large only.
+  if (height === 'compact') return 'rail';
   if (width === 'compact') return 'bar';
   if (width === 'medium' && (spec.panes ?? 1) > 1 && ctx.posture.kind !== 'book') return 'bar';
   return 'rail';
