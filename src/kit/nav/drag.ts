@@ -54,6 +54,13 @@ function indexAt(layout: NavLayout, x: number): number {
 
 const centreOf = (layout: NavLayout, index: number) => layout.items[index]!.x + layout.items[index]!.width / 2;
 
+function drop(state: NavDragState): void {
+  state.active = false;
+  state.lift.x = 0;
+  state.lift.v = 0;
+  state.lift.target = 0;
+}
+
 function settleTowards(state: NavDragState, layout: NavLayout, index: number): void {
   state.active = false;
   state.index = index;
@@ -88,9 +95,12 @@ export function moveNavDrag(state: NavDragState, layout: NavLayout, pointerX: nu
   state.index = indexAt(layout, x);
 }
 
-/** The nearest item; the lens springs to it and its lift falls to 0. */
+/** The nearest item; the lens springs to it and its lift falls to 0. Where the layout is not a bar the press just ends. */
 export function releaseNavDrag(state: NavDragState, layout: NavLayout): number {
-  if (!draggable(layout)) return state.index;
+  if (!draggable(layout)) {
+    drop(state);
+    return state.index;
+  }
   const index = indexAt(layout, state.x.x);
   settleTowards(state, layout, index);
   return index;
@@ -98,14 +108,16 @@ export function releaseNavDrag(state: NavDragState, layout: NavLayout): number {
 
 /** A cancelled press settles back where it was. */
 export function cancelNavDrag(state: NavDragState, layout: NavLayout, selected: number): void {
-  if (!draggable(layout)) return;
+  if (!draggable(layout)) {
+    drop(state);
+    return;
+  }
   const index = selected >= 0 && selected < layout.items.length ? selected : indexAt(layout, state.x.x);
   settleTowards(state, layout, index);
 }
 
 /** True while the lens is held or still moving. */
-export function stepNavDrag(state: NavDragState, layout: NavLayout, dt: number, reduceMotion = false): boolean {
-  void layout;
+export function stepNavDrag(state: NavDragState, dt: number, reduceMotion = false): boolean {
   let moving = state.active;
   if (state.stretch > 0) {
     state.stretch *= Math.exp(-Math.max(dt, 0) / STRETCH_TAU);

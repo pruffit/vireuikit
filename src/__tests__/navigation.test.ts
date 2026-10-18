@@ -563,11 +563,11 @@ describe('the drag', () => {
     const drag = createNavDrag();
     expect(navDragFrame(drag, barA)).toBeNull();
     pressNavDrag(drag, barA, barA.items[2]!.x + 10);
-    stepNavDrag(drag, barA, 1 / 60);
+    stepNavDrag(drag, 1 / 60);
     const frame = navDragFrame(drag, barA)!;
     expect(frame.lift).toBeGreaterThan(0);
     expect(frame.hover).toBe(2);
-    for (let i = 0; i < 60; i += 1) stepNavDrag(drag, barA, 1 / 60);
+    for (let i = 0; i < 60; i += 1) stepNavDrag(drag, 1 / 60);
     expect(navDragFrame(drag, barA)!.lift).toBe(1);
     moveNavDrag(drag, barA, barA.items[0]!.x + 5, 1 / 60);
     expect(navDragFrame(drag, barA)!.hover).toBe(0);
@@ -599,19 +599,19 @@ describe('the drag', () => {
     const f = navDragFrame(drag, barA)!;
     expect(f.lens.width).toBeCloseTo(lensWidth * (1 + fast), 6);
     expect(f.lens.height).toBeCloseTo((cell.height + 12) * (1 - fast / 2), 6);
-    for (let i = 0; i < 30; i += 1) stepNavDrag(drag, barA, 1 / 60);
+    for (let i = 0; i < 30; i += 1) stepNavDrag(drag, 1 / 60);
     expect(drag.stretch).toBe(0);
   });
 
   it('settles on the nearest item on release and lets the lift go', () => {
     const drag = createNavDrag();
     pressNavDrag(drag, barA, barA.items[0]!.x + 10);
-    for (let i = 0; i < 20; i += 1) stepNavDrag(drag, barA, 1 / 60);
+    for (let i = 0; i < 20; i += 1) stepNavDrag(drag, 1 / 60);
     moveNavDrag(drag, barA, barA.items[2]!.x + 20, 1 / 60);
     expect(releaseNavDrag(drag, barA)).toBe(2);
     expect(drag.active).toBe(false);
     let moving = true;
-    for (let i = 0; i < 240 && moving; i += 1) moving = stepNavDrag(drag, barA, 1 / 120);
+    for (let i = 0; i < 240 && moving; i += 1) moving = stepNavDrag(drag, 1 / 120);
     expect(moving).toBe(false);
     expect(navDragFrame(drag, barA)).toBeNull();
     expect(drag.x.x).toBeCloseTo(barA.items[2]!.x + barA.items[2]!.width / 2, 6);
@@ -630,7 +630,7 @@ describe('the drag', () => {
     pressNavDrag(drag, barA, barA.items[3]!.x + 10);
     cancelNavDrag(drag, barA, 1);
     expect(drag.active).toBe(false);
-    for (let i = 0; i < 240; i += 1) stepNavDrag(drag, barA, 1 / 120);
+    for (let i = 0; i < 240; i += 1) stepNavDrag(drag, 1 / 120);
     expect(drag.x.x).toBeCloseTo(barA.items[1]!.x + 37, 6);
     expect(navDragFrame(drag, barA)).toBeNull();
   });
@@ -640,9 +640,27 @@ describe('the drag', () => {
     pressNavDrag(drag, barA, barA.items[0]!.x + 10);
     moveNavDrag(drag, barA, barA.items[3]!.x + 10, 1 / 60);
     releaseNavDrag(drag, barA);
-    expect(stepNavDrag(drag, barA, 1 / 60, true)).toBe(true);
+    expect(stepNavDrag(drag, 1 / 60, true)).toBe(true);
     expect(navDragFrame(drag, barA)).toBeNull();
-    expect(stepNavDrag(drag, barA, 1 / 60, true)).toBe(false);
+    expect(stepNavDrag(drag, 1 / 60, true)).toBe(false);
+  });
+
+  it('ends a press whatever the layout is by then: release and cancel clear it and drop the lift', () => {
+    for (const end of ['release', 'cancel'] as const) {
+      for (const layout of [railB, sideC, minBar]) {
+        const drag = createNavDrag();
+        pressNavDrag(drag, barA, barA.items[2]!.x + 10);
+        for (let i = 0; i < 20; i += 1) stepNavDrag(drag, 1 / 60);
+        expect(drag.lift.x).toBeGreaterThan(0.5);
+        if (end === 'release') releaseNavDrag(drag, layout);
+        else cancelNavDrag(drag, layout, 1);
+        expect(drag.active).toBe(false);
+        expect(drag.lift.x).toBe(0);
+        expect(drag.lift.target).toBe(0);
+        expect(stepNavDrag(drag, 1 / 60)).toBe(false);
+        expect(navDragFrame(drag, barA)).toBeNull();
+      }
+    }
   });
 
   it('is for the full bar only', () => {

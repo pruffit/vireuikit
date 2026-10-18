@@ -865,7 +865,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       if (instant && this.#morph && !this.#forced()) {
         stepNavMorph(this.#morph, 0, true);
         const layout = this.#restLayout();
-        if (layout) stepNavDrag(this.#drag, layout, 0, true);
+        if (layout) stepNavDrag(this.#drag, 0, true);
         stepFormMorph(this.#pillAnim.state, 0, 1, true);
         stepFormMorph(this.#accAnim.state, 0, 1, true);
       }
@@ -884,7 +884,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       const instant = this.#presentation?.instantSprings ?? false;
       let moving = stepNavMorph(morph, dt, instant);
       const layout = this.#restLayout();
-      if (layout && stepNavDrag(this.#drag, layout, dt, instant)) moving = true;
+      if (layout && stepNavDrag(this.#drag, dt, instant)) moving = true;
       if (stepFormMorph(this.#pillAnim.state, dt, 1, instant)) moving = true;
       if (stepFormMorph(this.#accAnim.state, dt, 1, instant)) moving = true;
       this.#paint();
@@ -1220,9 +1220,10 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       } catch {
         // Nothing was captured on a tap.
       }
-      if (!layout || !plan) return;
-      if (cancelled) {
-        cancelNavDrag(this.#drag, layout, plan.selected);
+      if (!plan) return;
+      const bar = layout !== null && layout.form === 'bar' && !layout.minimized;
+      if (cancelled || !bar) {
+        cancelNavDrag(this.#drag, layout ?? plan.layout, plan.selected);
       } else {
         const index = releaseNavDrag(this.#drag, layout);
         if (press.dragging) {

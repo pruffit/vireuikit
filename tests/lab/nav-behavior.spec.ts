@@ -728,6 +728,40 @@ test.describe('dragging on the bar', () => {
     await expect(page.locator('vire-nav [aria-current]')).toHaveText('Home');
   });
 
+  test('a press that ends while the form is changing ends the drag: no lens is left, and the next press works', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    const home = await linkBox(page, 'Home');
+    await page.mouse.move(home.cx, home.cy);
+    await page.mouse.down();
+    await page.mouse.move(home.cx + 30, home.cy, { steps: 3 });
+    await resize(page, 700, 720);
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-moving'));
+    await page.waitForTimeout(150);
+    expect(await attr(page, 'data-form')).toBe('bar');
+    await page.mouse.up();
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.getAttribute('data-form') === 'rail');
+    await settle(page);
+    expect(await lensNow(page)).toBeNull();
+    await resize(page, 430, 720);
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.getAttribute('data-form') === 'bar');
+    await settle(page);
+    await page.waitForTimeout(200);
+    expect(await lensNow(page)).toBeNull();
+    expect(await attr(page, 'data-moving')).toBeNull();
+
+    const before = (await clicks(page)).length;
+    const start = await linkBox(page, 'Home');
+    const messages = await linkBox(page, 'Messages');
+    await page.mouse.move(start.cx, start.cy);
+    await page.mouse.down();
+    await page.mouse.move(messages.cx - 6, messages.cy, { steps: 8 });
+    expect((await lensNow(page))!.dragging).toBe(true);
+    await page.mouse.up();
+    await settle(page);
+    expect((await clicks(page)).slice(before)).toEqual(['click:Messages']);
+    expect(await lensNow(page)).toBeNull();
+  });
+
   test('a tap is a link click: a press that does not move 6 px clicks the link once, with nothing prevented', async ({ page }) => {
     await openNav(page, 'glass=0&accessory=0', 430, 720);
     await page.evaluate(() => {
