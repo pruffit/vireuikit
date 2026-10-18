@@ -52,14 +52,14 @@ export function effectiveInput(): InputLayers {
   };
 }
 
-const editable = (target: EventTarget | null) =>
+export const isEditable = (target: EventTarget | null) =>
   target instanceof Element && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') !== null;
 
 // An on-screen keyboard only types into a field, so a key pressed elsewhere is a hardware one.
 function onKey(e: KeyboardEvent): void {
   // The window sees a shadow host as the target; the path still starts at the field inside an open root.
   const target = e.composedPath()[0] ?? e.target;
-  if (keyboardSeen || e.isComposing || e.key === 'Unidentified' || e.key === 'Process' || editable(target)) return;
+  if (keyboardSeen || e.isComposing || e.key === 'Unidentified' || e.key === 'Process' || isEditable(target)) return;
   keyboardSeen = true;
   for (const listener of [...inputListeners]) listener();
 }

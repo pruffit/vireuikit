@@ -5,6 +5,10 @@ import {
   NAV_MORPH_TIMING,
   NAV_SIZES,
   FORM_MORPH_TIMING,
+  INPUT_POINTER,
+  adaptiveContext,
+  fixedNavigationForm,
+  navigationForm,
   aimNavMorph,
   cancelNavDrag,
   createMinimize,
@@ -692,5 +696,48 @@ describe('minimising on scroll', () => {
     const s = createMinimize(100);
     stepMinimize(s, 200);
     expect(stepMinimize(s, -12)).toBe(false);
+  });
+});
+
+describe('navLayout: the toggle', () => {
+  const layout = (form: 'bar' | 'rail' | 'sidebar', toggle = true) =>
+    navLayout({ ...base, form, window: form === 'sidebar' ? { width: 1280, height: 800 } : base.window, secondary: 2, toggle });
+
+  it('sits in the head strip: centred in the rail, at the trailing end of the sidebar', () => {
+    const rail = layout('rail');
+    expect(rail.toggle).toMatchObject({ width: 44, height: 44 });
+    expect(rail.toggle!.x + 22).toBeCloseTo(rail.body.x + rail.body.width / 2, 6);
+    expect(rail.toggle!.y + 22).toBeCloseTo(rail.body.y + 8 + 24, 6);
+    const side = layout('sidebar');
+    expect(side.toggle!.x + 44).toBe(side.body.x + side.body.width - 8);
+    expect(side.toggle!.y).toBe(rail.toggle!.y);
+  });
+
+  it('is absent where the head holds none, and on the bar', () => {
+    expect(layout('rail', false).toggle).toBeNull();
+    expect(layout('sidebar', false).toggle).toBeNull();
+    expect(layout('bar').toggle).toBeNull();
+    expect(navLayout({ ...base, minimized: true }).toggle).toBeNull();
+  });
+});
+
+describe('fixedNavigationForm', () => {
+  const ctx = adaptiveContext({ window: { width: 1280, height: 800 }, input: INPUT_POINTER });
+  const model = navigationForm(ctx, { primary: 4, secondary: 2, search: true });
+
+  it('keeps the destinations and gives the search and the toggle the form they belong to', () => {
+    expect(model.form).toBe('sidebar');
+    const bar = fixedNavigationForm(model, 'bar');
+    expect(bar).toMatchObject({ form: 'bar', edge: 'bottom', primary: 4, secondary: 2, secondaryVisible: false, collapsible: false, expandable: null });
+    expect(bar.search).toEqual({ form: 'button', place: 'bar', shortcut: true });
+    const rail = fixedNavigationForm(model, 'rail');
+    expect(rail).toMatchObject({ form: 'rail', edge: 'leading', collapsible: false });
+    expect(rail.search).toMatchObject({ form: 'item', place: 'rail' });
+  });
+
+  it('returns the model itself when it already is that form, and a search-less model stays so', () => {
+    expect(fixedNavigationForm(model, 'sidebar')).toBe(model);
+    const none = navigationForm(ctx, { primary: 4 });
+    expect(fixedNavigationForm(none, 'bar').search).toBeNull();
   });
 });

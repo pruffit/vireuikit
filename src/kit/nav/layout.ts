@@ -10,6 +10,7 @@ export const NAV_SIZES = {
   sidebar: { width: 280, row: { touch: 44, pointer: 36 }, padding: 8, margin: 8, head: 48, separator: 12 },
   accessory: { height: 48, gap: 8, inline: 44, content: 56, margin: 8 },
   lens: { inflate: 6 },
+  toggle: 44,
 } as const;
 
 export type NavLayoutInput = {
@@ -42,6 +43,8 @@ export type NavLayout = {
   /** The bar's separate circle, or the search item (rail) or field (sidebar) inside the body. */
   search: MorphBox | null;
   accessory: MorphBox | null;
+  /** The toggle in the head of the rail or sidebar; null where the head holds none. */
+  toggle: MorphBox | null;
   accessoryPlacement: BottomAccessoryForm['placement'] | null;
   /** What the content must clear. */
   insets: { bottom: number; start: number };
@@ -76,6 +79,7 @@ function barLayout(input: NavLayoutInput, items: number, minimized: boolean): Na
       pill: selected >= 0 ? { ...body } : null,
       search,
       accessory: acc,
+      toggle: null,
       accessoryPlacement: placement,
       insets: { bottom: height - body.y, start: 0 },
     };
@@ -104,6 +108,7 @@ function barLayout(input: NavLayoutInput, items: number, minimized: boolean): Na
     pill: selected >= 0 ? { ...cells[selected]! } : null,
     search,
     accessory: acc,
+    toggle: null,
     accessoryPlacement: placement,
     insets: { bottom: height - body.y + (acc ? accessory.height + accessory.gap : 0), start: 0 },
   };
@@ -117,6 +122,12 @@ function contentAccessory(input: NavLayoutInput, start: number): { box: MorphBox
   const width = Math.max(0, input.window.width - start - accessory.margin);
   const acc = box(start, input.window.height - bottom - accessory.content, width, accessory.content, accessory.content / 2);
   return { box: acc, bottom: bottom + accessory.content };
+}
+
+/** A square centred in the head strip, `dx` from the body's leading edge. */
+function headToggle(body: MorphBox, padding: number, head: number, dx: number): MorphBox {
+  const d = NAV_SIZES.toggle;
+  return box(body.x + dx, body.y + padding + (head - d) / 2, d, d, d / 2);
 }
 
 function inset(b: MorphBox, d: number): MorphBox {
@@ -145,6 +156,7 @@ function railLayout(input: NavLayoutInput, items: number): NavLayout {
     pill: selected >= 0 ? inset(cells[selected]!, bar.inset) : null,
     search: hasSearch ? cell(items) : null,
     accessory: acc.box,
+    toggle: input.toggle ? headToggle(body, rail.padding, rail.head, (rail.width - NAV_SIZES.toggle) / 2) : null,
     accessoryPlacement: acc.box ? 'content-bottom' : null,
     insets: { bottom: acc.bottom, start },
   };
@@ -177,6 +189,7 @@ function sidebarLayout(input: NavLayoutInput, items: number, secondary: number):
     pill: selected >= 0 ? { ...cells[selected]! } : null,
     search,
     accessory: acc.box,
+    toggle: input.toggle ? headToggle(body, sidebar.padding, sidebar.head, sidebar.width - sidebar.padding - NAV_SIZES.toggle) : null,
     accessoryPlacement: acc.box ? 'content-bottom' : null,
     insets: { bottom: acc.bottom, start },
   };
