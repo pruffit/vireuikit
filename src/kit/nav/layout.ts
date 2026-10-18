@@ -139,7 +139,9 @@ function railLayout(input: NavLayoutInput, items: number): NavLayout {
   const hasSearch = input.search?.form === 'item';
   const n = items + (hasSearch ? 1 : 0);
   const head = input.toggle ? rail.head : 0;
-  const height = rail.padding * 2 + head + n * rail.item + Math.max(n - 1, 0) * rail.gap;
+  const natural = rail.padding * 2 + head + n * rail.item + Math.max(n - 1, 0) * rail.gap;
+  // A rail taller than its window stops at the window's edge, as the sidebar does; the rows run past it and scroll.
+  const height = Math.min(natural, Math.max(input.window.height - 2 * rail.margin, 0));
   // The item's radius 24 plus the 4 dp the body keeps around its corner: concentric with the item.
   const body = box(rail.margin, rail.margin, rail.width, height, 28);
   const cell = (i: number) =>

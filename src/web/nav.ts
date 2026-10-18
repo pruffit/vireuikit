@@ -181,7 +181,9 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     #lastKey = '';
     #parent: HTMLElement | null = null;
     #parentWas: { bottom: string; start: string } | null = null;
-    #scrollTop = 0;
+    // Leaving the scrolling state resets the offset, and that reset's own scroll event must not overwrite what is remembered.
+    #scrollReset = false;
+    #scrollTops = new Map<NavigationFormKind, number>();
     #dirty = false;
     #swallow: (() => void) | null = null;
     #tapping = false;
@@ -291,6 +293,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#body = this.#lensSlot = this.#accSlot = null;
       this.#ctx = this.#plan = this.#shown = this.#morph = null;
       this.#plans = new WeakMap();
+      this.#scrollTops.clear();
       this.#drag = createNavDrag();
       this.#press = null;
       this.#minState = createMinimize();
@@ -455,7 +458,12 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#cleanups.push(() => this.#endPress?.());
       on<MouseEvent>(toggle, 'click', () => this.#toggleClick());
       on<Event>(nav, 'scroll', () => {
-        if (this.hasAttribute('data-scroll')) this.#scrollTop = nav.scrollTop;
+        const form = this.#shown?.layout.form;
+        if (this.#scrollReset && nav.scrollTop === 0) {
+          this.#scrollReset = false;
+          return;
+        }
+        if (form && this.hasAttribute('data-scroll')) this.#scrollTops.set(form, nav.scrollTop);
       });
 
       on<KeyboardEvent>(doc, 'keydown', (e) => {
@@ -917,9 +925,9 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         if (layout.toggle) this.#place(toggle, layout.toggle, hit);
         this.#syncToggle();
       }
-      const last = layout.items[layout.items.length - 1];
-      const bottom = last ? last.y + last.height + 8 : 0;
-      this.#fits = layout.form !== 'sidebar' || bottom <= layout.body.y + layout.body.height;
+      const rows = layout.form === 'bar' ? [] : [...layout.items, ...(layout.search ? [layout.search] : [])];
+      const bottom = Math.max(0, ...rows.map((row) => row.y + row.height)) + 8;
+      this.#fits = rows.length === 0 || bottom <= layout.body.y + layout.body.height + 0.5;
       if (focused && this.#loses(focused, shown)) this.#handFocus(shown);
     }
 
@@ -997,9 +1005,11 @@ export function createNavElementClass(options: NavElementOptions = {}) {
 
       this.toggleAttribute('data-moving', !rest || dragFrame !== null);
       const scrolls = rest && dragFrame === null && !this.#fits;
+      let restore = false;
       if (this.hasAttribute('data-scroll') !== scrolls) {
         this.toggleAttribute('data-scroll', scrolls);
-        if (scrolls) nav.scrollTop = this.#scrollTop;
+        this.#scrollReset = !scrolls;
+        restore = scrolls;
       }
       const ink = frame.showing === 'from' ? frame.ink.outgoing : frame.ink.incoming;
       this.style.setProperty('--vk-ink', clamp01(ink).toFixed(3));
@@ -1011,6 +1021,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       s.setProperty('--vk-w', px(box.width));
       s.setProperty('--vk-h', px(box.height));
       s.setProperty('--vk-r', px(box.radius));
+      if (restore) nav.scrollTop = this.#scrollTops.get(shown.layout.form) ?? 0;
 
       const pill = shown === plan ? this.#pillBox() : shownLayout.pill;
       this.#paintPill(shown.layout.minimized ? null : pill, ink * (1 - (lens?.lift ?? 0)));

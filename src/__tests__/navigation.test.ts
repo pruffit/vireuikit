@@ -155,6 +155,15 @@ describe('navLayout: the rail', () => {
     expect(l.insets.start).toBe(8 + 80 + 8);
   });
 
+  it('stops at the edge of the window when it is taller, its rows running past the body', () => {
+    const tall = rail({ items: 4, window: { width: 800, height: 340 } });
+    expect(tall.body.height).toBe(340 - 16);
+    expect(tall.body.y + tall.body.height).toBe(340 - 8);
+    expect(tall.search!.y + tall.search!.height).toBeGreaterThan(tall.body.y + tall.body.height);
+    const fits = rail({ items: 4, window: { width: 800, height: 376 } });
+    expect(fits.body.height).toBe(16 + 48 + 5 * 56 + 4 * 4);
+  });
+
   it('insets the pill by 3 dp', () => {
     const l = rail({ selected: 2 });
     const cell = l.items[2]!;

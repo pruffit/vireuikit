@@ -566,6 +566,32 @@ test.describe('a change of form', () => {
   });
 });
 
+test.describe('a rail taller than its window', () => {
+  test('stops at the window edge and scrolls its rows inside the body, remembering the offset', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0&nav-form=rail', 700, 280);
+    const host = page.locator('vire-nav');
+    await expect(host).toHaveAttribute('data-scroll', '');
+    const frame = await rect(page, '#frame');
+    const body = await rect(page, 'vire-nav > nav');
+    expect(body.y + body.height).toBeCloseTo(frame.y + frame.height - 8, 1);
+    const search = page.locator('vire-nav a[data-search]');
+    const before = (await search.boundingBox())!;
+    expect(before.y + before.height).toBeGreaterThan(body.y + body.height + 1);
+    await page.locator('vire-nav > nav').evaluate((el) => (el.scrollTop = 1000));
+    await nextFrame(page);
+    const top = await page.locator('vire-nav > nav').evaluate((el) => el.scrollTop);
+    expect(top).toBeGreaterThan(20);
+    const end = (await search.boundingBox())!;
+    expect(end.y + end.height).toBeLessThanOrEqual(body.y + body.height + 1);
+    await resize(page, 700, 600);
+    await expect(host).not.toHaveAttribute('data-scroll', '');
+    await resize(page, 700, 280);
+    await expect(host).toHaveAttribute('data-scroll', '');
+    await settle(page);
+    expect(await page.locator('vire-nav > nav').evaluate((el) => el.scrollTop)).toBe(top);
+  });
+});
+
 test.describe('the lens', () => {
   test("on the bar the search circle is the lens's second shape, and buds off the trailing end as the bar grows and merges back as it contracts", async ({ page }) => {
     await stubGlass(page);

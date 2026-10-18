@@ -376,6 +376,7 @@ bar is also a knob the finger drags (U 298–299.7 s, 15 fps). Behaviour tests a
 | NV18 | Hit areas: every destination meets 44 dp wherever any coarse input is present (AD2); sidebar rows are 44 dp on the touch tier and 36 dp on the pointer tier. | behaviour (hit areas measured with stubbed media queries) |
 | NV19 | With glass off, under reduced transparency and increased contrast every form stays readable and works: a plain or frosted body, a filled pill, the same geometry. | behaviour (modes); snapshots |
 | NV20 | The lab shows every form (bar, minimised bar, rail, sidebar) on every backdrop with glass on and off, and the stage draws the real navigation in place of its outline. | snapshots `nav-*`, and `adaptive stage: …` (`adaptive-*`) on the stage; behaviour "…the model's forms…" per preset |
+| NV21 | A rail taller than its window stops at the window's edge and its rows scroll inside the body at rest, the offset remembered per form, as the sidebar's do. | unit `navLayout` (the rail's body capped); behaviour "a rail taller than its window…" |
 
 Side-by-side: the cycle at M 8:35–8:47 against the stage's sweep, and the drag at U 298–299.7 s against the gallery's
 bar.
