@@ -7,6 +7,7 @@ now reaches 44 dp wherever any coarse input is present (`any-pointer: coarse`), 
 where it had 24 dp; hover now comes from the pointer that entered, so a mouse on a touch-first tablet hovers where it
 did not. The default size still follows the primary pointer.
 
+- **The navigation model** (`vireuikit`). `navLayout` and `NAV_SIZES` place the bar, the minimised bar, the rail and the sidebar with their items, pill, search and accessory; `navMorphFrame` with `createNavMorph`, `aimNavMorph`, `stepNavMorph`, `currentNavFrame` and `NAV_MORPH_TIMING` change a form through the selection (lift, contract, travel, grow, settle), turn back mid-way and take a third form by swapping the target or rebasing from the current frame; `createNavDrag` with `pressNavDrag`, `moveNavDrag`, `releaseNavDrag`, `cancelNavDrag`, `stepNavDrag` and `navDragFrame` drag the selection along the bar; `createMinimize`, `stepMinimize`, `expandMinimize` and `MINIMIZE_THRESHOLD` minimise the bar on scroll.
 - **The adaptive model** (`vireuikit`). `AdaptiveContext` (the window in dp, the input in three layers, the posture of a
   folding screen, reduced motion) with `adaptiveContext`, `halfOpen`, the `INPUT_*` presets, `windowSegments`,
   `postureFromSegments`, `segmentOf` and `surfaceRegion`; `classifyWindow`, `widthClass` and `heightClass` with every
