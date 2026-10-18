@@ -62,8 +62,8 @@ ${ITEM}>svg{position:absolute;inset-inline-start:calc((var(--vk-menu-row) - var(
 ${ITEM}:is(:focus,[data-vire-force-state=hover]){--vk-fill:var(--vk-fill-active)}
 ${ITEM}:is([data-pressed],[data-vire-force-state=pressed]){--vk-fill:var(--vk-fill-pressed)}
 ${ITEM}:focus-visible{outline:2px solid currentColor;outline-offset:-2px}
-${ITEM}:disabled{cursor:default;--vk-fill:0;-webkit-text-fill-color:color-mix(in srgb,currentColor 40%,transparent)}
-${ITEM}:disabled>svg{opacity:.4}
+${ITEM}[aria-disabled=true]{cursor:default;--vk-fill:0;-webkit-text-fill-color:color-mix(in srgb,currentColor 40%,transparent)}
+${ITEM}[aria-disabled=true]>svg{opacity:.4}
 ${MENU}[data-phase=moving]>[popover]{padding:0}
 ${MENU}[data-phase=moving]>[popover]>*{transform:translate(calc(var(--vk-cx) + var(--vk-menu-pad)),calc(var(--vk-cy) + var(--vk-menu-pad)));
  opacity:min(1,calc(var(--vk-ink-in)*2));filter:blur(calc((1 - var(--vk-ink-in))*8px))}
@@ -87,7 +87,7 @@ ${HOST}[data-contrast][data-surface=glass]>button{${CONTRAST_GLASS}}
 ${MENU}[data-contrast]:is([data-surface=plain],[data-surface=frosted])>[popover]{background:Canvas;box-shadow:inset 0 0 0 2px currentColor}
 ${MENU}[data-contrast][data-surface=glass]>[popover]{${CONTRAST_GLASS}}
 
-${HOST}[data-carried]>button{background:transparent!important}
+${HOST}[data-carried]>button{background:transparent!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;box-shadow:none!important;pointer-events:none}
 ${HOST}[data-carried]>button::after{visibility:hidden}
 
 @media (forced-colors:active){
@@ -99,7 +99,8 @@ ${SURFACE}{color:CanvasText!important;background:Canvas!important;border:1px sol
 ${SURFACE}>*{filter:none!important;opacity:1!important}
 ${ITEM}{-webkit-text-fill-color:currentColor!important;color:CanvasText;background:Canvas}
 ${ITEM}:is(:focus,[data-vire-force-state=hover],[data-pressed]){color:HighlightText;background:Highlight}
-${ITEM}:disabled{color:GrayText;background:Canvas}
+${ITEM}:is(:disabled,[aria-disabled=true]){color:GrayText;background:Canvas}
+${HOST}[data-carried]>button{opacity:var(--vk-carry)}
 }
 `;
 

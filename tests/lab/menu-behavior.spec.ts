@@ -12,6 +12,16 @@ const focused = (page: Page) =>
     return el?.id || el?.textContent?.trim() || el?.tagName || '';
   });
 const DARK = { luma: 0.06, busy: 0, lo: 0.06, hi: 0.06, r: 0.06, g: 0.06, b: 0.06 };
+const openNow = (page: Page, id = 'more') => expect(page.locator(`#${id}`)).toHaveAttribute('data-phase', 'open');
+
+// VIREUIKIT_CPU_THROTTLE=4 runs the whole file on a CPU slowed through the DevTools protocol, to show it does not flake.
+const THROTTLE = Number(process.env.VIREUIKIT_CPU_THROTTLE ?? 1);
+if (THROTTLE > 1) {
+  test.beforeEach(async ({ page }) => {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: THROTTLE });
+  });
+}
 
 test.describe('before the upgrade', () => {
   test('the platform popover opens, closes on a choice, Escape and a press outside, and gives focus back', async ({ page }) => {
@@ -55,18 +65,25 @@ test.describe('roles', () => {
     const items = menu.getByRole('menuitem');
     await expect(items).toHaveCount(5);
     await expect(items.nth(2)).toBeDisabled();
+    await expect(items.nth(2)).toHaveAttribute('aria-disabled', 'true');
+    expect(await items.nth(2).evaluate((el) => el.hasAttribute('disabled'))).toBe(false);
     for (const tabindex of await items.evaluateAll((els) => els.map((el) => el.getAttribute('tabindex')))) {
       expect(tabindex).toBe('-1');
     }
   });
 
   test('removing the element gives the markup back, and connecting it again upgrades it', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 200 });
     await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').click();
+    await openNow(page);
+    expect(await page.locator('#more-list').evaluate((el) => el.hasAttribute('data-scroll'))).toBe(true);
     const read = () =>
       page.evaluate(() => {
         const menu = (window as unknown as { __menu: HTMLElement }).__menu;
         const trigger = menu.querySelector('#more-trigger')!;
         const list = menu.querySelector('[popover]')!;
+        const deleted = list.querySelectorAll('button')[2]!;
         return {
           target: trigger.getAttribute('popovertarget'),
           haspopup: trigger.getAttribute('aria-haspopup'),
@@ -74,6 +91,11 @@ test.describe('roles', () => {
           role: list.getAttribute('role'),
           item: list.querySelector('button')!.getAttribute('popovertargetaction'),
           itemRole: list.querySelector('button')!.getAttribute('role'),
+          disabled: deleted.hasAttribute('disabled'),
+          ariaDisabled: deleted.getAttribute('aria-disabled'),
+          listAttributes: [...list.attributes].map((a) => a.name).sort(),
+          menuStyle: menu.getAttribute('style'),
+          open: list.matches(':popover-open'),
         };
       });
     await page.evaluate(() => {
@@ -82,12 +104,46 @@ test.describe('roles', () => {
       (window as unknown as { __parent: HTMLElement }).__parent = menu.parentElement!;
       menu.remove();
     });
-    expect(await read()).toEqual({ target: 'more-list', haspopup: null, popover: '', role: null, item: 'hide', itemRole: null });
+    expect(await read()).toEqual({
+      target: 'more-list',
+      haspopup: null,
+      popover: '',
+      role: null,
+      item: 'hide',
+      itemRole: null,
+      disabled: true,
+      ariaDisabled: null,
+      listAttributes: ['id', 'popover'],
+      menuStyle: null,
+      open: false,
+    });
     await page.evaluate(() => {
       const w = window as unknown as { __menu: HTMLElement; __parent: HTMLElement };
       w.__parent.append(w.__menu);
     });
-    expect(await read()).toMatchObject({ target: null, haspopup: 'menu', popover: 'manual', role: 'menu', itemRole: 'menuitem' });
+    expect(await read()).toMatchObject({ target: null, haspopup: 'menu', popover: 'manual', role: 'menu', itemRole: 'menuitem', ariaDisabled: 'true' });
+  });
+
+  test('an item taken out of the menu gets its markup back', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    const taken = await page.evaluate(() => {
+      const items = document.querySelectorAll('#more-list > button');
+      const rename = items[1]!;
+      const remove = items[2]!;
+      rename.remove();
+      remove.remove();
+      return new Promise<string[][]>((resolve) =>
+        requestAnimationFrame(() =>
+          resolve(
+            [rename, remove].map((el) =>
+              ['role', 'tabindex', 'popovertarget', 'popovertargetaction', 'disabled', 'aria-disabled'].map((n) => `${n}=${el.getAttribute(n)}`),
+            ),
+          ),
+        ),
+      );
+    });
+    expect(taken[0]).toEqual(['role=null', 'tabindex=null', 'popovertarget=more-list', 'popovertargetaction=hide', 'disabled=null', 'aria-disabled=null']);
+    expect(taken[1]).toEqual(['role=null', 'tabindex=null', 'popovertarget=more-list', 'popovertargetaction=hide', 'disabled=', 'aria-disabled=null']);
   });
 });
 
@@ -114,32 +170,37 @@ test.describe('keyboard', () => {
     expect(await page.locator('#more-list button:focus').count()).toBe(0);
   });
 
-  test('arrows, Home, End and typeahead move over enabled items and wrap', async ({ page }) => {
+  // WAI-ARIA APG: a disabled item is focusable, it only cannot be chosen.
+  test('arrows, Home, End and typeahead move over every item, a disabled one included, and wrap', async ({ page }) => {
     await openCase(page, 'view=menu');
     await page.locator('#more-trigger').focus();
     await page.keyboard.press('Enter');
     const steps: [string, string][] = [
       ['ArrowDown', 'Rename'],
+      ['ArrowDown', 'Delete'],
       ['ArrowDown', 'Remove from list'],
       ['ArrowDown', 'Copy text'],
       ['ArrowDown', 'Copy link'],
       ['ArrowUp', 'Copy text'],
       ['Home', 'Copy link'],
       ['End', 'Copy text'],
+      ['d', 'Delete'],
       ['Home', 'Copy link'],
-      ['r', 'Rename'],
-      ['e', 'Rename'],
-      ['m', 'Remove from list'],
     ];
     for (const [key, expected] of steps) {
       await page.keyboard.press(key);
       expect(await focused(page), key).toBe(expected);
     }
+    // Typed together, letters refine the match; the events carry their own time, so a slow machine cannot split them.
+    const typed = (keys: string[]) =>
+      page.evaluate((keys) => {
+        for (const key of keys) document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+        return document.activeElement?.textContent?.trim();
+      }, keys);
+    expect(await typed(['r', 'e', 'm'])).toBe('Remove from list');
     await page.waitForTimeout(600);
-    await page.keyboard.press('c');
-    expect(await focused(page)).toBe('Copy text');
-    await page.keyboard.press('c');
-    expect(await focused(page)).toBe('Copy link');
+    expect(await typed(['c'])).toBe('Copy text');
+    expect(await typed(['c'])).toBe('Copy link');
   });
 
   test('the pointer makes an item active', async ({ page }) => {
@@ -156,6 +217,7 @@ test.describe('choice and dismissal', () => {
     await openCase(page, 'view=menu');
     const trigger = page.locator('#more-trigger');
     await trigger.click();
+    await openNow(page);
     await page.getByRole('menuitem', { name: 'Rename' }).click();
     expect(await log(page)).toEqual(['click:rename']);
     expect(await focused(page)).toBe('more-trigger');
@@ -163,21 +225,128 @@ test.describe('choice and dismissal', () => {
     await expect.poll(() => isOpen(page)).toBe(false);
 
     await page.keyboard.press('Enter');
+    await openNow(page);
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
     expect(await log(page)).toEqual(['click:rename', 'click:rename']);
     expect(await focused(page)).toBe('more-trigger');
   });
 
-  test('a disabled item cannot be chosen and closes nothing', async ({ page }) => {
+  test('a choice closes the menu even when the item\'s own handler stops the click', async ({ page }) => {
     await openCase(page, 'view=menu');
+    await page.evaluate(() => {
+      const rename = [...document.querySelectorAll('#more-list button')].find((b) => b.textContent === 'Rename')!;
+      rename.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.getElementById('log')!.textContent += 'own:rename\n';
+      });
+    });
     await page.locator('#more-trigger').click();
-    await expect(page.locator('#more')).toHaveAttribute('data-phase', 'open');
+    await openNow(page);
+    await page.getByRole('menuitem', { name: 'Rename' }).click();
+    expect(await log(page)).toEqual(['own:rename']);
+    await expect(page.locator('#more-trigger')).toHaveAttribute('aria-expanded', 'false');
+    await expect.poll(() => isOpen(page)).toBe(false);
+  });
+
+  test('a disabled item can be reached but not chosen, by pointer or key', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').focus();
+    await page.keyboard.press('Enter');
+    await openNow(page);
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    expect(await focused(page)).toBe('Delete');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Space');
     await page.getByRole('menuitem', { name: 'Delete' }).click({ force: true });
     expect(await log(page)).toEqual([]);
     expect(await isOpen(page)).toBe(true);
     await expect(page.locator('#more-trigger')).toHaveAttribute('aria-expanded', 'true');
   });
+});
+
+// The menu grows in under the pointer that opened it, and the first item lands where the trigger was.
+test.describe('input that began on the trigger', () => {
+  test('a double click on the trigger opens the menu and chooses nothing', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').dblclick();
+    await openNow(page);
+    await page.waitForTimeout(300);
+    expect(await log(page)).toEqual([]);
+    expect(await isOpen(page)).toBe(true);
+  });
+
+  for (const gap of [40, 120, 200, 300]) {
+    test(`a second click ${gap} ms after the first chooses nothing while the content is still arriving`, async ({ page }) => {
+      await openCase(page, 'view=menu');
+      const box = (await page.locator('#more-trigger').boundingBox())!;
+      const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+      await page.mouse.click(x, y);
+      await page.waitForTimeout(gap);
+      await page.mouse.click(x, y);
+      await openNow(page);
+      expect(await log(page)).toEqual([]);
+      expect(await isOpen(page)).toBe(true);
+    });
+  }
+
+  for (const key of ['Enter', 'Space']) {
+    test(`${key} held on the trigger opens the menu once and chooses nothing`, async ({ page }) => {
+      await openCase(page, 'view=menu');
+      await page.locator('#more-trigger').focus();
+      await page.keyboard.down(key);
+      await page.keyboard.down(key);
+      await page.keyboard.down(key);
+      await page.keyboard.up(key);
+      await openNow(page);
+      await page.waitForTimeout(200);
+      expect(await log(page)).toEqual([]);
+      expect(await isOpen(page)).toBe(true);
+      expect(await focused(page)).toBe('Copy link');
+    });
+  }
+
+  test('Enter held on an item chooses it once and does not open the menu again', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').focus();
+    await page.keyboard.press('Enter');
+    await openNow(page);
+    await page.keyboard.down('Enter');
+    await page.keyboard.down('Enter');
+    await page.keyboard.down('Enter');
+    await page.keyboard.up('Enter');
+    await expect.poll(() => isOpen(page)).toBe(false);
+    expect(await log(page)).toEqual(['click:copy']);
+    await expect(page.locator('#more-trigger')).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('a second Enter before the content has arrived chooses nothing', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').focus();
+    await page.evaluate(() => {
+      const trigger = document.getElementById('more-trigger')!;
+      trigger.click();
+      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      (document.activeElement as HTMLElement).click();
+    });
+    await openNow(page);
+    expect(await log(page)).toEqual([]);
+    expect(await isOpen(page)).toBe(true);
+  });
+
+  test('a click after the content has arrived still chooses', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    const box = (await page.locator('#more-trigger').boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await openNow(page);
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    expect(await log(page)).toEqual(['click:copy']);
+    await expect.poll(() => isOpen(page)).toBe(false);
+  });
+});
+
+test.describe('dismissal', () => {
 
   test('Escape closes and returns focus to the trigger', async ({ page }) => {
     await openCase(page, 'view=menu');
@@ -212,7 +381,21 @@ test.describe('choice and dismissal', () => {
   });
 });
 
-type Frame = { open: boolean; x: number; y: number; w: number; h: number; radius: number; ink: number; carried: boolean; phase: string | null };
+type Frame = {
+  open: boolean;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  radius: number;
+  ink: number;
+  carried: boolean;
+  phase: string | null;
+  /** The trigger's own lens, body and rim as rendered. */
+  triggerLens: string;
+  triggerBody: string;
+  triggerRim: string;
+};
 
 /** Records the surface on every frame, and right after the element's own click and key handlers. */
 async function record(page: Page, id = 'more'): Promise<void> {
@@ -220,6 +403,7 @@ async function record(page: Page, id = 'more'): Promise<void> {
     const menu = document.getElementById(id)!;
     const list = menu.querySelector<HTMLElement>(':scope > [popover]')!;
     const carrier = menu.querySelector(':scope > vire-icon-button, :scope > vire-button');
+    const button = menu.querySelector<HTMLElement>(':scope > vire-icon-button > button, :scope > vire-button > button');
     const frames: Frame[] = [];
     (window as unknown as { __frames: Frame[] }).__frames = frames;
     const snap = () => {
@@ -235,6 +419,9 @@ async function record(page: Page, id = 'more'): Promise<void> {
         ink: ink === '' ? 1 : Number(ink),
         carried: carrier?.hasAttribute('data-carried') ?? false,
         phase: menu.getAttribute('data-phase'),
+        triggerLens: button ? getComputedStyle(button).backdropFilter : 'none',
+        triggerBody: button ? getComputedStyle(button).backgroundColor : 'rgba(0, 0, 0, 0)',
+        triggerRim: button ? getComputedStyle(button, '::after').visibility : 'hidden',
       });
     };
     document.addEventListener('click', snap);
@@ -336,22 +523,70 @@ test.describe('growth', () => {
   });
 
   test('reopening while it closes turns back from where it is', async ({ page }) => {
+    await slowTime(page);
     await openCase(page, 'view=menu');
-    await record(page);
     await page.locator('#more-trigger').click();
-    await expect(page.locator('#more')).toHaveAttribute('data-phase', 'open');
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(60);
-    const turn = await mark(page);
-    await page.locator('#more-trigger').click({ force: true });
-    await expect(page.locator('#more')).toHaveAttribute('data-phase', 'open');
+    await openNow(page);
+    await record(page);
+    // Counted in frames, not milliseconds, so a slow machine turns back at the same point of the closing.
+    const turn = await page.evaluate(
+      () =>
+        new Promise<number>((resolve) => {
+          const list = document.getElementById('more-list')!;
+          list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          let left = 4;
+          const step = () => {
+            if ((left -= 1) > 0) return requestAnimationFrame(step);
+            document.getElementById('more-trigger')!.click();
+            resolve((window as unknown as { __frames: unknown[] }).__frames.length);
+          };
+          requestAnimationFrame(step);
+        }),
+    );
+    await openNow(page);
     const after = (await frames(page)).slice(turn);
     expect(after.every((f) => f.open)).toBe(true);
     expect(Math.min(...after.map((f) => f.h))).toBeGreaterThan(44);
+    await expect(page.locator('#more-trigger')).toHaveAttribute('aria-expanded', 'true');
   });
 });
 
 test.describe('one body', () => {
+  for (const glass of ['1', 'touch']) {
+    test(`while the menu grows, is out and retracts, the trigger draws no lens, body or rim (glass=${glass})`, async ({ page }) => {
+      const { opening, closing } = await openAndClose(page, `view=menu&glass=${glass}`);
+      const out = [...opening, ...closing];
+      expect(out.length).toBeGreaterThan(10);
+      for (const f of out) {
+        expect(f.carried).toBe(true);
+        expect(f.triggerLens).toBe('none');
+        expect(f.triggerBody).toBe('rgba(0, 0, 0, 0)');
+        expect(f.triggerRim).toBe('hidden');
+      }
+    });
+  }
+
+  test('a trigger whose lens appears only under the finger goes back to no lens at rest', async ({ page }) => {
+    await openCase(page, 'view=menu&glass=touch');
+    const lens = () =>
+      page.locator('#more-trigger').evaluate((el) => {
+        const id = /#([w-]+)/.exec(el.style.backdropFilter)?.[1];
+        const filter = document.getElementById(id ?? '');
+        return {
+          blur: filter?.querySelector('feGaussianBlur')?.getAttribute('stdDeviation') ?? null,
+          displacement: [...(filter?.querySelectorAll('feDisplacementMap') ?? [])].map((d) => d.getAttribute('scale')),
+          shadow: el.style.boxShadow,
+        };
+      });
+    const before = await lens();
+    await page.locator('#more-trigger').focus();
+    await page.keyboard.press('Enter');
+    await openNow(page);
+    await page.keyboard.press('Escape');
+    await expect.poll(() => isOpen(page)).toBe(false);
+    await expect.poll(lens).toEqual(before);
+  });
+
   test('the trigger hands its body over while the menu is out and takes it back', async ({ page }) => {
     await openCase(page, 'view=menu');
     const host = page.locator('#more > vire-icon-button');
@@ -448,6 +683,37 @@ test.describe('the core\'s morph', () => {
     }
     expect(last.morph).toBeNull();
     expect(last.geometry.width).toBeGreaterThan(44 * 3);
+  });
+
+  test('a scroll or a resize while the menu is out costs the lens nothing and lays out once a frame', async ({ page }) => {
+    await page.route('**/vireglass_dom.js*', (route) => route.fulfill({ contentType: 'text/javascript', body: RECORDING_LENS }));
+    await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').click();
+    await openNow(page);
+    const calls = () =>
+      page.evaluate(() => (window as unknown as { __lenses: { id: string; calls: unknown[] }[] }).__lenses.find((l) => l.id === 'more-list')!.calls.length);
+    const before = await calls();
+    const measured = await page.evaluate(
+      () =>
+        new Promise<number>((resolve) => {
+          let toggles = 0;
+          const menu = document.getElementById('more')!;
+          const watch = new MutationObserver((records) => (toggles += records.length));
+          watch.observe(menu, { attributes: true, attributeFilter: ['data-measure'] });
+          for (let i = 0; i < 10; i += 1) {
+            document.dispatchEvent(new Event('scroll'));
+            window.dispatchEvent(new Event('resize'));
+          }
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              watch.disconnect();
+              resolve(toggles);
+            }),
+          );
+        }),
+    );
+    expect(measured).toBe(0);
+    expect(await calls()).toBe(before);
   });
 });
 
@@ -599,6 +865,16 @@ test.describe('forced colours', () => {
     expect(colours.active).toBe(colours.highlight);
     expect(colours.disabled).toBe(colours.gray);
   });
+
+  test('the carried trigger fades with the growth instead of standing over the drop', async ({ page }) => {
+    await page.emulateMedia({ forcedColors: 'active' });
+    await openCase(page, 'atom=menu&state=growing');
+    const button = page.locator('#menu-growing-trigger');
+    await expect(page.locator('#menu-growing > vire-icon-button')).toHaveAttribute('data-carried', '');
+    expect(await button.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(0);
+    await page.locator('#menu-growing').evaluate((el) => el.removeAttribute('data-vire-force-state'));
+    await expect.poll(() => button.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(1);
+  });
 });
 
 test.describe('upgrade while the page is parsed', () => {
@@ -618,6 +894,123 @@ test.describe('upgrade while the page is parsed', () => {
     await expect(page.getByRole('menuitem', { name: 'Three' })).toHaveAttribute('tabindex', '-1');
     await page.getByRole('menuitem', { name: 'Two' }).click();
     expect(await log(page)).toEqual(['click:Two']);
+  });
+});
+
+test.describe('attributes and forced states', () => {
+  test('glass is parsed as on the buttons: "off" or an unknown value is no glass', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    const menu = page.locator('#more');
+    await expect(menu).toHaveAttribute('data-glass', 'on');
+    for (const [value, expected] of [['off', 'off'], ['nonsense', 'off'], ['present', 'on'], ['touch', 'on'], ['', 'on']] as const) {
+      await menu.evaluate((el, v) => el.setAttribute('glass', v), value);
+      await expect(menu, value).toHaveAttribute('data-glass', expected);
+    }
+    await menu.evaluate((el) => el.removeAttribute('glass'));
+    await expect(menu).toHaveAttribute('data-glass', 'off');
+  });
+
+  test('taking a forced state away closes the menu and resets aria-expanded', async ({ page }) => {
+    await openCase(page, 'atom=menu&state=open');
+    const trigger = page.locator('#menu-open-trigger');
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    await page.locator('#menu-open').evaluate((el) => el.removeAttribute('data-vire-force-state'));
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(await isOpen(page, 'menu-open')).toBe(false);
+  });
+
+  test('the list\'s own toggle event fires once the growth has run back, aria-expanded as the closing begins', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').click();
+    await openNow(page);
+    const order = await page.evaluate(
+      () =>
+        new Promise<string[]>((resolve) => {
+          const out: string[] = [];
+          const list = document.getElementById('more-list')!;
+          const trigger = document.getElementById('more-trigger')!;
+          new MutationObserver(() => out.push('expanded=' + trigger.getAttribute('aria-expanded'))).observe(trigger, {
+            attributes: true,
+            attributeFilter: ['aria-expanded'],
+          });
+          list.addEventListener('toggle', (e) => {
+            out.push('toggle=' + (e as ToggleEvent).newState + '@' + (list.getBoundingClientRect().height < 45 ? 'trigger' : 'menu'));
+            resolve(out);
+          });
+          list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        }),
+    );
+    expect(order).toEqual(['expanded=false', 'toggle=closed@trigger']);
+  });
+});
+
+// A closed shadow root hides everything inside it from a listener on the document.
+test.describe('inside a closed shadow root', () => {
+  type Shadow = { root: ShadowRoot; picks: string[] };
+
+  async function shadowMenu(page: Page) {
+    await openCase(page, 'view=menu&glass=1');
+    await page.evaluate(() => {
+      const host = document.createElement('div');
+      host.id = 'shadow-host';
+      host.style.cssText = 'position:absolute;left:420px;top:300px;width:420px;height:320px';
+      document.body.append(host);
+      const root = host.attachShadow({ mode: 'closed' });
+      root.innerHTML =
+        '<div id="pad" style="position:absolute;inset:0;background:#eef"></div>' +
+        '<vire-menu id="shadow-menu" glass style="position:absolute;left:24px;top:24px">' +
+        '<vire-icon-button glass><button id="shadow-trigger" type="button" popovertarget="shadow-list" aria-label="More">M</button></vire-icon-button>' +
+        '<div id="shadow-list" popover>' +
+        '<button type="button" popovertarget="shadow-list" popovertargetaction="hide">Copy link</button>' +
+        '<button type="button" popovertarget="shadow-list" popovertargetaction="hide">Rename</button>' +
+        '</div></vire-menu>';
+      const shadow = { root, picks: [] as string[] };
+      (window as unknown as { __shadow: typeof shadow }).__shadow = shadow;
+      root.getElementById('shadow-list')!.addEventListener('click', (e) => shadow.picks.push((e.target as HTMLElement).textContent!));
+    });
+    await page.waitForFunction(() => /url\(/.test((window as unknown as { __shadow: { root: ShadowRoot } }).__shadow.root.getElementById('shadow-list')!.style.backdropFilter));
+  }
+  const centreOf = (page: Page, id: string, label?: string) =>
+    page.evaluate(
+      ([id, label]) => {
+        const root = (window as unknown as { __shadow: { root: ShadowRoot } }).__shadow.root;
+        const el = label ? [...root.getElementById(id)!.querySelectorAll('button')].find((b) => b.textContent === label)! : root.getElementById(id)!;
+        const r = el.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      },
+      [id, label] as const,
+    );
+  const state = (page: Page) =>
+    page.evaluate(() => {
+      const { root, picks } = (window as unknown as { __shadow: Shadow }).__shadow;
+      return {
+        open: root.getElementById('shadow-list')!.matches(':popover-open'),
+        phase: root.getElementById('shadow-menu')!.getAttribute('data-phase'),
+        picks: [...picks],
+      };
+    });
+
+  test('a choice inside it is a choice, and a press elsewhere in it or outside it dismisses', async ({ page }) => {
+    await shadowMenu(page);
+    const trigger = await centreOf(page, 'shadow-trigger');
+    const openIt = async () => {
+      await page.mouse.click(trigger.x, trigger.y);
+      await expect.poll(async () => (await state(page)).phase).toBe('open');
+    };
+    await openIt();
+    const rename = await centreOf(page, 'shadow-list', 'Rename');
+    await page.mouse.click(rename.x, rename.y);
+    expect((await state(page)).picks).toEqual(['Rename']);
+    await expect.poll(async () => (await state(page)).open).toBe(false);
+
+    await openIt();
+    await page.mouse.click(800, 600);
+    await expect.poll(async () => (await state(page)).open).toBe(false);
+
+    await openIt();
+    await page.mouse.click(60, 650);
+    await expect.poll(async () => (await state(page)).open).toBe(false);
+    expect((await state(page)).picks).toEqual(['Rename']);
   });
 });
 

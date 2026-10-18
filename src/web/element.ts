@@ -93,6 +93,7 @@ export function createControlElementClass(
     #morph: GlassMorph | null = null;
     #sample: BackdropSample | null = null;
     #carried: number | null = null;
+    #hadStyle = { host: false, control: false };
 
     get a11y(): A11yOverride {
       return this.#own;
@@ -123,8 +124,9 @@ export function createControlElementClass(
       this.toggleAttribute('data-carried', this.#carried !== null);
       if (this.#carried === null) this.style.removeProperty('--vk-carry');
       else this.style.setProperty('--vk-carry', this.#carried.toFixed(3));
-      // The lens materialises out rather than being removed, so taking the body back is one synchronous repaint.
-      if (handedOver) this.#glass?.setAppear(this.#carried === null ? 1 : 0);
+      // The lens materialises out rather than being removed, so taking the body back is one synchronous repaint;
+      // a lens that appears only under the finger goes back to absent.
+      if (handedOver) this.#glass?.setAppear(this.#carried === null && this.#glassMode() !== 'touch' ? 1 : 0);
     }
 
     connectedCallback(): void {
@@ -135,6 +137,7 @@ export function createControlElementClass(
         Reflect.deleteProperty(this, key);
         Reflect.set(this, key, value);
       }
+      this.#hadStyle.host = this.hasAttribute('style');
       ensureStyles(this, options.nonce);
       this.#cleanups.push(watchCoarsePointer(() => this.#onInputChange()));
       this.#cleanups.push(watchSystemA11y(() => this.#refreshMode()));
@@ -148,12 +151,14 @@ export function createControlElementClass(
       clearTimeout(this.#suppressTimer);
       this.#frame = 0;
       this.#dropGlass();
+      if (this.#control && !this.#hadStyle.control && this.#control.getAttribute('style') === '') this.#control.removeAttribute('style');
       this.#control = null;
       this.#state = CONTROL_IDLE;
       this.#suppressClick = false;
       this.#carried = null;
       for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-size', 'data-carried']) this.removeAttribute(name);
       for (const name of Array.from(this.style)) if (name.startsWith('--vk-')) this.style.removeProperty(name);
+      if (!this.#hadStyle.host && this.getAttribute('style') === '') this.removeAttribute('style');
       this.#presentation = null;
       this.#mode = null;
     }
@@ -191,6 +196,7 @@ export function createControlElementClass(
 
     #upgrade(control: HTMLButtonElement): void {
       this.#control = control;
+      this.#hadStyle.control = control.hasAttribute('style');
       this.setAttribute('data-vk', '');
       this.#caps = isCoarsePointer() ? TOUCH_INPUT : POINTER_INPUT;
       this.#listen(control);
