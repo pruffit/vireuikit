@@ -45,3 +45,63 @@ export async function centerOf(locator: Locator): Promise<{ x: number; y: number
   const box = (await locator.boundingBox())!;
   return { x: box.x + box.width / 2, y: box.y + box.height / 2, box };
 }
+
+export type MediaInput = { pointer: 'fine' | 'coarse'; anyCoarse: boolean; anyHover: boolean };
+
+/**
+ * Answers the input media queries the way a given device would, through the real `matchMedia` path, and lets a test
+ * change them live (`window.__input.set`). Playwright's touch emulation turns every one of them coarse at once, so a
+ * laptop with a touch screen (a fine primary pointer with touch present) cannot be emulated otherwise.
+ */
+export async function emulateInput(page: Page, input: MediaInput): Promise<void> {
+  await page.addInitScript((init: MediaInput) => {
+    const state = { ...init };
+    const real = window.matchMedia.bind(window);
+    const answers: Record<string, () => boolean> = {
+      '(pointer: coarse)': () => state.pointer === 'coarse',
+      '(pointer: fine)': () => state.pointer === 'fine',
+      '(any-pointer: coarse)': () => state.pointer === 'coarse' || state.anyCoarse,
+      '(any-pointer: fine)': () => state.pointer === 'fine',
+      '(hover: hover)': () => state.pointer === 'fine' && state.anyHover,
+      '(any-hover: hover)': () => state.anyHover,
+    };
+    const lists: { query: string; list: EventTarget }[] = [];
+    class FakeList extends EventTarget {
+      constructor(readonly media: string) {
+        super();
+      }
+      get matches() {
+        return answers[this.media]!();
+      }
+      onchange = null;
+      addListener(cb: EventListener) {
+        this.addEventListener('change', cb);
+      }
+      removeListener(cb: EventListener) {
+        this.removeEventListener('change', cb);
+      }
+    }
+    window.matchMedia = (query: string) => {
+      if (!(query in answers)) return real(query);
+      const list = new FakeList(query);
+      lists.push({ query, list });
+      return list as unknown as MediaQueryList;
+    };
+    (window as unknown as { __input: { set(next: Partial<MediaInput>): void } }).__input = {
+      set(next) {
+        Object.assign(state, next);
+        for (const { list } of lists) list.dispatchEvent(new Event('change'));
+      },
+    };
+  }, input);
+}
+
+/** Opens the adaptive stage with a viewport that holds its window. */
+export async function openStage(page: Page, query: string, size?: { width: number; height: number }): Promise<void> {
+  if (size) await page.setViewportSize({ width: Math.max(size.width + 24, 400), height: Math.max(size.height + 24, 400) });
+  await openCase(page, `view=adaptive&${query}`);
+  await page.waitForFunction(() => window.__adaptive?.ctx() !== null && window.__adaptive.settled());
+  await nextFrame(page);
+}
+
+export { nextFrame };

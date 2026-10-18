@@ -1,4 +1,4 @@
-# Acceptance: button, icon button and menu
+# Acceptance: button, icon button, menu and the adaptive model
 
 Each criterion is written in the kit's own words from the reference analysis. Sources are cited by code and
 timestamp (`M 3:52`), and this is the one place the codes are defined:
@@ -12,11 +12,22 @@ timestamp (`M 3:52`), and this is the one place the codes are defined:
 | B | Tech Talk 111462, "Raise the bar with iPhone Duo" |
 | H | Apple HIG ("Materials", "Color") and the SwiftUI `Glass` documentation |
 | W | WCAG 2.2 |
+| I | WWDC25 session 208, "Elevate the design of your iPad app" |
+| K | WWDC25 session 282, "Make your UIKit app more flexible" |
+| Q | WWDC25 session 256, "What's new in SwiftUI" |
+| U | WWDC25 session 323, "Build a SwiftUI app with the new design" |
+| G | Material 3: Breakpoints, Layout, Navigation bar and rail, Toolbars, Menus, Search, Bottom and side sheets, Dialogs, List-detail |
+| J | Android Developers: window size classes, adaptive navigation, canonical layouts, foldables and fold awareness, input compatibility on large screens |
+| F | Microsoft Learn (WinUI): NavigationView, command bar, dialogs and flyouts, screen sizes and breakpoints, input devices |
+| E | The web platform: Media Queries 4 and 5, CSS Environment Variables 1, the Viewport Segments API, the Device Posture API |
+
+H also covers the HIG's layout, tab bar, sidebar, toolbar, popover, sheet and search field pages and the UIKit and
+SwiftUI presentation documentation. On I, K, Q and U only chapters carry times, so their timestamps are approximate (≈).
 
 How a criterion is checked:
 
 - **unit** — a test in `src/__tests__/`;
-- **behaviour** — a Playwright test in `tests/lab/behavior.spec.ts` (`npm run check:lab`, runs in CI);
+- **behaviour** — a Playwright test in `tests/lab/*behavior.spec.ts` (`npm run check:lab`, runs in CI);
 - **snapshot** — a baseline in `tests/lab/__screenshots__/<platform>/` (`npm run check:lab:visual`, local, Windows
   baselines only);
 - **side-by-side** — a visual comparison with the reference at the cited timestamp. It is not measurable, and
@@ -35,7 +46,7 @@ How a criterion is checked:
 | Nested radius | outer radius minus the gap, optional floor | D 3:53, M 7:53 (`nestedRadius`, backed by `concentricRadius` from `vireglass`). |
 | Icon box | height / 2 | **Derived:** the glyph fills half the body and leaves a quarter of the height on each side, which is exactly 6 dp at the smallest tier; the unit test requires at least 6. |
 | Button horizontal padding | 10 / 14 / 18 / 22 / 20 dp (small … xlarge, touch) | **Derived:** about 0.45 × height, so the label starts after the curve of a capsule. The reference has no padding figures. |
-| Hit area | 44 dp on a coarse pointer for every tier, 24 dp on a fine one | HIG; W 2.5.8. The body keeps its size; the hit area reaches past it. The Android client raises the finger floor to 48. |
+| Hit area | 44 dp wherever any coarse input is present, for every tier; 24 dp with fine pointers only | HIG; W 2.5.8. The body keeps its size; the hit area reaches past it. The Android client raises the finger floor to 48. Which tier the layout uses is the primary pointer's (AD2). |
 | Press growth | 18 % icon button, 6 % button | **Chosen** from M 3:51–3:52: the lifted icon button visibly grows by about a fifth, and S says the lift exists because the finger covers a small target, so the button, which sinks, grows less. |
 | Menu row | the tier's height (44 dp at touch) | **Measured**, M 5:11: the rows are 287.5 px apart in a frame where the toolbar they grew from is 282 px tall (44.9 dp at 44). |
 | Menu padding | 0.3 × the row: 7 / 10 / 12 / 14 / 13 dp (small … xlarge, touch) | **Measured**, M 5:11: the first glyph's centre is 34.6 dp below the top edge and 33.8 dp in from the leading edge, which is the padding plus half a row, so 12 to 13 dp at 44. |
@@ -65,7 +76,7 @@ A button is an action: nothing grows out of it, and it sinks under press rather 
 | B5 | A button that is an action does not grow into anything; it grows only when it is the trigger of a `<vire-menu>`, and then the menu grows out of it (N8). `setMorph` exists on both elements as a hook for a host, but nothing in the kit calls it. | unit (`pressResponse` only grows the body); `setMorph` itself is not tested |
 | B6 | The press is cancelled when the pointer leaves, and releasing outside does not activate. | unit; behaviour "the pointer leaving cancels the press" |
 | B7 | A release outside never swallows a later click: a keyboard or scripted click, and a real click, still fire. | behaviour "after a release outside…", "a release outside followed by a real click…" |
-| B8 | Hover exists only with a cursor; keyboard focus draws a ring on any device (W 2.4.7), a click does not. A key press does not stay held when focus moves away. | unit; behaviour "hover comes with the cursor", "keyboard focus shows the ring…", "a key shows the focus ring even though the pointer is coarse", "a key press does not stick…" |
+| B8 | Hover comes from the pointer that entered: a mouse or a pen hovers on any device, a finger never does (AD3); keyboard focus draws a ring on any device (W 2.4.7), a click does not. A key press does not stay held when focus moves away. | unit; behaviour "hover comes with the cursor", "a mouse on a touch-first device hovers", "a finger never hovers…", "keyboard focus shows the ring…", "a key shows the focus ring even though the pointer is coarse", "a key press does not stick…" |
 | B9 | Disabled stays glass but stops asserting itself: a quarter of the resting body, dimmed ink, no response, cannot be activated. | unit; behaviour "a disabled control cannot be activated"; snapshot of the disabled state |
 | B10 | It works before the glass: the native button clicks, submits its form, is named and focusable with no element defined; a button that already has keyboard focus shows the ring as it upgrades. | behaviour "before the upgrade" |
 | B11 | Upgrading while the page is still being parsed adopts the single native button; none is synthesized. | behaviour "upgrade while the page is parsed" (elements defined by a script before the markup) |
@@ -78,7 +89,7 @@ A button is an action: nothing grows out of it, and it sinks under press rather 
 | B18 | Reduced motion: springs are instant, the press response itself stays (M 18:35). | unit; behaviour "reduced motion makes the press instant" against "the same press without it is still moving one frame in" |
 | B19 | The system settings are followed live, and a setting made on the page beats them. | behaviour "the system setting is followed…" (reduced motion only), "a setting made on the page changes live elements" |
 | B20 | Appearance goes by modulating the lens, never by fading the element (M 2:55). | the element never animates opacity; the touch-only variant uses `setAppear`. Not gated. |
-| B21 | The hit area meets the target floor on a coarse pointer without changing layout, and a tap in it is exactly one click, seen once on the host and once on the button. | behaviour "hit area on a coarse pointer" (including "a tap in the hit area is exactly one click…"), "hit area on a fine pointer" |
+| B21 | The hit area meets the target floor wherever a coarse input is present, without changing layout (AD2), and a tap in it is exactly one click, seen once on the host and once on the button. | behaviour "hit area on a coarse pointer" (including "a tap in the hit area is exactly one click…"), "hit area on a fine pointer", "a laptop with a touch screen keeps the pointer tier…" |
 | B22 | The element cleans up: removing it removes its lens and its filter; reconnecting upgrades again. | behaviour "removing the element removes its lens and its filter", "connecting again…" |
 | B23 | Edge light and the rim's strength, adaptive shadow, dispersion, backdrop blur at the rim: the material's, not the kit's. | owned by `vireglass`; visible in the snapshots, not asserted here beyond B27 |
 | B24 | If the lens cannot be loaded or attached, the control falls back to the plain surface (frosted under reduced transparency), stays clickable, raises no unhandled error, and the next change retries the attach. | behaviour "a lens that fails to attach" (an aborted module request; an `attachGlass` that throws, counting the retries) |
@@ -122,7 +133,7 @@ button or a bare `<button>`; it grows only because it opens a menu (B5). Behavio
 | N7 | There is no way to choose and stay open. | by construction (no such option); unit (`choose` always closes) |
 | N8 | The glass grows out of the trigger: the surface's first frame is the trigger's body (box and radius), it contracts into a drop smaller than the trigger, the drop grows into the menu with a small overshoot, and the content comes into focus only near size (M 5:11, frame by frame; M 5:05 "the bubble simply pops open to reveal the content"). | unit (frames at the boundaries, the drop, the overshoot, the ink); behaviour "the surface starts on the trigger, passes a drop and lands on the menu", canary "a menu that pops open without growing fails it" |
 | N9 | The timing is the reference's: the drop forms in about 0.10 s, the menu is at size at about 0.3 s and overshoots by about 3.5 % at about 0.37 s; closing reaches the drop at about 0.25 s and is back in the trigger at about 0.42 s (M 5:11, "Against the reference"). | unit `DEFAULT_GROWTH_TIMING` against these numbers |
-| N10 | It stays under the finger: the menu shares the trigger's corner that points to the nearest viewport corner and grows into the open space, covering the trigger; it flips or slides only to stay in the viewport, and `corner` fixes the corner (S: the button morphs into the menu so that the grip does not change). | unit `menuPlacement`; behaviour "the menu pins to the trigger's corner" |
+| N10 | It stays under the finger: the menu shares the trigger's corner that points to the nearest corner of its region (the trigger's segment of the window, AD23) and grows into the open space, covering the trigger; it flips or slides only to stay in that region, and `corner` fixes the corner (S: the button morphs into the menu so that the grip does not change). | unit `menuPlacement`; behaviour "the menu pins to the trigger's corner" |
 | N11 | Closing retraces the growth: the content defocuses first, the menu flows back into a drop and the drop into the trigger, ending on the trigger's body; reopening midway turns back from where it is. | unit (reverse path, turning back); behaviour "closing runs back through the drop into the trigger" |
 | N12 | One body: on every frame the menu is out (growing, open, retracting) the trigger draws no lens, no body and no rim of its own and takes no pointer events, and its glyph goes out of focus as the growth begins, so there is never glass on glass; it takes the body back when the menu has retracted into it, and a trigger whose lens appears only under the finger goes back to no lens (M 13:24; M 5:11, the toolbar's glyphs defocus as it gathers into the drop). Under forced colours the trigger fades with its glyph. | behaviour "while the menu grows, is out and retracts, the trigger draws no lens, body or rim" (sampled every frame, glass on and `touch`), "the trigger hands its body over and takes it back", "a trigger whose lens appears only under the finger…", "the carried trigger fades…"; snapshots `menu-*` |
 | N13 | Glass only on the menu's surface: the items are content on it and carry no lens, and the active item's highlight is ink on the glass (the nearer half of a press), concentric with the menu. | unit `menuItemFill`; behaviour "the surface is the only lens"; snapshots |
@@ -287,9 +298,74 @@ to the core's lens that moves the body or the rim fails it in either direction.
   from declared backgrounds. A host that knows its backdrop sets `sample` on the element (B29), which goes to the
   lens's `setSample`; the lab does this for its photo and reference backdrops instead of declaring their mean colour.
 
+## Adaptive model
+
+What each atom and pattern becomes across window classes, input and posture. The model is `src/kit/adaptive`
+(`docs/design.md`, "The adaptive layer"). It rests on decisions taken for VireMusic on 18.10.2026: a menu grows out of
+its trigger on every class and a long pick is a sheet; search is a button at the bar's end on compact, a rail item on
+medium and expanded and a persistent field from large; the bottom transport stays on every class, with a supporting
+pane beside the content from large and over it on expanded; a rail on medium with one pane and on a compact height, a
+bar on a compact width and in tabletop, a sidebar from large; foldables get postures; four primary destinations and a
+search button, no "More". Behaviour tests are in `tests/lab/adaptive-behavior.spec.ts` (the stage) and
+`tests/lab/input-behavior.spec.ts` (the atoms' input layers and a real fold).
+
+| # | Criterion | Check |
+|---|---|---|
+| AD1 | Classes come from the window, never the device: width compact below 600 dp, medium to 839, expanded to 1199, large to 1599, xlarge from 1600; height compact below 480, medium to 899, expanded from 900 (G Breakpoints; J; H Layout: "not device type or orientation"). Orientation is not an input. | unit "width boundaries…", "height boundaries…"; behaviour "a view is addressed by its URL…" |
+| AD2 | Input is three layers: the size tier follows the primary pointer, the hit area any coarse input, hover the event; a keyboard changes neither tier nor hit area (E MQ4: `pointer` describes the primary only; S Apple: iPad stays touch first; I ≈8:40). A laptop with a touch screen gets the pointer tier (32 dp) with a 44 dp hit area. | unit "density follows the primary pointer…", canary "one coarse flag cannot give…"; behaviour "a laptop with a touch screen keeps the pointer tier…" (stubbed media queries, the system path), canary "a single coarse flag fails that gate whichever way it reads", "a phone gets the finger tier…", "a device that gains or loses touch moves the hit area…", "the real atoms take the tier from the primary pointer…" |
+| AD3 | Hover is the event's: a mouse on a touch-first device hovers, a finger never does, and a device that can no longer hover drops a hover that is showing while a held press stays. | unit "hover is the event's"; behaviour "a mouse on a touch-first device hovers", "a finger never hovers, even where the pointer is primary", "a hover that is showing goes…" |
+| AD4 | A hardware keyboard is learned from a key pressed outside a field; typing into a field does not count, a field inside an open shadow root included, because an on-screen keyboard types only there (E MQ4: no query exists). | behaviour "is known from a key pressed outside a field…" |
+| AD5 | A host or a simulation overrides the input layers live (`setInputOverride`); a key set to `undefined` follows the system again. | behaviour "the input override beats the system…" |
+| AD6 | Posture: tabletop is a horizontal fold, book a vertical one; on the web two viewport segments count as half-open, since there is no hinge angle (E Viewport Segments; J fold-aware). An occluding band belongs to neither segment, a line splits at its centre; segments and posture convert both ways. | unit "posture and segments" |
+| AD7 | Navigation's form: a bar on a compact width and in tabletop; a rail on medium with one pane, on expanded and on any compact height below large, whatever the window's proportions; a sidebar from large; medium with two panes takes the bar, except in book posture, where the rail stays; a sidebar the person collapsed stays a rail until they expand it (decision 4; G Navigation bar, rail; J adaptive navigation; F NavigationView). | unit "navigation"; behaviour, one test per preset |
+| AD8 | The same primary destinations on every form, at most five bar slots with the search button, the rest secondary; secondary destinations show only in the sidebar; there is no "More" (decision 6; H Tab bars; G Navigation rail). | unit "the same destinations on every form…" |
+| AD9 | Search: a button at the bar's trailing end, a rail item, a persistent field from large (in the sidebar, or the toolbar's corner with the sidebar collapsed); a shortcut wherever there is a keyboard and from large (decision 2; Q ≈4:12; S Slack; I ≈10:24). | unit "search: …"; behaviour per preset (`data-search`) |
+| AD10 | Navigation is one body: through a sweep from 360 to 1600 dp and back the stage has one navigation element on every frame, and its form flows bar, rail, sidebar, rail, bar (M 8:35–8:47; I ≈1:25). | behaviour "a sweep across every breakpoint and back keeps one navigation body…" |
+| AD11 | A class change is a morph on the growth's springs (the menu's opening response, critically damped so a layout does not bounce off the window's edge): no frame covers 40 % of the change. | unit "moves at the growth's pace…", "every frame is one box between the two…"; behaviour (the same sweep, largest step below 0.4), canary "a navigation that swaps form in one frame fails the morph gate" (above 0.9) |
+| AD12 | Turned back mid-way, a morph runs back from where it is and never reaches the other form; a third form starts from the current box (N11). | unit "turned back mid-way…", "a third form mid-way…"; behaviour "turned back mid-way, the body runs back…" |
+| AD13 | Reduced motion: the new form is there in the next frame (B18, N18). | unit "under reduced motion…"; behaviour "under reduced motion the new form is there in the next frame" |
+| AD14 | State is indestructible: the section, the selection, the list's scroll, typed text and an open sheet survive every threshold of a sweep, a fold and unfold and a rotation (I ≈1:25; D 13:43; J foldables). | behaviour "the section, the selection, the list's scroll…" |
+| AD15 | A menu grows out of its trigger on every class; a long pick is a sheet (`picker`), never a menu (decision 1; M 5:11; S). | unit "a menu grows out of its trigger on every class", "a modal task is a bottom sheet…" |
+| AD16 | A popover is a bottom sheet grown from its source below 600 dp and a popover from 600 (H `UIModalPresentationStyle.popover`; S Tide Guide). | unit "a popover is a sheet grown…"; behaviour "a popover becomes a sheet grown from its source below 600…" |
+| AD17 | A supplementary sheet is a bottom sheet below 840 dp (at most 640 wide on medium), a side sheet that narrows the content from 840 (at most 400), and a third pane from 1600 (G Bottom sheets, Side sheets, Large and extra-large). | unit "a supplementary sheet is…"; behaviour "an open sheet changes form at 840 and 1600 and back…" (widths measured) |
+| AD18 | A modal task or a picker is a bottom sheet below 600 dp and a centred sheet from 600, at most 560 wide (G Dialogs; U ≈6:20). | unit "a modal task is a bottom sheet below 600…" |
+| AD19 | A dialog with fields is full screen below 600 dp and a basic dialog from 600; an alert is an alert on every class (G Dialogs: "full-screen dialogs are for compact breakpoints only"). | unit "a dialog with fields…"; behaviour "…a dialog with fields is full screen below 600" |
+| AD20 | On a compact height every bottom or centred sheet is full screen; a side sheet is full height already and stays (H `presentationCompactAdaptation`). | unit "on a compact height every bottom or centred sheet is full screen…"; behaviour "…full screen on a compact height" |
+| AD21 | An open surface stays open through a change of form; only one whose anchor is gone retracts into the anchor's new owner and closes. Fluent closes flyouts on a resize; that is not taken (F Dialogs and flyouts; H popover adaptation). | unit "describes what flows into what…"; behaviour "an open sheet… stays open", the state test |
+| AD22 | No surface crosses the fold: it lives in its source's segment, or the largest one without a source; a side sheet in book posture takes the trailing segment, in tabletop its source's half like every other surface (J Learn about foldables). | unit "a surface never crosses the fold…", "in tabletop a side sheet stays in its source's half…", "a surface lives in its source's segment…" |
+| AD23 | A menu is placed in its trigger's segment, pinned to the corner facing that segment's nearest corner, and every frame of its growth stays in the segment, the overshoot included; a menu taller than its segment scrolls inside it. | unit "a menu near the fold pins to the corner facing its own segment…", "every frame of the growth stays in the region…", "a menu opened in either half of a folded window never crosses the fold" (400 random cases per posture and band); behaviour on a real fold from the DevTools display feature: "beside a vertical fold it stays in its trigger's segment on every frame…", "above a horizontal fold a menu taller than its segment scrolls…", canary "without the segments the same menu crosses where the fold would be"; on the stage: "in book posture…", "in tabletop…", canary "a window that reports no fold lets the same menus cross it" |
+| AD24 | List-detail: one pane below 840 dp and on a compact height; two from 840 with a 360 dp list, 412 from 1200; a medium window halves only for sparse content; book posture splits the panes at the fold (J canonical layouts; G List-detail). | unit "one pane below 840…", "a medium window splits in half only for sparse content…", "book posture splits the panes along the fold…"; behaviour per preset (list width measured), "a half-open posture…" |
+| AD25 | Narrowing keeps the detail when something is selected and the person is on it, the list otherwise; widening shows the list with the selection drawn, or the detail's empty state; back exists only on a lone detail (J; K ≈5:00). | unit "narrowing keeps the detail…", "widening shows the list…" |
+| AD26 | The supporting pane is beside the content from large (at most 400 dp), over it on expanded when opened, hidden below, and the person's choice to keep it is remembered, so it returns when the window widens (decision 3; J supporting pane). | unit "the supporting pane…", "a sweep down and back up returns the supporting pane…"; behaviour "a supporting pane shown beside the content hides below large and comes back…" |
+| AD27 | The bottom accessory sits above the bar, in the bar's row once the bar minimises (transport only), and along the bottom of the content beside a rail or a sidebar (H Tab bars, bottom accessory; decision 3). | unit "the bottom accessory sits above the bar…" |
+| AD28 | A toolbar fits its container: separate capsules, then neighbours merge (text never with symbols, groups only within themselves), then the lowest priority goes into "…" first, the trailing one among equals; a badged item and the main action never overflow, and the main action is at the trailing end; "…" exists only for overflow; every item stays reachable at every width, and a wider container never shows fewer (M 4:43; H Toolbars; B 11:40; D 9:41–10:05). | unit "toolbar layout" (every width from 0 to 520 dp) |
+| AD29 | The window places the toolbar: at the bottom on compact with at most three groups, at the pane's top above that, in a trailing vertical strip on a compact height, where text stays in a horizontal row (B 0:28; D: text buttons do not stand vertical). | unit "the window places it…", "vertical: symbols stand in the strip…"; behaviour per preset (toolbar edge) |
+| AD30 | Tabletop splits what is watched (above the fold) from its controls (below), book the leading half from the trailing; the bar sits in tabletop's bottom half (J fold-aware; J adaptive navigation). | unit "a half-open posture splits watched content…"; behaviour "a half-open posture: tabletop puts the bar in the bottom half…" |
+| AD31 | While the window is dragged no lens is rebuilt or reshaped: the atoms keep their geometry across every class (K ≈14:44: re-rendering for every size within a resize is unnecessary). | behaviour "the lenses are neither rebuilt nor reshaped…" (a recording stand-in for `vireglass/dom`; a press afterwards still reaches it) |
+| AD32 | The stage shows every preset at its URL: the real atoms in their forms and the unbuilt patterns as outlines placed by the model. | behaviour per preset; snapshots `adaptive-*` (phone portrait and landscape, book with a popover, tabletop, tablet landscape with a side sheet, desktop with the supporting pane) |
+
+Side-by-side: the vertical strip of a toolbar and of panes on the folding phone's inner screen in landscape (B 0:28,
+5:56) against the stage's `preset=phone-landscape`. The sidebar flowing into the tab bar (I ≈1:25) and the tab bar's
+bottom accessory (H Tab bars) have no local frames yet.
+
 ## What is not covered
 
 - Switch, slider, segmented control, chip, field; the Android target (`src/native/` does not exist yet).
+- The adaptive patterns themselves: navigation, sheet, popover, toolbar and search field are outlines on the stage,
+  placed by the model; their elements come next (`docs/design.md`, "Order"). Only the navigation and the open surface
+  morph on the stage; panes move to their new boxes at once.
+- A surface whose anchor goes into overflow: the model says it retracts and closes (AD21); `<vire-menu>` does not yet
+  see its trigger leave, which arrives with the toolbar.
+- A dialog with fields on a compact height stays a basic dialog from 600 dp, by width only as Material has it; whether
+  it should go full screen there like a sheet is open.
+- In tabletop a list-detail keeps its panes side by side across the fold by the class rules; only the bar and the
+  surfaces respect the halves.
+- The context menu on a secondary click or a long press, the on-screen keyboard's inset and the window controls
+  overlay (`titlebar-area`) are not modelled.
+- The keyboard heuristic (AD4) counts an on-screen keyboard that sends keys outside a field as a hardware one, and
+  one typing into a field inside a closed shadow root, which the document cannot see into.
+- Postures are simulated: on the stage through `setViewportOverride`, in the browser through the DevTools display
+  feature; no device was used.
 - `accent` tinting for the one primary action: nothing in the kit sets it.
 - `glass="touch"` (glass only under the finger): wired through `vireglass`'s interactive variant, not tested.
 - `setMorph` on the button and the icon button: a hook for a host that nothing in the kit calls. The menu morphs its

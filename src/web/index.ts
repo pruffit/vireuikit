@@ -3,6 +3,16 @@ import { createMenuElementClass } from './menu';
 
 export { getA11yOverride, setA11yOverride, systemA11y } from './a11y';
 export type { VireControlElement } from './element';
+export {
+  effectiveInput,
+  getInputOverride,
+  setInputOverride,
+  setViewportOverride,
+  systemInput,
+  viewportSegments,
+  watchAdaptiveContext,
+} from './environment';
+export type { InputOverride, ViewportOverride } from './environment';
 export type { VireMenuElement } from './menu';
 export { STYLES } from './styles';
 

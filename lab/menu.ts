@@ -54,7 +54,8 @@ export const SHARE_ITEMS: readonly MenuItemSpec[] = [
 export function makeMenu(spec: MenuSpec): HTMLElement {
   const menu = document.createElement('vire-menu');
   menu.id = spec.id;
-  menu.setAttribute('size', spec.size);
+  // An empty size leaves the tier to the input, as a host that sets none would.
+  if (spec.size) menu.setAttribute('size', spec.size);
   if (spec.glass !== '0') menu.setAttribute('glass', '');
   if (spec.force) menu.setAttribute('data-vire-force-state', spec.force);
   if (spec.corner) menu.setAttribute('corner', spec.corner);
@@ -74,7 +75,7 @@ export function makeMenu(spec: MenuSpec): HTMLElement {
     menu.append(trigger);
   } else {
     const host = document.createElement(spec.trigger.kind === 'icon' ? 'vire-icon-button' : 'vire-button');
-    host.setAttribute('size', spec.size);
+    if (spec.size) host.setAttribute('size', spec.size);
     if (spec.glass !== '0') host.setAttribute('glass', spec.glass === 'touch' ? 'touch' : 'present');
     host.append(trigger);
     if (spec.sample) (host as VireControlElement).sample = spec.sample;

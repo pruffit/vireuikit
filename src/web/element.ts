@@ -2,10 +2,9 @@ import { VIREGLASS_CONTROL_MATERIAL, type BackdropSample, type VireGlassMaterial
 import type { GlassMorph } from 'vireglass/dom';
 import { presentationFor, sameA11y, type A11yMode, type A11yOverride, type Presentation } from '../kit/a11y';
 import { atomBody, atomMaterial, type VireUIKitAtomKind } from '../kit/atom';
+import { hitTarget, hoversWith, sizeTier } from '../kit/adaptive/input';
 import {
   CONTROL_IDLE,
-  POINTER_INPUT,
-  TOUCH_INPUT,
   stepControl,
   type ControlEvent,
   type ControlState,
@@ -18,18 +17,10 @@ import {
   visualAtomState,
 } from '../kit/behavior/visual';
 import { pressResponse } from '../kit/response';
-import {
-  BUTTON_SIZES,
-  CONTROL_SIZES,
-  defaultSize,
-  hitSlop,
-  iconButtonSize,
-  minTarget,
-  type ControlSize,
-} from '../kit/sizes';
+import { BUTTON_SIZES, CONTROL_SIZES, hitSlop, iconButtonSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
+import { effectiveInput, watchPointerInput } from './environment';
 import { attachControlGlass, type GlassSession } from './glass';
-import { isCoarsePointer, watchCoarsePointer } from './input';
 import { ensureStyles } from './styles';
 
 type GlassMode = 'present' | 'touch' | 'off';
@@ -51,6 +42,9 @@ type ForcedState = keyof typeof FORCED;
 const MATERIAL_STEPS = 10;
 // How long after a release outside the button its click is still treated as that release's.
 const SUPPRESS_MS = 100;
+// Hover is the event's: the pointer that entered decides it, not the device's primary pointer.
+const HOVER: InputCaps = { hover: true };
+const NO_HOVER: InputCaps = { hover: false };
 
 export interface VireControlElement extends HTMLElement {
   a11y: A11yOverride;
@@ -74,7 +68,6 @@ export function createControlElementClass(
 
     #control: HTMLButtonElement | null = null;
     #state: ControlState = CONTROL_IDLE;
-    #caps: InputCaps = POINTER_INPUT;
     #visual = createControlVisual();
     #own: A11yOverride = {};
     #mode: A11yMode | null = null;
@@ -139,7 +132,7 @@ export function createControlElementClass(
       }
       this.#hadStyle.host = this.hasAttribute('style');
       ensureStyles(this, options.nonce);
-      this.#cleanups.push(watchCoarsePointer(() => this.#onInputChange()));
+      this.#cleanups.push(watchPointerInput(() => this.#onInputChange()));
       this.#cleanups.push(watchSystemA11y(() => this.#refreshMode()));
       this.#cleanups.push(watchA11yOverride(() => this.#refreshMode()));
       this.#awaitControl();
@@ -198,7 +191,6 @@ export function createControlElementClass(
       this.#control = control;
       this.#hadStyle.control = control.hasAttribute('style');
       this.setAttribute('data-vk', '');
-      this.#caps = isCoarsePointer() ? TOUCH_INPUT : POINTER_INPUT;
       this.#listen(control);
       this.#cleanups.push(this.#observeSize(control));
       this.#syncDisabled();
@@ -211,14 +203,15 @@ export function createControlElementClass(
 
     #onInputChange(): void {
       if (!this.#control) return;
-      this.#caps = isCoarsePointer() ? TOUCH_INPUT : POINTER_INPUT;
+      // A mouse unplugged mid-hover never sends a leave; an enter with no hover clears it and leaves the press alone.
+      if (this.#state.hovered && !effectiveInput().hover) this.#dispatch({ type: 'enter' }, NO_HOVER);
       this.#refreshMode(true);
     }
 
     #size(): ControlSize {
       const wanted = this.getAttribute('size');
       if (wanted && (CONTROL_SIZES as readonly string[]).includes(wanted)) return wanted as ControlSize;
-      return defaultSize({ touch: isCoarsePointer() });
+      return sizeTier(effectiveInput());
     }
 
     #glassMode(): GlassMode {
@@ -232,9 +225,9 @@ export function createControlElementClass(
       return wanted !== null && Object.hasOwn(FORCED, wanted) ? (wanted as ForcedState) : null;
     }
 
-    #dispatch(event: ControlEvent): boolean {
+    #dispatch(event: ControlEvent, caps: InputCaps = HOVER): boolean {
       if (this.#forced()) return false;
-      const step = stepControl(this.#state, event, this.#caps);
+      const step = stepControl(this.#state, event, caps);
       this.#state = step.state;
       this.#render();
       return step.activated;
@@ -292,7 +285,7 @@ export function createControlElementClass(
           if (mine(e)) this.#dispatch({ type: 'cancel' });
         });
         on<PointerEvent>(target, 'pointerenter', (e) => {
-          if (mine(e) && e.pointerType !== 'touch') this.#dispatch({ type: 'enter' });
+          if (mine(e)) this.#dispatch({ type: 'enter' }, hoversWith(e.pointerType) ? HOVER : NO_HOVER);
         });
         on<PointerEvent>(target, 'pointerleave', (e) => {
           // A captured pointer never leaves; the move handler decides by position instead.
@@ -363,7 +356,7 @@ export function createControlElementClass(
     #applySlop(): void {
       const control = this.#control;
       if (!control) return;
-      const floor = minTarget({ touch: isCoarsePointer() });
+      const floor = hitTarget(effectiveInput());
       this.#slop = { x: hitSlop(control.offsetWidth, floor), y: hitSlop(control.offsetHeight, floor) };
       this.style.setProperty('--vk-slop-x', String(this.#slop.x));
       this.style.setProperty('--vk-slop-y', String(this.#slop.y));
@@ -377,7 +370,7 @@ export function createControlElementClass(
       const disabled = control.disabled;
       if (this.#forced()) return;
       if (disabled !== this.#state.disabled) {
-        this.#state = stepControl(this.#state, { type: 'disable', disabled }, this.#caps).state;
+        this.#state = stepControl(this.#state, { type: 'disable', disabled }, HOVER).state;
         this.#render();
       }
     }
