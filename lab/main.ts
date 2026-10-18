@@ -1,6 +1,7 @@
 import { BUTTON_SIZES, CONTROL_SIZES, type ControlSize } from '../src/kit/sizes';
 import type { BackdropSample } from 'vireglass';
 import { defineVireElements, effectiveInput, setA11yOverride, setInputOverride, type VireControlElement } from 'vireuikit/web';
+import { adaptiveStage } from './adaptive';
 import { BACKDROPS, paintBackdrop, type Backdrop } from './backdrops';
 import { MENU_STATES, menuGallery, menuSandbox, type MenuLabState } from './menu';
 import { menuReference } from './menu-reference';
@@ -26,7 +27,7 @@ const flag = (name: string): boolean | undefined => {
   return v === '1' ? true : v === '0' ? false : undefined;
 };
 
-const VIEWS = ['gallery', 'sandbox', 'menu', 'reference', 'menu-reference'] as const;
+const VIEWS = ['gallery', 'sandbox', 'menu', 'reference', 'menu-reference', 'adaptive'] as const;
 const view = pick('view', VIEWS, 'gallery');
 const atomParam = pick('atom', ['all', ...ATOMS, 'menu'] as const, 'all');
 const stateParam = pick('state', ['all', ...FORCEABLE_STATES, ...MENU_STATES] as const, 'all');
@@ -50,7 +51,7 @@ if (upgrade) {
 }
 
 const stage = document.getElementById('stage')!;
-let sample: BackdropSample | null = view.includes('reference') ? null : await paintBackdrop(stage, backdrop);
+let sample: BackdropSample | null = view.includes('reference') || view === 'adaptive' ? null : await paintBackdrop(stage, backdrop);
 
 const log = document.getElementById('log')!;
 const note = (text: string) => {
@@ -158,6 +159,7 @@ if (view === 'sandbox') sandbox();
 else if (view === 'menu') menuSandbox(document.getElementById('rows')!, note, { size, glass, sample: upgrade ? sample : null });
 else if (view === 'reference') await reference();
 else if (view === 'menu-reference') await menuReference(stage, document.getElementById('rows')!);
+else if (view === 'adaptive') await adaptiveStage(stage, document.getElementById('rows')!, params, { glass, backdrop, chrome });
 else gallery();
 
 function buildChrome(): void {
