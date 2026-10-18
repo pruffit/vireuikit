@@ -157,6 +157,8 @@ export type SheetGalleryOptions = {
   /** The platform's own markup, no kit, to see the first HTML. */
   force?: string | null;
   kind?: string | null;
+  /** `filters` is a short body, `list` a tall one that scrolls. */
+  content?: string | null;
   attrs?: Record<string, string>;
 };
 
@@ -179,11 +181,11 @@ export function sheetGallery(stage: HTMLElement, rows: HTMLElement, form: SheetL
     tag: popover ? 'vire-popover' : 'vire-sheet',
     kind: popover ? undefined : kind,
     surface: popover ? 'popover' : supplementary ? 'manual' : 'dialog',
-    body: popover ? 'filters' : kind === 'alert' ? 'alert' : kind === 'dialog' ? 'rename' : 'list',
+    body: options.content === 'filters' ? 'filters' : popover ? 'filters' : kind === 'alert' ? 'alert' : kind === 'dialog' ? 'rename' : 'list',
     trigger: 'Open',
     glass: options.glass,
     sample: options.sample,
-    attrs: { ...(options.detent ? { detent: options.detent } : {}), ...(options.attrs ?? {}) },
+    attrs: { ...(options.detent ? { detent: options.detent, detents: 'peek medium large' } : {}), ...(options.attrs ?? {}) },
     force: options.force ?? `open${options.detent ? `:${options.detent}` : ''}`,
   });
   frame.append(page(host, frameSpec.trigger));

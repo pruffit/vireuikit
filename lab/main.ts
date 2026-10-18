@@ -95,6 +95,7 @@ function gallery(): void {
       detent: params.get('detent'),
       force: params.get('state') ?? undefined,
       kind: params.get('kind'),
+      content: params.get('content'),
     });
     return;
   }

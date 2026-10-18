@@ -42,7 +42,7 @@ import {
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { deepActive, dropEmptyStyle, rootsOf } from './dom';
 import { isEditable, viewportRoot, watchAdaptiveContext, windowRect } from './environment';
-import { attachControlGlass, type GlassFrame, type GlassSession } from './glass';
+import { attachControlGlass, ensureGlass, glassLoaded, probeRect, type GlassFrame, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
@@ -58,7 +58,8 @@ type Carrier = HTMLElement & { setCarried?: (ink: number | null) => void };
 type Forced = { kind: 'open'; detent: SheetDetent | null } | { kind: 'grow'; t: number };
 type CommandLike = Event & { command: string; source: Element | null };
 type Shown = { box: MorphBox; opacity: number; scrim: number };
-type Detent = { name: SheetDetent; height: number };
+/** `names`: every detent that lands on this height (a peek as tall as the sheet is also large). */
+type Detent = { name: SheetDetent; height: number; names: SheetDetent[] };
 type Lifted = { action: string; restore: () => void };
 
 export interface VireSurfaceElement extends HTMLElement {
@@ -127,6 +128,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #lastLens = { material: '', morph: '', geometry: '' };
     #sample: BackdropSample | null = null;
     #held: BackdropSample | null = null;
+    #probed: BackdropSample | null = null;
 
     #open = false;
     #out = false;
@@ -134,6 +136,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #hiding = false;
     #reflecting = false;
     #swallow = false;
+    #forcedWaited = false;
     #focused = false;
     #pg = createGrowthState();
     #sg = createSheetGrowth();
@@ -177,6 +180,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
 
     set sample(next: BackdropSample | null) {
       this.#sample = next;
+      if (this.#out) this.#probed = this.#backdrop();
       if (!this.#glass) return;
       if (this.#out) this.#holdSample();
       else this.#glass.setSample(next);
@@ -256,6 +260,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#presentation = null;
       this.#mode = null;
       this.#forcedState = null;
+      this.#forcedWaited = false;
     }
 
     attributeChangedCallback(name: string): void {
@@ -447,11 +452,10 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
             e.preventDefault();
             this.#close();
           } else if (command === 'show-modal') {
-            const button = source instanceof HTMLButtonElement ? source : null;
-            if (button && !surface.contains(button)) this.#source = button;
-            if (this.#out && !this.#open) {
+            const button = source instanceof HTMLButtonElement && !surface.contains(source) ? source : null;
+            if (!this.#open && this.#ctx) {
               e.preventDefault();
-              this.#show(this.#source);
+              this.#show(button ?? this.#source);
             }
           }
         });
@@ -595,8 +599,9 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       }
       this.#open = true;
       if (!this.#out) {
-        this.#present();
+        // Laid out and read before it is presented: a modal dialog makes the page inert, and an inert page cannot be read.
         this.#comeOut();
+        this.#present();
       }
       this.#syncTriggers();
       this.#publishInset();
@@ -643,6 +648,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#kb = null;
       this.#detent = null;
       this.#place(true);
+      this.#probed = this.#backdrop();
       this.#setCarried(1);
       this.#holdSample();
     }
@@ -686,6 +692,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#press = null;
       this.#kb = null;
       this.#held = null;
+      this.#probed = null;
       this.#touch = '';
       this.#clearInset();
       if (surface) {
@@ -764,7 +771,13 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       const list: Detent[] = [];
       for (const name of this.#wantedDetents()) {
         const [height] = sheetDetents(this.#kind(), window, { detents: [name], content: sheetPeekContent(content.height) });
-        if (height !== undefined && !list.some((d) => d.height === height)) list.push({ name, height });
+        if (height === undefined) continue;
+        const same = list.find((d) => d.height === height);
+        if (!same) list.push({ name, height, names: [name] });
+        else {
+          same.names.push(name);
+          if (DETENTS.indexOf(name) > DETENTS.indexOf(same.name)) same.name = name;
+        }
       }
       return list.sort((a, b) => a.height - b.height);
     }
@@ -808,10 +821,10 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #chooseDetent(opening: boolean): void {
       const list = this.#detents;
       if (list.length === 0) return;
-      let picked = list.find((d) => d.name === this.#detent);
+      let picked = list.find((d) => this.#detent !== null && d.names.includes(this.#detent));
       if (!picked) {
-        const asked = this.getAttribute('detent');
-        picked = list.find((d) => d.name === asked) ?? (this.#detent ? list.reduce((a, b) => (Math.abs(b.height - this.#drag.height.target) < Math.abs(a.height - this.#drag.height.target) ? b : a)) : list[0]!);
+        const asked = this.getAttribute('detent') as SheetDetent | null;
+        picked = list.find((d) => asked !== null && d.names.includes(asked)) ?? (this.#detent ? list.reduce((a, b) => (Math.abs(b.height - this.#drag.height.target) < Math.abs(a.height - this.#drag.height.target) ? b : a)) : list[0]!);
       }
       this.#detent = picked.name;
       this.#reflect(picked.name);
@@ -833,7 +846,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     }
 
     #setDetent(name: string | null, animate: boolean): void {
-      const picked = this.#detents.find((d) => d.name === name);
+      const picked = this.#detents.find((d) => name !== null && d.names.includes(name as SheetDetent));
       if (!this.#out) return;
       if (!picked) {
         if (this.#detent) this.#reflect(this.#detent, true);
@@ -1094,12 +1107,23 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       glass.frame(next);
     }
 
+    /** What lies behind the surface as it will stand, dimmed by the scrim that will lie over it. */
+    #backdrop(): BackdropSample | null {
+      const layout = this.#layout;
+      if (!layout) return null;
+      const { x, y } = this.#origin;
+      const read = this.#sample ?? probeRect(this.ownerDocument, { x: x + layout.box.x, y: y + layout.box.y, width: layout.box.width, height: layout.box.height });
+      if (!read || !layout.scrim) return read;
+      const k = 1 - SHEET_SIZES.scrimAlpha;
+      return { ...read, luma: read.luma * k, lo: read.lo * k, hi: read.hi * k, r: read.r * k, g: read.g * k, b: read.b * k };
+    }
+
     #holdSample(): void {
       const glass = this.#glass;
       const surface = this.#surface;
       const layout = this.#layout;
       if (!glass || !surface || !layout) return;
-      let sample = this.#sample;
+      let sample = this.#probed;
       if (!sample) {
         const s = surface.style;
         s.setProperty('--vk-x', px(this.#origin.x + layout.box.x));
@@ -1415,17 +1439,26 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         }
         return;
       }
+      if (!this.#out && !this.#forcedWaited && this.#wantsGlass() && !glassLoaded()) {
+        // The backdrop is read before the surface is presented, and that needs the glass module.
+        const again = () => {
+          this.#forcedWaited = true;
+          if (this.#forcedState) this.#applyForced();
+        };
+        void ensureGlass().then(again, again);
+        return;
+      }
       this.#open = true;
       if (!this.#out) {
         if (!this.#ctx) return;
-        this.#present();
         this.#comeOut();
+        this.#present();
       }
       if (forced.kind === 'open') {
         this.#pg = { shrink: { x: 1, v: 0, target: 1 }, grow: { x: 1, v: 0, target: 1 } };
         this.#sg = { x: 1, v: 0, target: 1 };
         if (forced.detent) {
-          const picked = this.#detents.find((d) => d.name === forced.detent);
+          const picked = this.#detents.find((d) => d.names.includes(forced.detent!));
           if (picked) {
             this.#detent = picked.name;
             this.#drag.height = { x: picked.height, v: 0, target: picked.height };

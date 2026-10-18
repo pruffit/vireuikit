@@ -302,7 +302,8 @@ modal sheet is centred from 600 dp, a dialog with fields is full screen below 60
 - After the upgrade the element runs the show and the hide, so the growth can run back before the surface leaves the
   top layer. A popover becomes `manual` and its buttons' `popovertarget` is lifted; a dialog's `command` and `cancel`
   events, a `<form method="dialog">` submit and a `close()` through `command="close"` are intercepted and run back first.
-  A host calling `close()` or `hidePopover()` itself gets no animation, only a clean settle. Everything lifted is
+  A host calling `close()` or `hidePopover()` itself gets no animation, only a clean settle, and one calling `showModal()`
+  itself should set `sample`: a modal dialog makes the page inert, and the lens reads the backdrop before it opens. Everything lifted is
   restored when the element is removed, along with the inline properties, the created grabber and the inset below.
 - The window is the nearest ancestor marked `data-vire-shell`, else the root given to `setViewportOverride`, else the
   viewport. The form, the placement and the detents are measured in it; a positioned ancestor is not a window.

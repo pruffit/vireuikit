@@ -57,6 +57,14 @@ attribute, a development aid of the elements that the lab and the snapshots use.
   lists every decision, and scenarios sweep the width, fold and unfold, rotate and attach a keyboard, checking the
   person's state on each step. `foldaware=0` hides the fold from the atoms only, for the canary.
 
+- **Sheet gallery and sandbox** (`?atom=sheet&form=<form>&detent=&content=&backdrop=&glass=`, `?view=sheet&w=&h=`). The gallery draws
+  one open surface in a window frame (`data-vire-shell`) of the size that gives it its form: `popover` (700 wide),
+  `popover-sheet`, `bottom-sheet` (390), `side-sheet` (1000), `side-pane` (1700, the third pane), `centered-sheet`,
+  `full-screen`, `basic-dialog` and `alert`, with page content behind it so the scrim and the glass show. The sandbox is
+  a resizable frame with a trigger for every kind, one surface opened by script, the events logged in `#log` and
+  `window.__lab.sheet` (`resize`, `record`, `setViewport` with `stubvv=1`). The elements take `data-vire-force-state`: `open`,
+  `open:<detent>` and `grow:<t>` (a growth frozen at `t`, 0 to 1).
+
 ## Gates
 
 | Gate | Checks |
@@ -287,6 +295,19 @@ while it stays open.
 - **The keyboard.** When a field in a bottom sheet takes focus and the visual viewport shrinks, the sheet moves to its
   largest detent and keeps its bottom above the keyboard. When the keyboard leaves, the sheet goes back to the detent the
   person had, if they did not move it.
+- **The window and what the element reads.**
+  - The window is the nearest ancestor marked `data-vire-shell`, else the root given to `setViewportOverride`, else the
+    viewport. A positioned ancestor is no window: a trigger sits in toolbars and cards.
+  - A trigger's `command="show-modal"` is intercepted and run through the element, so the backdrop is laid out and read
+    before the dialog is presented (an inert page cannot be read), and dimmed by the scrim it will lie under. A host that
+    calls `showModal()` itself gets a backdrop that cannot be read and should set `sample`.
+  - While the surface is out its trigger takes no pointer of its own, but the control that wraps it still passes the click
+    on, so a supplementary sheet closes by its button.
+  - A drag in the content starts from a touch or a pen, not a mouse (a mouse selects text there); the grabber and the
+    top strip drag with any pointer. A touch is the content's while it scrolls (`touch-action` follows the scroll
+    position and the detent).
+  - `detent` is reflected, and `vire-sheet-detent` fired, while the surface is a bottom sheet; a peek as tall as the
+    sheet is also `large`.
 - **Glass budget.** An open surface is one glass surface: its trigger has handed its body over, and the side pane and
   full-screen forms are not glass.
 

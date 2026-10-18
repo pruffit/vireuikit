@@ -171,7 +171,7 @@ ${SH}[data-phase=growing]>:is(dialog,[popover])>[data-vk-grabber]{position:absol
 ${SH}[data-phase=growing]>:is(dialog,[popover])>:not([data-vk-grabber]){transform:translate(calc(var(--vk-cx,0px) + var(--vk-pad,16px)),calc(var(--vk-cy,0px) + var(--vk-pad-t,16px)));
  width:var(--vk-content-w,auto);box-sizing:border-box}
 ${SH}:is([data-phase=growing],[data-phase=morph])>:is(dialog,[popover])>:not([data-vk-grabber]){opacity:min(1,calc(var(--vk-ink-in,1)*2));filter:blur(calc((1 - var(--vk-ink-in,1))*8px))}
-${SH}[data-measure]>:is(dialog,[popover]){--vk-pad-t:var(--vk-mpt,var(--vk-pad))!important;width:var(--vk-mw,max-content)!important;height:auto!important;left:0!important;top:0!important;
+${SH}[data-measure]>:is(dialog,[popover]){display:block!important;--vk-pad-t:var(--vk-mpt,var(--vk-pad))!important;width:var(--vk-mw,max-content)!important;height:auto!important;left:0!important;top:0!important;
  padding:0 var(--vk-pad) var(--vk-pad)!important;max-width:none!important;overflow:visible!important;visibility:hidden;clip-path:none}
 ${SH}[data-measure]>:is(dialog,[popover])>:not([data-vk-grabber]){width:auto!important;transform:none!important;filter:none!important;opacity:1!important}
 ${GRAB}{position:sticky;top:0;z-index:1;display:block;box-sizing:border-box;flex:none;width:var(--vk-grab-hit);height:var(--vk-grab-hit);
@@ -183,10 +183,10 @@ ${GRAB}::before{content:'';position:absolute;left:50%;top:var(--vk-grab-top);wid
 ${GRAB}:focus-visible::before{outline:2px solid currentColor;outline-offset:6px}
 ${SH}[data-height=dragging]>:is(dialog,[popover])>[data-vk-grabber]{cursor:grabbing}
 
-${SH}[data-surface=glass]>:is(dialog,[popover]){color:var(--vireglass-ink-color,inherit);
+${SH}[data-surface=glass]>:is(dialog,[popover]){color:color-mix(in srgb,CanvasText calc(var(--vk-opaque)*100%),var(--vireglass-ink-color,CanvasText));
  ${GLASS_BODY.replaceAll('background:','background-color:')};
  background-image:linear-gradient(var(--vk-solid),var(--vk-solid))}
-${SH}[data-surface=plain]>:is(dialog,[popover]){background:Canvas;${SHADOW}}
+${SH}[data-surface=plain]>:is(dialog,[popover]){background:Canvas;color:CanvasText;${SHADOW}}
 ${SH}[data-form=full-screen]>:is(dialog,[popover]){box-shadow:none}
 ${SH}[data-form=side-pane]>:is(dialog,[popover]){box-shadow:0 0 0 1px color-mix(in srgb,currentColor 14%,transparent)}
 ${SH}[data-contrast][data-surface=plain]>:is(dialog,[popover]){box-shadow:inset 0 0 0 2px currentColor}

@@ -451,4 +451,10 @@ D 6:54–7:10 against the popover's growth.
 - A retry after a module that failed to load: browsers cache a failed dynamic import, so the retry is attempted but
   may fail again without a new request; only a throwing `attachGlass` is observed retrying.
 - Forced colours: the colour of the text is asserted, not how the control looks.
+- The sheet's drag from the content follows the scroller the touch began in and the surface, not every nested scroller's
+  position; `touch-action` is set from the surface's own scroll. A real on-screen keyboard is stubbed through the visual
+  viewport; the bottom safe area is not read for the sheet.
+- The side sheet and the third pane sit at the right edge of the window; right-to-left layout is not modelled.
+- A host that calls `showModal()` itself, with no trigger, cannot have the backdrop read (the page is inert); it sets
+  `sample`.
 - Snapshots: Windows baselines only, run locally, not in CI.

@@ -1,5 +1,6 @@
 import type { BackdropSample, VireGlassAccessibility, VireGlassGeometry, VireGlassMaterial } from 'vireglass';
 import type { AttachGlassOptions, GlassHandle, GlassMorph } from 'vireglass/dom';
+import type { Rect } from '../kit/geometry';
 
 export type GlassParams = {
   material: VireGlassMaterial;
@@ -32,6 +33,32 @@ export type GlassSession = {
   destroy(): void;
 };
 
+let loaded: typeof import('vireglass/dom') | null = null;
+
+export const glassLoaded = (): boolean => loaded !== null;
+
+/** Loads the glass module, which is what a host that must read the backdrop first waits for. */
+export async function ensureGlass(): Promise<void> {
+  loaded ??= await import('vireglass/dom');
+}
+
+/**
+ * What lies behind a box in client coordinates, read through an element that is only there while it is read. A modal
+ * dialog makes the page inert, and hit testing skips an inert page, so this is read before the dialog opens. Null until the
+ * glass module has loaded.
+ */
+export function probeRect(doc: Document, box: Rect): BackdropSample | null {
+  if (!loaded) return null;
+  const probe = doc.createElement('div');
+  probe.style.cssText = `position:fixed;left:${box.x}px;top:${box.y}px;width:${box.width}px;height:${box.height}px;visibility:hidden;pointer-events:none`;
+  doc.body.append(probe);
+  try {
+    return loaded.probeBackdrop(probe);
+  } finally {
+    probe.remove();
+  }
+}
+
 // Loaded on demand: the control works without it, so the glass is an upgrade, not a dependency of
 // first paint. Resolves to null if the caller stopped wanting it while the module loaded.
 export async function attachControlGlass(
@@ -39,7 +66,8 @@ export async function attachControlGlass(
   params: GlassParams,
   stillWanted: () => boolean,
 ): Promise<GlassSession | null> {
-  const { attachGlass, probeBackdrop } = await import('vireglass/dom');
+  await ensureGlass();
+  const { attachGlass, probeBackdrop } = loaded!;
   if (!stillWanted()) return null;
 
   // `attachGlass` re-reads these on `update()`. The geometry is passed in because a pressed
