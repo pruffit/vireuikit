@@ -127,16 +127,23 @@ setA11yOverride({ reduceTransparency: true });
 - Before the element is defined the browser runs it: the trigger toggles the list, a choice clicks the item and closes
   it, Escape and a press outside dismiss it, and focus comes back to the trigger. Write the markup without menu roles.
 - After the upgrade the element adds the menu-button roles (`aria-haspopup`, `aria-expanded`, `menu`, `menuitem`)
-  together with their keyboard: Enter, Space or ArrowDown open on the first enabled item and ArrowUp on the last; the
-  arrows, Home, End and typeahead move over enabled items; Escape and a choice return focus to the trigger; Tab closes
-  and moves on. A pointer opens it with focus on the menu. Removing the element restores the markup.
+  together with their keyboard: Enter, Space or ArrowDown open on the first item and ArrowUp on the last; the arrows,
+  Home, End and typeahead move over the items; Escape and a choice return focus to the trigger; Tab closes and moves
+  on. A pointer opens it with focus on the menu. Removing the element restores the markup.
+- A disabled item follows the WAI-ARIA APG: it stays focusable and cannot be chosen. The element turns its `disabled`
+  into `aria-disabled="true"`; after the upgrade, change it with `aria-disabled` (setting `disabled` again is turned
+  into it too).
+- The press that opened the menu chooses nothing: a click on an item counts once the menu has arrived, and neither
+  the second click of a double click nor a held key ever counts.
+- The list's own `beforetoggle` and `toggle` events fire when it leaves the top layer, after the growth has run back;
+  `aria-expanded` turns false as the closing begins.
 - The menu grows out of its trigger and covers it: the trigger's body contracts into a drop, the drop grows into the
   menu with a small overshoot, and the content comes into focus near size. A choice closes it, and closing runs the
   same path back into the trigger. Reduced motion opens and closes it in one frame. A menu that has to stay open for
   several picks is a popover, which is another atom.
 - While the menu is out, the trigger hands its body to the menu's surface (`setCarried` on `<vire-button>` and
   `<vire-icon-button>`), so there is never glass on glass.
-- Attributes: `glass` (the surface is a lens; absent: an opaque surface), `size` (as for the buttons; rows are as tall
+- Attributes: `glass` (empty, `present` or `touch`: the surface is a lens; absent or anything else: an opaque surface), `size` (as for the buttons; rows are as tall
   as the tier), `corner` (`top-left`, `top-right`, `bottom-left`, `bottom-right`: the trigger corner the menu pins to;
   by default the one facing the nearest viewport corner). `sample` works as on the buttons; without one, the backdrop
   under the menu is read once as it opens and held while it is out.

@@ -89,8 +89,17 @@ same growth run backwards, and it closes after a choice. How the web element get
   attribute fixes the corner for a host that knows its layout.
 - **A menu does not flip.** Larger elements adapt but do not switch between light and dark (M 15:29), so the backdrop
   is read once as the menu opens (or taken from the host's `sample`) and held while it is out.
-- **Disabled items are skipped** by the arrows and by typeahead, as native disabled buttons are skipped by Tab; they
-  stay visible, dimmed and announced.
+- **Disabled items follow the WAI-ARIA APG**: focusable, not activatable. The arrows and typeahead reach them and a
+  choice is refused; the element turns `disabled` into `aria-disabled="true"` (a disabled button cannot take focus) and
+  back on disconnect.
+- **The press that opened the menu does not choose.** The first item grows in under the pointer, so a click counts
+  only once the menu has arrived (content in focus, surface past its overshoot) and its press began after that; the
+  second click of a double click and held keys never count. A choice is taken in the capture phase, so it closes the
+  menu even when an item's handler stops the click.
+- **A closed shadow root hides the menu from the document**, so a press outside is judged in the innermost tree that
+  can see it, one listener per tree from the element's root out to the document.
+- **The list's `toggle` event comes late.** It fires when the list leaves the top layer, after the growth has run
+  back; `aria-expanded` turns false as the closing begins.
 
 ## Acceptance of an atom
 
