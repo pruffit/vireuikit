@@ -27,6 +27,7 @@ import {
   sheetGrowthFrame,
   sheetInset,
   sheetLayout,
+  sheetPeekContent,
   sheetOpacity,
   sheetRadius,
   sheetResistance,
@@ -268,7 +269,7 @@ describe('sheetLayout, other forms', () => {
 describe('the sizes', () => {
   it('holds the numbers of the spec', () => {
     expect(SHEET_SIZES.detent).toEqual({ medium: 0.5, largeTopGap: 56, peekMin: 120 });
-    expect(SHEET_SIZES.drag).toEqual({ distance: 56, velocity: 125, zone: 125 });
+    expect(SHEET_SIZES.drag).toEqual({ distance: 56, velocity: 125, zone: 125, stale: 0.1 });
     expect(SHEET_SIZES.side).toMatchObject({ width: 360, min: 280, max: 400, inset: 8, radius: 24 });
     expect(SHEET_SIZES.dialog).toMatchObject({ width: 560, alertWidth: 320 });
     expect(SHEET_SIZES.scrimAlpha).toBe(0.32);
@@ -547,6 +548,11 @@ describe('what the element asks of the model', () => {
     expect(defaultSheetDetents('sheet')).toEqual(['medium', 'large']);
     expect(defaultSheetDetents('popover')).toEqual(['peek']);
     expect(defaultSheetDetents('modal-sheet')).toEqual(['large']);
+  });
+
+  it('asks for a peek that shows the content and the gap under the floating sheet', () => {
+    expect(sheetPeekContent(300)).toBe(312);
+    expect(sheetDetents('popover', phone, { content: sheetPeekContent(300) })).toEqual([312]);
   });
 
   it('attaches a lens to every form but the third pane and full screen, and to a bottom sheet that is not opaque at its lowest detent', () => {

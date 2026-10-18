@@ -11,7 +11,8 @@ export const SHEET_SIZES = {
   grabber: { width: 32, height: 4, hit: 44, top: 8 },
   /** The content's inset from the surface, and the strip at the top where a drag moves the sheet. */
   content: { pad: 16, handle: 28 },
-  drag: { distance: 56, velocity: 125, zone: 125 },
+  /** `stale`: a release this long after the last move is a finger that stopped, not a fling. */
+  drag: { distance: 56, velocity: 125, zone: 125, stale: 0.1 },
   /** Fitted: about 0.4 s to rest on a 300 dp move, under 2 % overshoot (see the tests). */
   detentSpring: { response: 0.45, damping: 0.8 },
   side: { width: 360, min: 280, max: 400, fraction: 1 / 3, inset: 8, radius: 24 },

@@ -19,6 +19,9 @@ const DEFAULTS: Partial<Record<SurfaceKind, readonly SheetDetent[]>> = {
 /** The detents a kind has before an author names any. */
 export const defaultSheetDetents = (kind: SurfaceKind): readonly SheetDetent[] => DEFAULTS[kind] ?? ['large'];
 
+/** What to hand `sheetDetents` as `content` so that `peek` shows all of it: the content and the gap the sheet floats above the window's edge. */
+export const sheetPeekContent = (content: number): number => content + SHEET_SIZES.inset.rest;
+
 /** The resting heights in dp of the detents a kind has, ascending and without repeats. */
 export function sheetDetents(kind: SurfaceKind, window: Size, options: SheetDetentOptions = {}): number[] {
   const { detent } = SHEET_SIZES;
