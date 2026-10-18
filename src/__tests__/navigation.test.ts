@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MINIMIZE_JITTER,
   MINIMIZE_THRESHOLD,
   NAV_MINIMIZE_TIMING,
   NAV_MORPH_TIMING,
@@ -11,6 +12,7 @@ import {
   navigationForm,
   aimNavMorph,
   cancelNavDrag,
+  clampScrollTop,
   createMinimize,
   createNavDrag,
   createNavMorph,
@@ -697,6 +699,43 @@ describe('minimising on scroll', () => {
     stepMinimize(s, (top += 40));
     expect(s.minimized).toBe(true);
     for (let i = 0; i < 100; i += 1) expect(stepMinimize(s, (top += i % 2 === 0 ? 5 : -5))).toBe(true);
+  });
+
+  it('counts a step shorter than 4 dp against the run into it: net jitter never toggles, a downward scroll with small back-steps still minimises', () => {
+    const jitter = createMinimize(100);
+    let top = 100;
+    for (let i = 0; i < 100; i += 1) expect(stepMinimize(jitter, (top += i % 2 === 0 ? 3 : -3))).toBe(false);
+    const scrolling = createMinimize(100);
+    top = 100;
+    let result = false;
+    for (let i = 0; i < 6 && !result; i += 1) {
+      top += 9;
+      result = stepMinimize(scrolling, top);
+      if (!result) result = stepMinimize(scrolling, (top -= 3));
+    }
+    expect(result).toBe(true);
+    expect(MINIMIZE_JITTER).toBe(4);
+  });
+
+  it('takes a reversal of 4 dp or more for a reversal: a downward scroll with 5 dp back-steps does not minimise', () => {
+    const s = createMinimize(100);
+    let top = 100;
+    for (let i = 0; i < 40; i += 1) {
+      top += 10;
+      expect(stepMinimize(s, top)).toBe(false);
+      expect(stepMinimize(s, (top -= 5))).toBe(false);
+    }
+  });
+
+  it('clamps the position to the scrollable range, so a bounce past the end is the end', () => {
+    expect(clampScrollTop(-12, 1000, 400)).toBe(0);
+    expect(clampScrollTop(300, 1000, 400)).toBe(300);
+    expect(clampScrollTop(640, 1000, 400)).toBe(600);
+    expect(clampScrollTop(50, 300, 400)).toBe(0);
+    const s = createMinimize(550);
+    stepMinimize(s, clampScrollTop(600, 1000, 400));
+    s.minimized = true;
+    for (const bounce of [630, 660, 640, 600]) expect(stepMinimize(s, clampScrollTop(bounce, 1000, 400))).toBe(true);
   });
 
   it('expands after 24 up, at the top, and on a tap', () => {

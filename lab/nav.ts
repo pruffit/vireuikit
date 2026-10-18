@@ -147,7 +147,12 @@ export type NavSandboxOptions = {
 };
 
 /** A resizable window with a scrolling list, SPA-style links and the events logged. */
-export type NavSandboxHandle = { frame: HTMLElement; resize(width: number, height: number): void };
+export type NavSandboxHandle = {
+  frame: HTMLElement;
+  resize(width: number, height: number): void;
+  /** Makes the page itself scroll and hands the navigation the document as its scroller. */
+  scrollOnDocument(): void;
+};
 
 export function navSandbox(rows: HTMLElement, note: (text: string) => void, options: NavSandboxOptions): NavSandboxHandle {
   ensureCss();
@@ -194,6 +199,12 @@ export function navSandbox(rows: HTMLElement, note: (text: string) => void, opti
     resize(width, height) {
       frame.style.width = `${width}px`;
       frame.style.height = `${height}px`;
+    },
+    scrollOnDocument() {
+      const spacer = document.createElement('div');
+      spacer.style.cssText = 'height:3000px';
+      document.body.append(spacer);
+      (nav as VireNavElement).scroller = document.scrollingElement;
     },
   };
 }

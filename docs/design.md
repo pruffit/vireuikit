@@ -184,7 +184,9 @@ here the anchor is the selected destination. `<vire-nav>` builds it:
 - **Minimising.** With `minimize="scroll"` and a scroller (the `scroller` property or attribute), the bar minimises after
   24 dp scrolled down and expands after 24 dp up, at the top, on a tap on it and when focus enters it (U 5:07; H Tab
   bars). Minimised, the bar is a circle with the selected destination's icon at the leading end and the search circle at
-  the trailing end, both 44 dp; the transition is the same contraction into the selection. Only the bar minimises.
+  the trailing end, both 44 dp; the transition is the same contraction into the selection. Only the bar minimises. A reversal shorter than 4 dp is
+  counted into the run, not taken for a change of direction; the position is clamped to the scrollable range, so a bounce
+  past an end cannot expand the bar; the scroller is resolved again on every change, and the document can be it.
 - **The bottom accessory** is placed by `bottomAccessory`: a capsule over the bar and its search (48 dp high, 8 dp above),
   in the minimised bar's row between the two circles, or along the bottom of the content beside a rail or sidebar. It
   has its own glass and reshapes between placements by `formMorphFrame`; `data-placement` on it tells the host which

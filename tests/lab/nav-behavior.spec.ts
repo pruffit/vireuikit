@@ -965,6 +965,112 @@ test.describe('minimising', () => {
   });
 });
 
+test.describe('the scroller', () => {
+  const minimise = async (page: Page, top = 100) => {
+    await scrollTo(page, top);
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-minimized'));
+    await settle(page);
+  };
+  const expanded = async (page: Page) => {
+    await page.waitForFunction(() => !document.querySelector('vire-nav')!.hasAttribute('data-minimized'));
+    await settle(page);
+  };
+
+  test('giving a new scroller expands a minimised bar, and the new one minimises it', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    await minimise(page);
+    await page.evaluate(() => {
+      const other = document.createElement('div');
+      other.id = 'other';
+      other.style.cssText = 'position:absolute;width:100px;height:100px;overflow:auto;left:0;top:0';
+      other.innerHTML = '<div style="height:900px"></div>';
+      document.getElementById('frame')!.append(other);
+      (document.querySelector('vire-nav') as unknown as { scroller: Element }).scroller = other;
+    });
+    await expanded(page);
+    await page.evaluate(() => (document.getElementById('other')!.scrollTop = 120));
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-minimized'));
+  });
+
+  test('a scroller id that no longer resolves lets go of the node, and the bar expands', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    await minimise(page);
+    await page.evaluate(() => document.getElementById('scroller')!.remove());
+    await resize(page, 431, 720);
+    await expanded(page);
+    await page.evaluate(() => {
+      const next = document.createElement('div');
+      next.id = 'scroller';
+      next.style.cssText = 'position:absolute;width:100px;height:100px;overflow:auto;left:0;top:0';
+      next.innerHTML = '<div style="height:900px"></div>';
+      document.getElementById('frame')!.append(next);
+      document.querySelector('vire-nav nav ul')!.append(document.createElement('li'));
+    });
+    await nextFrame(page);
+    await scrollTo(page, 120);
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-minimized'));
+  });
+
+  test('a node the id has moved away from is let go: the id names the new one', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    await minimise(page);
+    await page.evaluate(() => {
+      const old = document.getElementById('scroller')!;
+      old.id = 'retired';
+      const next = old.cloneNode(true) as HTMLElement;
+      next.id = 'scroller';
+      next.dataset.new = '';
+      document.getElementById('frame')!.append(next);
+    });
+    await resize(page, 431, 720);
+    await expanded(page);
+    await page.evaluate(() => (document.getElementById('retired')!.scrollTop = 300));
+    await page.waitForTimeout(100);
+    expect(await attr(page, 'data-minimized')).toBeNull();
+    await page.evaluate(() => (document.querySelector('[data-new]')!.scrollTop = 300));
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-minimized'));
+  });
+
+  test('the document itself can be the scroller: the window scrolls it, and the bar minimises and expands', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    await page.evaluate(() => window.__lab.nav!.scrollOnDocument());
+    await nextFrame(page);
+    await page.evaluate(() => window.scrollTo(0, 120));
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-minimized'));
+    await settle(page);
+    await page.evaluate(() => window.scrollTo(0, 60));
+    await expanded(page);
+    await page.evaluate(() => window.scrollTo(0, 300));
+    await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-minimized'));
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expanded(page);
+    // the old scroller no longer counts
+    await scrollTo(page, 400);
+    await page.waitForTimeout(100);
+    expect(await attr(page, 'data-minimized')).toBeNull();
+  });
+
+  test('a bounce past the end is the end: it does not expand the bar', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    const max = await page.evaluate(() => {
+      const el = document.getElementById('scroller')!;
+      return el.scrollHeight - el.clientHeight;
+    });
+    await minimise(page, max);
+    await page.evaluate((end) => {
+      const el = document.getElementById('scroller')!;
+      let fake = end;
+      Object.defineProperty(el, 'scrollTop', { get: () => fake, configurable: true });
+      for (const top of [end + 30, end + 60, end + 20, end]) {
+        fake = top;
+        el.dispatchEvent(new Event('scroll'));
+      }
+    }, max);
+    await page.waitForTimeout(1000);
+    expect(await attr(page, 'data-minimized')).toBe('');
+  });
+});
+
 test.describe('the bottom accessory', () => {
   test('sits over the bar and its search, 48 dp high and 8 above; in the minimised bar between the circles; beside a rail or sidebar along the bottom of the content', async ({ page }) => {
     await openNav(page, 'glass=0', 430, 720);

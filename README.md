@@ -236,7 +236,11 @@ and changes form through the selected destination.
   `scroller` property to an element), `search-key` (default `/`), `toggle-label` (the toggle's name, default "Sidebar";
   it never changes, `aria-expanded` says whether the sidebar is shown), `glass` (empty or `present`: glass; otherwise a plain body).
 - Minimising: the bar becomes a circle with the selected icon, and the search a second circle, after 24 dp scrolled
-  down in the scroller, and expands after 24 dp up, at the top, on a tap on it and when focus enters it.
+  down in the scroller, and expands after 24 dp up, at the top, on a tap on it and when focus enters it. Giving the
+  bar another scroller expands it. The element looks the id up again on each change: a node that left the document, or
+  that the id no longer names, is let go and the bar expands. The document itself works as a scroller
+  (`document.documentElement`, `document.body` or `document.scrollingElement`, listened to on the window), and a
+  bounce past either end of the scroll range counts as the end. A step back of less than 4 dp does not break a run.
 - `[data-accessory]` is the bottom accessory. It sits over the bar, in the minimised bar's row, or along the bottom of
   the content beside a rail or sidebar, and says which in its `data-placement` (`above-bar`, `in-bar`,
   `content-bottom`): show the transport only when `in-bar`.

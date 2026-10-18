@@ -17,6 +17,7 @@ import { menuMaterial } from '../kit/menu';
 import {
   aimNavMorph,
   cancelNavDrag,
+  clampScrollTop,
   createMinimize,
   createNavDrag,
   createNavMorph,
@@ -210,7 +211,9 @@ export function createNavElementClass(options: NavElementOptions = {}) {
 
     set scroller(next: Element | null) {
       this.#scrollerProp = next;
-      if (this.#navEl) this.#bindScroller();
+      if (!this.#navEl) return;
+      this.#bindScroller();
+      this.#replan();
     }
 
     connectedCallback(): void {
@@ -384,6 +387,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
             changed = true;
           }
         }
+        if (this.#syncScroller()) changed = true;
         if (changed) this.#scheduleReplan();
       });
       markup.observe(this, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-current'] });
@@ -551,7 +555,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     #replan(): void {
       const ctx = this.#ctx;
       if (!this.#navEl || !ctx) return;
-      this.#rebindScrollerIfMissing();
+      this.#syncScroller();
       this.#hideBadges();
       const forced = this.#forced();
       const minimized = forced?.kind === 'minimized' || this.#minState.minimized;
@@ -702,33 +706,48 @@ export function createNavElementClass(options: NavElementOptions = {}) {
 
     // ---- scrolling ----------------------------------------------------------------------------------------------
 
+    /** The property wins while its node is in the document; the id is looked up again each time, as the node may be parsed late or replaced. */
+    #wantedScroller(): Element | null {
+      if (this.getAttribute('minimize') !== 'scroll') return null;
+      if (this.#scrollerProp?.isConnected) return this.#scrollerProp;
+      const id = this.getAttribute('scroller');
+      const root = this.getRootNode() as Document | ShadowRoot;
+      return id && 'getElementById' in root ? root.getElementById(id) : null;
+    }
+
+    #isPage(el: Element): boolean {
+      const doc = this.ownerDocument;
+      return el === doc.documentElement || el === doc.body || el === doc.scrollingElement;
+    }
+
     #bindScroller(): void {
       this.#unbindScroller?.();
       this.#unbindScroller = null;
-      this.#scrollerEl = null;
-      if (this.getAttribute('minimize') !== 'scroll') {
-        this.#minState = createMinimize();
-        return;
-      }
-      const id = this.getAttribute('scroller');
-      const root = this.getRootNode() as Document | ShadowRoot;
-      const el = this.#scrollerProp ?? (id ? root.getElementById(id) : null);
-      if (!el) return;
+      const el = this.#wantedScroller();
       this.#scrollerEl = el;
-      this.#minState = createMinimize(el.scrollTop);
+      this.#minState = createMinimize(el ? this.#scrollPosition(el) : 0);
+      if (!el) return;
+      const target: EventTarget = this.#isPage(el) ? this.ownerDocument.defaultView! : el;
       const onScroll = () => {
         const was = this.#minState.minimized;
-        stepMinimize(this.#minState, el.scrollTop);
+        stepMinimize(this.#minState, this.#scrollPosition(el));
         if (this.#minState.minimized !== was) this.#replan();
       };
-      el.addEventListener('scroll', onScroll, { passive: true });
-      this.#unbindScroller = () => el.removeEventListener('scroll', onScroll);
+      target.addEventListener('scroll', onScroll, { passive: true });
+      this.#unbindScroller = () => target.removeEventListener('scroll', onScroll);
     }
 
-    /** The scroller named by id may be parsed after the navigation. */
-    #rebindScrollerIfMissing(): void {
-      if (this.#scrollerEl || this.getAttribute('minimize') !== 'scroll') return;
-      if (this.#scrollerProp || this.getAttribute('scroller')) this.#bindScroller();
+    #scrollPosition(el: Element): number {
+      const source = this.#isPage(el) ? (this.ownerDocument.scrollingElement ?? el) : el;
+      return clampScrollTop(source.scrollTop, source.scrollHeight, source.clientHeight);
+    }
+
+    /** Follows the scroller to what it is now; true when that took the bar out of the minimised state. */
+    #syncScroller(): boolean {
+      if (this.#wantedScroller() === this.#scrollerEl) return false;
+      const was = this.#minState.minimized;
+      this.#bindScroller();
+      return was;
     }
 
     // ---- the toggle and the sidebar over the content ------------------------------------------------------------
