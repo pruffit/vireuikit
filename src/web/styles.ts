@@ -62,8 +62,8 @@ ${ITEM}>svg{position:absolute;inset-inline-start:calc((var(--vk-menu-row) - var(
 ${ITEM}:is(:focus,[data-vire-force-state=hover]){--vk-fill:var(--vk-fill-active)}
 ${ITEM}:is([data-pressed],[data-vire-force-state=pressed]){--vk-fill:var(--vk-fill-pressed)}
 ${ITEM}:focus-visible{outline:2px solid currentColor;outline-offset:-2px}
-${ITEM}[aria-disabled=true]{cursor:default;--vk-fill:0;-webkit-text-fill-color:color-mix(in srgb,currentColor 40%,transparent)}
-${ITEM}[aria-disabled=true]>svg{opacity:.4}
+${ITEM}:is(:disabled,[aria-disabled=true]){cursor:default;--vk-fill:0;-webkit-text-fill-color:color-mix(in srgb,currentColor 40%,transparent)}
+${ITEM}:is(:disabled,[aria-disabled=true])>svg{opacity:.4}
 ${MENU}[data-phase=moving]>[popover]{padding:0}
 ${MENU}[data-phase=moving]>[popover]>*{transform:translate(calc(var(--vk-cx) + var(--vk-menu-pad)),calc(var(--vk-cy) + var(--vk-menu-pad)));
  opacity:min(1,calc(var(--vk-ink-in)*2));filter:blur(calc((1 - var(--vk-ink-in))*8px))}

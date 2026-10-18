@@ -17,9 +17,18 @@ export const GLYPHS = {
   triangle: svg('<path d="M12 4l9 16H3z"/>'),
   square: svg('<rect x="4" y="4" width="16" height="16" rx="2"/>'),
   hexagon: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/>'),
+  pin: svg('<path d="M9 3h6l-1 6 3 3H7l3-3zM12 12v9"/>'),
 } as const;
 
-export type MenuItemSpec = { label: string; log?: string; glyph?: keyof typeof GLYPHS; disabled?: boolean; force?: 'hover' | 'pressed' };
+export type MenuItemSpec = {
+  label: string;
+  log?: string;
+  glyph?: keyof typeof GLYPHS;
+  disabled?: boolean;
+  /** Disabled the WAI-ARIA APG way: still focusable. */
+  ariaDisabled?: boolean;
+  force?: 'hover' | 'pressed';
+};
 
 export type MenuSpec = {
   id: string;
@@ -37,6 +46,7 @@ export const SHARE_ITEMS: readonly MenuItemSpec[] = [
   { label: 'Rename', log: 'rename', glyph: 'pencil' },
   { label: 'Delete', log: 'delete', glyph: 'trash', disabled: true },
   { label: 'Remove from list', log: 'remove', glyph: 'folder' },
+  { label: 'Pin', log: 'pin', glyph: 'pin', ariaDisabled: true },
   { label: 'Copy text', log: 'text', glyph: 'link' },
 ];
 
@@ -83,6 +93,7 @@ export function makeMenu(spec: MenuSpec): HTMLElement {
     button.append(item.label);
     if (item.log) button.dataset.log = item.log;
     if (item.disabled) button.disabled = true;
+    if (item.ariaDisabled) button.setAttribute('aria-disabled', 'true');
     if (item.force) button.setAttribute('data-vire-force-state', item.force);
     list.append(button);
   }

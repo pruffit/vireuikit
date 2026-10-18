@@ -54,7 +54,9 @@ export type MenuElementOptions = { nonce?: string | undefined };
 
 let ids = 0;
 
-const isDisabled = (item: Element) => item.getAttribute('aria-disabled') === 'true' || item.hasAttribute('disabled');
+// Both stay the author's: a native disabled item cannot take focus, an aria-disabled one can (WAI-ARIA APG).
+const nativelyDisabled = (item: Element) => item.hasAttribute('disabled');
+const isDisabled = (item: Element) => nativelyDisabled(item) || item.getAttribute('aria-disabled') === 'true';
 
 /** The element's own tree outwards: its root first, the document last. */
 function rootsOf(el: Element): Root[] {
@@ -97,6 +99,8 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #lastFrame = 0;
     /** When the content was last fully in focus; null while it is still arriving or leaving. */
     #readySince: number | null = null;
+    /** When the content came into focus, which is when a deliberate key may choose. */
+    #inSince: number | null = null;
     #downAt = Number.NEGATIVE_INFINITY;
     #own: A11yOverride = {};
     #mode: A11yMode | null = null;
@@ -178,6 +182,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#natural = null;
       this.#held = null;
       this.#readySince = null;
+      this.#inSince = null;
       for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-contrast', 'data-size', 'data-phase', 'data-measure']) {
         this.removeAttribute(name);
       }
@@ -242,16 +247,23 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#keep(list, 'aria-labelledby', trigger.id);
       this.#adoptItems();
       const items = new MutationObserver((records) => {
+        let changed = false;
         for (const record of records) {
-          for (const node of record.removedNodes) this.#releaseItem(node);
-          if (record.type === 'attributes' && record.target instanceof HTMLButtonElement) this.#disableItem(record.target);
+          if (record.type === 'childList' && record.target === list) {
+            changed = true;
+            for (const node of record.removedNodes) this.#releaseItem(node);
+          } else if (record.type === 'attributes') {
+            this.#keepFocusOff(record.target as Element);
+          }
         }
+        if (!changed) return;
         this.#adoptItems();
         if (this.#out) {
           this.#natural = null;
           this.#place();
         }
       });
+      // Read, never rewritten: the disabled attribute stays the author's.
       items.observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
       this.#cleanups.push(() => items.disconnect());
       this.#listen(trigger, list);
@@ -269,26 +281,20 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         this.#keep(item, 'popovertargetaction', null, restore);
         this.#keep(item, 'role', 'menuitem', restore);
         this.#keep(item, 'tabindex', '-1', restore);
-        const ariaWas = item.getAttribute('aria-disabled');
-        this.#disableItem(item);
-        restore.push(() => {
-          // Ours was the aria-disabled; the platform's disabled goes back in its place.
-          if (ariaWas === 'true') return;
-          if (item.getAttribute('aria-disabled') === 'true') item.setAttribute('disabled', '');
-          if (ariaWas === null) item.removeAttribute('aria-disabled');
-          else item.setAttribute('aria-disabled', ariaWas);
-        });
         this.#itemRestore.set(item, () => {
           for (const undo of restore.reverse()) undo();
         });
       }
     }
 
-    // WAI-ARIA APG: a disabled menu item stays focusable, so the platform's disabled becomes aria-disabled.
-    #disableItem(item: Element): void {
-      if (!item.hasAttribute('disabled') || item.parentElement !== this.#list) return;
-      item.removeAttribute('disabled');
-      item.setAttribute('aria-disabled', 'true');
+    /** A focused item that turns natively disabled loses focus to the page; the menu keeps it instead. */
+    #keepFocusOff(item: Element): void {
+      const list = this.#list;
+      if (!list || !this.#state.open || item.parentElement !== list || !nativelyDisabled(item)) return;
+      const active = (list.getRootNode() as Root).activeElement;
+      if (active !== item && list.contains(active)) return;
+      this.#state = { ...this.#state, active: -1 };
+      list.focus({ preventScroll: true });
     }
 
     #releaseItem(node: Node): void {
@@ -306,6 +312,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       return this.#items().map((item) => ({
         label: item.getAttribute('aria-label') ?? item.textContent ?? '',
         disabled: isDisabled(item),
+        focusable: !nativelyDisabled(item),
       }));
     }
 
@@ -384,10 +391,11 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
             if (this.#out) drop(e);
             return;
           }
-          // Not what the person chose: the second click of a double click on the trigger, a click before the
-          // content has arrived, or a press that began before it had (the item grew in under the pointer).
+          // Not what the person chose: the second click of a double click, a pointer click before the menu has
+          // arrived or whose press began earlier (the item grew in under the pointer), or a key before the content shows.
           const ready = this.#readySince;
-          if (e.detail > 1 || ready === null || (e.detail > 0 && this.#downAt < ready)) return drop(e);
+          const pointerEarly = e.detail > 0 && (ready === null || this.#downAt < ready);
+          if (e.detail > 1 || pointerEarly || this.#inSince === null) return drop(e);
           this.#close({ type: 'choose', index: this.#items().indexOf(item) });
         },
         true,
@@ -475,6 +483,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const step = stepMenu(this.#state, { type: 'open', focus }, this.#model());
       this.#state = step.state;
       this.#readySince = null;
+      this.#inSince = null;
       clearTimeout(this.#inertTimer);
       list.inert = false;
       this.#trigger!.setAttribute('aria-expanded', 'true');
@@ -490,6 +499,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#applyFocus(step.focus);
       if (!closing) return;
       this.#readySince = null;
+      this.#inSince = null;
       this.#trigger!.setAttribute('aria-expanded', 'false');
       for (const item of this.#items()) item.removeAttribute('data-pressed');
       // Not inside the click that chose: the item still owes its own handlers that click.
@@ -624,7 +634,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const f = menuSurfaceFrame(this.#from, this.#to, this.#anchor, phase);
       const settled = phase.shrink === 1 && phase.grow === 1;
       // Arrived: the content in focus and the surface no longer growing (past its overshoot).
-      if (this.#state.open && f.ink.incoming >= 1 && this.#growth.grow.v <= 0) this.#readySince ??= performance.now();
+      if (this.#state.open && f.ink.incoming >= 1) {
+        this.#inSince ??= performance.now();
+        if (this.#growth.grow.v <= 0) this.#readySince ??= performance.now();
+      }
       this.setAttribute('data-phase', settled ? 'open' : 'moving');
       this.#setBox(f.box);
       const s = list.style;
