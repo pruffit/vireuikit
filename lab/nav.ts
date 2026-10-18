@@ -104,7 +104,7 @@ const CSS = `
 [data-accessory][data-placement=in-bar] .acc { justify-content: center; }
 `;
 
-function ensureCss(): void {
+export function ensureCss(): void {
   if (document.getElementById('lab-nav-css')) return;
   const style = document.createElement('style');
   style.id = 'lab-nav-css';
