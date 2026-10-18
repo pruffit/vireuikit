@@ -98,3 +98,23 @@ export function releaseSheetDrag(state: SheetDragState, detents: readonly number
 export function stepSheetHeight(spring: Spring, dt: number, reduceMotion = false): boolean {
   return stepSpring(spring, dt, SHEET_SIZES.detentSpring.response, SHEET_SIZES.detentSpring.damping, reduceMotion);
 }
+
+export type SheetTouchAction = 'none' | 'pan-up' | 'pan-y';
+
+/**
+ * What the browser may do with a touch that starts in the content: scroll it while it has somewhere to go, and leave
+ * the sheet the rest. At its top and below the largest detent both directions move the sheet; at the largest only a
+ * downward drag does, upward is the content's.
+ */
+export function sheetTouchAction(scrollTop: number, height: number, detents: readonly number[]): SheetTouchAction {
+  if (scrollTop > 0) return 'pan-y';
+  const largest = detents[detents.length - 1] ?? height;
+  return height < largest ? 'none' : 'pan-up';
+}
+
+/** Whether a drag that began in the content (`dy` positive downward) is the sheet's rather than the content's. */
+export function sheetContentDrag(scrollTop: number, dy: number, height: number, detents: readonly number[]): boolean {
+  if (scrollTop > 0 || dy === 0) return false;
+  const largest = detents[detents.length - 1] ?? height;
+  return dy > 0 || height < largest;
+}

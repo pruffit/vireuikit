@@ -100,6 +100,11 @@ export function setViewportOverride(next: ViewportOverride | null): void {
   for (const listener of [...viewportListeners]) listener();
 }
 
+/** The element the host made the window, if any. */
+export function viewportRoot(): Element | null {
+  return viewportOverride?.root ?? null;
+}
+
 type SegmentsApi = { viewport?: { segments?: readonly DOMRectReadOnly[] | null } };
 
 /** The window and its segments in client coordinates. */
@@ -127,8 +132,16 @@ export function watchViewport(onChange: () => void): () => void {
   };
 }
 
-function contextOf(root: Element): AdaptiveContext {
+/** The window an element stands for: its box, or for the document the viewport (the root element's box is the whole page). */
+export function windowRect(root: Element): Rect {
+  const doc = root.ownerDocument.documentElement;
+  if (root === doc) return { x: 0, y: 0, width: doc.clientWidth, height: doc.clientHeight };
   const r = root.getBoundingClientRect();
+  return { x: r.x, y: r.y, width: r.width, height: r.height };
+}
+
+function contextOf(root: Element): AdaptiveContext {
+  const r = windowRect(root);
   const window = { width: r.width, height: r.height };
   const box = { x: r.x, y: r.y, width: r.width, height: r.height };
   const local = viewportSegments()

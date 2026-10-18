@@ -9,11 +9,15 @@ const NAV = 'vire-nav[data-vk]';
 const BODIES = `${NAV}>nav,${NAV}>[data-accessory]`;
 const LINKS = `${NAV}>nav a`;
 const CIRCLE = '[data-form=bar]>nav>a[data-search]';
+const SH = ':is(vire-popover,vire-sheet)[data-vk]';
+const SURF = `${SH}>:is(dialog,[popover])`;
+const GRAB = `${SURF}>[data-vk-grabber]`;
 
 const GLASS_BODY = `background:color-mix(in srgb,color-mix(in srgb,#fff calc((var(--vk-body-white) + var(--vk-body-lift)*2)*100%),var(--vireglass-tint-color,#fff)) calc(var(--vk-body-alpha)*100%),transparent);
  background:oklab(from color-mix(in srgb,#fff calc(var(--vk-body-white)*100%),var(--vireglass-tint-color,#fff)) calc(l + var(--vk-body-lift)) a b / var(--vk-body-alpha))`;
 const FROST_INK = 'color:oklab(from var(--vireglass-tint-color,#fff) calc(.95 - .87*clamp(0,(l + var(--vk-body-lift) - .6)*20,1)) 0 0)';
 const CONTRAST_GLASS = 'background:color-mix(in srgb,color-mix(in srgb,#fff calc((1 - var(--vireglass-ink,0))*100%),#000) 88%,transparent)';
+const SOLID = 'color-mix(in srgb,Canvas calc(var(--vk-opaque)*100%),transparent)';
 const SHADOW = 'box-shadow:0 0 0 1px color-mix(in srgb,currentColor 14%,transparent),0 10px 30px color-mix(in srgb,currentColor 18%,transparent)';
 
 // Every rule is keyed on `data-vk`, set at upgrade, so native markup keeps its own look until
@@ -149,6 +153,43 @@ ${NAV}[data-contrast]:is([data-surface=plain],[data-surface=frosted])>:is(nav,[d
 ${NAV}[data-contrast][data-surface=glass]>:is(nav,[data-accessory]),${NAV}[data-contrast][data-surface=glass]${CIRCLE}{${CONTRAST_GLASS}}
 ${NAV}[data-contrast]>nav>[data-vk-pill]{box-shadow:inset 0 0 0 2px currentColor}
 
+vire-popover,vire-sheet{display:contents}
+${SURF}{position:fixed;inset:auto;left:var(--vk-x,0px);top:var(--vk-y,0px);width:var(--vk-w,auto);height:var(--vk-h,auto);max-width:none;max-height:none;margin:0;
+ padding:var(--vk-pad-t,16px) var(--vk-pad,16px) var(--vk-pad,16px);border:0;border-radius:var(--vk-r,0px);box-sizing:border-box;
+ overflow-x:clip;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;color:inherit;font:inherit;background:transparent;outline:none;
+ clip-path:inset(-80px -80px var(--vk-clip-b,-80px) -80px);
+ --vk-body-alpha:0;--vk-body-white:0;--vk-body-lift:0;--vk-opaque:0;--vk-solid:${SOLID}}
+:where(${SURF}) :where(*){overscroll-behavior:contain}
+${SURF}[data-vk-touch=none]{touch-action:none}
+${SURF}[data-vk-touch=pan-up]{touch-action:pan-up}
+${SURF}[data-vk-touch=pan-y]{touch-action:pan-y}
+${SURF}::backdrop{position:fixed;inset:auto;left:var(--vk-sx,0px);top:var(--vk-sy,0px);width:var(--vk-sw,100vw);height:var(--vk-sh,100vh);
+ background:rgb(0 0 0/var(--vk-scrim,0));pointer-events:none}
+${SURF}[data-scrim]::backdrop{pointer-events:auto}
+${SH}[data-phase=growing]>:is(dialog,[popover]){overflow:clip;padding:0}
+${SH}[data-phase=growing]>:is(dialog,[popover])>:not([data-vk-grabber]){transform:translate(calc(var(--vk-cx,0px) + var(--vk-pad,16px)),calc(var(--vk-cy,0px) + var(--vk-pad-t,16px)));
+ width:var(--vk-content-w,auto);box-sizing:border-box}
+${SH}:is([data-phase=growing],[data-phase=morph])>:is(dialog,[popover])>:not([data-vk-grabber]){opacity:min(1,calc(var(--vk-ink-in,1)*2));filter:blur(calc((1 - var(--vk-ink-in,1))*8px))}
+${SH}[data-measure]>:is(dialog,[popover]){width:var(--vk-mw,max-content)!important;height:auto!important;left:0!important;top:0!important;
+ padding:var(--vk-mpt,var(--vk-pad)) var(--vk-pad) var(--vk-pad)!important;max-width:none!important;overflow:visible!important;visibility:hidden;clip-path:none}
+${SH}[data-measure]>:is(dialog,[popover])>:not([data-vk-grabber]){width:auto!important;transform:none!important;filter:none!important;opacity:1!important}
+${GRAB}{position:sticky;top:0;z-index:1;display:block;box-sizing:border-box;flex:none;width:var(--vk-grab-hit);height:var(--vk-grab-hit);
+ margin:calc(var(--vk-pad-t)*-1) auto calc(var(--vk-pad-t) - var(--vk-grab-hit));padding:0;border:0;background:none;outline:none;
+ touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
+${GRAB}[hidden]{display:none}
+${GRAB}::before{content:'';position:absolute;left:50%;top:var(--vk-grab-top);width:var(--vk-grab-w);height:var(--vk-grab-h);
+ margin-left:calc(var(--vk-grab-w)/-2);border-radius:calc(var(--vk-grab-h)/2);background:color-mix(in srgb,currentColor 38%,transparent)}
+${GRAB}:focus-visible::before{outline:2px solid currentColor;outline-offset:6px}
+${SH}[data-height=dragging]>:is(dialog,[popover])>[data-vk-grabber]{cursor:grabbing}
+
+${SH}[data-surface=glass]>:is(dialog,[popover]){color:var(--vireglass-ink-color,inherit);
+ ${GLASS_BODY.replaceAll('background:','background-color:')};
+ background-image:linear-gradient(var(--vk-solid),var(--vk-solid))}
+${SH}[data-surface=plain]>:is(dialog,[popover]){background:Canvas;${SHADOW}}
+${SH}[data-form=full-screen]>:is(dialog,[popover]){box-shadow:none}
+${SH}[data-form=side-pane]>:is(dialog,[popover]){box-shadow:0 0 0 1px color-mix(in srgb,currentColor 14%,transparent)}
+${SH}[data-contrast][data-surface=plain]>:is(dialog,[popover]){box-shadow:inset 0 0 0 2px currentColor}
+
 @supports not (color:oklab(from red l a b)){
 ${HOST}[data-frost][data-surface=glass]>button,${MENU}[data-frost][data-surface=glass]>[popover]{color:inherit;background:color-mix(in srgb,Canvas 82%,currentColor)}
 }
@@ -163,6 +204,9 @@ ${HOST}[data-carried]>button{background:transparent!important;backdrop-filter:no
 ${HOST}[data-carried]>button::after{visibility:hidden}
 
 @media (forced-colors:active){
+${SURF}{color:CanvasText!important;background:Canvas!important;border:1px solid CanvasText;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+${SURF}>*{filter:none!important;opacity:1!important}
+${GRAB}::before{background:CanvasText}
 ${BODY}{-webkit-text-fill-color:currentColor;text-shadow:none;color:ButtonText;background:ButtonFace;border:1px solid ButtonText;backdrop-filter:none;-webkit-backdrop-filter:none;transform:none}
 ${BODY}>svg{opacity:1;filter:none}
 ${HOST}[data-disabled]>button{-webkit-text-fill-color:currentColor;color:GrayText;border-color:GrayText}

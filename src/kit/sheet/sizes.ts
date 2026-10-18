@@ -9,6 +9,8 @@ export const SHEET_SIZES = {
   /** Glass up to 55 %, opaque from 90 %. */
   opacity: { glassUntil: 0.55, opaqueFrom: 0.9 },
   grabber: { width: 32, height: 4, hit: 44, top: 8 },
+  /** The content's inset from the surface, and the strip at the top where a drag moves the sheet. */
+  content: { pad: 16, handle: 28 },
   drag: { distance: 56, velocity: 125, zone: 125 },
   /** Fitted: about 0.4 s to rest on a 300 dp move, under 2 % overshoot (see the tests). */
   detentSpring: { response: 0.45, damping: 0.8 },

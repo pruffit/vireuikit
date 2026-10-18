@@ -263,6 +263,73 @@ and changes form through the selected destination.
   (in an effect, say), not before. The lens's copy follows the selected link's content, and a link that leaves the markup
   is left as the author wrote it.
 
+### Sheet and popover
+
+`<vire-popover>` and `<vire-sheet>` upgrade the platform's own transient surfaces. A surface is one body: it grows out
+of the control that presents it, runs back into it on close, and reshapes itself when the window changes class (a
+popover is a bottom sheet below 600 dp, a supplementary sheet a side sheet from 840 dp and a third pane from 1600 dp, a
+modal sheet is centred from 600 dp, a dialog with fields is full screen below 600 dp). Which form it takes is decided by
+`presentationForm` and reflected in `data-form` on the element and the surface.
+
+```html
+<vire-popover glass>
+  <vire-button glass><button popovertarget="filters">Filters</button></vire-button>
+  <div id="filters" popover>…<button popovertarget="filters" popovertargetaction="hide">Done</button></div>
+</vire-popover>
+
+<vire-sheet glass detents="medium large">
+  <button commandfor="add" command="show-modal">Add to playlist</button>
+  <dialog id="add" aria-labelledby="add-title">
+    <h2 id="add-title">Add to playlist</h2>…<button commandfor="add" command="close">Close</button>
+  </dialog>
+</vire-sheet>
+
+<vire-sheet glass kind="sheet">
+  <button popovertarget="queue">Queue</button>
+  <div id="queue" popover="manual">…</div>
+</vire-sheet>
+```
+
+- The kinds, from the markup: `<vire-popover>` is a `<button popovertarget>` and a `popover`. `<vire-sheet>` is a
+  `<dialog>` opened by `command="show-modal"` and closed by `command="close"` (kind `modal-sheet`; `kind` may say
+  `picker`, `dialog` or `alert`), or a `popover="manual"` its button toggles (kind `sheet`, supplementary: the page stays
+  usable and only the person closes it). The trigger is optional: a host may call `showModal()` or `showPopover()`
+  itself, and the surface then comes in from the bottom edge or from 96 % scale instead of growing out of a control.
+- Before the element is defined the browser runs each kind: light dismiss, Escape and focus return for the popover; an
+  inert page, Escape and focus moved in and back for the dialog; a toggle for the manual popover. Write the markup
+  without roles: the surface gets none (the dialog keeps its name from `aria-labelledby`), only the grabber is a
+  `role="slider"`.
+- After the upgrade the element runs the show and the hide, so the growth can run back before the surface leaves the
+  top layer. A popover becomes `manual` and its buttons' `popovertarget` is lifted; a dialog's `command` and `cancel`
+  events, a `<form method="dialog">` submit and a `close()` through `command="close"` are intercepted and run back first.
+  A host calling `close()` or `hidePopover()` itself gets no animation, only a clean settle. Everything lifted is
+  restored when the element is removed, along with the inline properties, the created grabber and the inset below.
+- The window is the nearest ancestor marked `data-vire-shell`, else the root given to `setViewportOverride`, else the
+  viewport. The form, the placement and the detents are measured in it; a positioned ancestor is not a window.
+- Growth. A popover grows as the menu does (the trigger's body, a drop, the panel with a small overshoot). A sheet grows
+  straight out of its trigger into its box with no drop. The trigger hands its body over while the surface is out
+  (`setCarried`), so there is never glass on glass, and takes it back on close. Reduced motion lands opening, closing and
+  every change of form in one frame.
+- The bottom sheet has detents: `detents="peek medium large"` (`peek` is the content's height, `medium` half the window,
+  `large` leaves 56 dp at the top; a supplementary sheet has `medium large`, a popover `peek`, a modal sheet `large`).
+  The current one is reflected in `detent`, settable by the host, and announced by a `vire-sheet-detent` event. The
+  sheet is inset glass at a low height and becomes opaque and flush as it rises. It follows the finger with no spring and
+  resists past the largest detent, springs to the detent the position and velocity choose, and closes below the lowest
+  one unless `persistent` is set. The content scrolls first: a drag moves the sheet only from the content's top, and on
+  the grabber and the top strip always. `[data-sheet-handle]` marks more chrome that drags.
+- The grabber is a created `<div role="slider" aria-orientation="vertical">` with a 44 dp hit area, whose
+  `aria-valuetext` is the detent's name and `aria-label` is `grabber-label` (default "Sheet height"). The arrows, Home and
+  End change the detent, a tap moves to the next. With a field focused and the visual viewport shrunk by a keyboard, the
+  sheet takes its largest detent above the keyboard and goes back when it leaves, unless the person moved it.
+- A side sheet publishes `--vire-sheet-inset-end` on its parent (the width and gaps it takes from the content), removed
+  on close. From 1600 dp the third pane is opaque and not glass, like full screen.
+- The scrim is 32 % black under a modal surface and under a popover's sheet form. A press on it closes a bottom sheet or
+  a popover, never a centred sheet, a dialog, an alert or a `persistent` surface. The background is never scaled or moved.
+- Attributes: `glass` (as on the menu), `kind`, `detents`, `detent`, `persistent`, `grabber-label`. Properties: `a11y`,
+  `sample`, `detent`, `open`. Reduced transparency and increased contrast make every form opaque, with the same geometry
+  and no lens; glass off is a plain opaque body with a shadow.
+- The lab forces states with `data-vire-force-state`: `open`, `open:<detent>` and `grow:<t>` (a growth frozen at `t`).
+
 Sizes, behaviour state machines and accessibility modes are exported from `vireuikit` and shared by every
 target. How an atom is accepted:
 [design](https://github.com/pruffit/vireuikit/blob/main/docs/design.md),

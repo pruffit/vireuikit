@@ -16,11 +16,14 @@ const DEFAULTS: Partial<Record<SurfaceKind, readonly SheetDetent[]>> = {
   popover: ['peek'],
 };
 
+/** The detents a kind has before an author names any. */
+export const defaultSheetDetents = (kind: SurfaceKind): readonly SheetDetent[] => DEFAULTS[kind] ?? ['large'];
+
 /** The resting heights in dp of the detents a kind has, ascending and without repeats. */
 export function sheetDetents(kind: SurfaceKind, window: Size, options: SheetDetentOptions = {}): number[] {
   const { detent } = SHEET_SIZES;
   const large = Math.max(0, window.height - detent.largeTopGap);
-  const wanted = options.detents ?? DEFAULTS[kind] ?? ['large'];
+  const wanted = options.detents ?? defaultSheetDetents(kind);
   const heights: number[] = [];
   for (const name of wanted) {
     if (name === 'large') heights.push(large);

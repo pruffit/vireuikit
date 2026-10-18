@@ -1,6 +1,6 @@
 // Where a surface sits, in dp, for every form `presentationForm` can give it.
 import type { MorphBox } from '../adaptive/form-morph';
-import type { PresentationForm } from '../adaptive/presentation';
+import type { PresentationForm, SurfaceKind } from '../adaptive/presentation';
 import type { Size } from '../geometry';
 import { menuPlacement, type MenuPlacement, type RoundedRect } from '../menu';
 import { SHEET_SIZES, sheetInset, sheetOpacity, sheetRadius } from './sizes';
@@ -125,4 +125,18 @@ export function sheetLayout(input: SheetLayoutInput): SheetLayout {
     case 'full-screen':
       return result({ x: 0, y: 0, width: window.width, height: window.height, radius: 0 }, { opacity: 1, glass: false });
   }
+}
+
+/** Whether a surface carries a lens at all: the pane and full screen never do, a bottom sheet only if its lowest detent is not opaque. */
+export function sheetUsesGlass(form: PresentationForm['form'], detents: readonly number[], window: Size): boolean {
+  if (form === 'side-pane' || form === 'full-screen') return false;
+  if (form !== 'bottom-sheet') return true;
+  const lowest = detents[0];
+  return lowest === undefined || window.height <= 0 || sheetOpacity(lowest / window.height) < 1;
+}
+
+/** A press on the scrim closes a bottom sheet or a popover, never a centred sheet, a dialog or an alert, and never a persistent surface. */
+export function scrimCloses(kind: SurfaceKind, form: PresentationForm['form'], persistent: boolean): boolean {
+  if (persistent) return false;
+  return form === 'bottom-sheet' || kind === 'popover';
 }

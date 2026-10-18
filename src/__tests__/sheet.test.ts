@@ -7,6 +7,7 @@ import {
   createGrowthState,
   createSheetDrag,
   createSheetGrowth,
+  defaultSheetDetents,
   menuPlacement,
   menuSurfaceFrame,
   moveSheetDrag,
@@ -15,6 +16,10 @@ import {
   pressSheetDrag,
   presentationForm,
   releaseSheetDrag,
+  scrimCloses,
+  sheetContentDrag,
+  sheetTouchAction,
+  sheetUsesGlass,
   sheetDetents,
   sheetEntryFrame,
   sheetForKeyboard,
@@ -534,5 +539,49 @@ describe('sheetForKeyboard', () => {
   it('keeps the bottom on the visual viewport when it is scrolled', () => {
     const vv = { x: 0, y: 40, width: 390, height: 460 };
     expect(sheetForKeyboard(heights, 400, phone, vv).bottom).toBe(500);
+  });
+});
+
+describe('what the element asks of the model', () => {
+  it('names the detents a kind has by default', () => {
+    expect(defaultSheetDetents('sheet')).toEqual(['medium', 'large']);
+    expect(defaultSheetDetents('popover')).toEqual(['peek']);
+    expect(defaultSheetDetents('modal-sheet')).toEqual(['large']);
+  });
+
+  it('attaches a lens to every form but the third pane and full screen, and to a bottom sheet that is not opaque at its lowest detent', () => {
+    const w = { width: 390, height: 800 };
+    expect(sheetUsesGlass('side-pane', [], w)).toBe(false);
+    expect(sheetUsesGlass('full-screen', [], w)).toBe(false);
+    expect(sheetUsesGlass('side-sheet', [], w)).toBe(true);
+    expect(sheetUsesGlass('popover', [], w)).toBe(true);
+    expect(sheetUsesGlass('bottom-sheet', [400, 744], w)).toBe(true);
+    expect(sheetUsesGlass('bottom-sheet', [744], w)).toBe(false);
+  });
+
+  it('lets a scrim press close a bottom sheet or a popover, never a centred surface or a persistent one', () => {
+    expect(scrimCloses('modal-sheet', 'bottom-sheet', false)).toBe(true);
+    expect(scrimCloses('popover', 'bottom-sheet', false)).toBe(true);
+    expect(scrimCloses('modal-sheet', 'centered-sheet', false)).toBe(false);
+    expect(scrimCloses('dialog', 'basic-dialog', false)).toBe(false);
+    expect(scrimCloses('alert', 'alert', false)).toBe(false);
+    expect(scrimCloses('modal-sheet', 'bottom-sheet', true)).toBe(false);
+    expect(scrimCloses('popover', 'popover', true)).toBe(false);
+  });
+
+  it('gives a drag in the content to the sheet only from the content top, upward only below the largest detent', () => {
+    const detents = [400, 744];
+    expect(sheetContentDrag(0, 20, 744, detents)).toBe(true);
+    expect(sheetContentDrag(0, -20, 744, detents)).toBe(false);
+    expect(sheetContentDrag(0, -20, 400, detents)).toBe(true);
+    expect(sheetContentDrag(12, 20, 400, detents)).toBe(false);
+    expect(sheetContentDrag(0, 0, 400, detents)).toBe(false);
+  });
+
+  it('leaves a touch to the content while it scrolls and to the sheet otherwise', () => {
+    const detents = [400, 744];
+    expect(sheetTouchAction(10, 400, detents)).toBe('pan-y');
+    expect(sheetTouchAction(0, 400, detents)).toBe('none');
+    expect(sheetTouchAction(0, 744, detents)).toBe('pan-up');
   });
 });
