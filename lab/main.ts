@@ -7,6 +7,7 @@ import { MENU_STATES, menuGallery, menuSandbox, type MenuLabState } from './menu
 import { menuReference } from './menu-reference';
 import { NAV_FORMS, navGallery, navSandbox, type NavLabForm, type NavSandboxHandle } from './nav';
 import { referenceControl } from './reference-controls';
+import { SHEET_FORMS, sheetGallery, sheetSandbox, type SheetLabForm, type SheetSandboxHandle } from './sheet';
 import { REFERENCE_STAGE, paintReferenceStage } from './reference-stage';
 
 const FORCEABLE_STATES = ['rest', 'hover', 'focus', 'pressed', 'disabled'] as const;
@@ -28,10 +29,11 @@ const flag = (name: string): boolean | undefined => {
   return v === '1' ? true : v === '0' ? false : undefined;
 };
 
-const VIEWS = ['gallery', 'sandbox', 'menu', 'nav', 'reference', 'menu-reference', 'adaptive'] as const;
+const VIEWS = ['gallery', 'sandbox', 'menu', 'nav', 'sheet', 'reference', 'menu-reference', 'adaptive'] as const;
 const view = pick('view', VIEWS, 'gallery');
-const atomParam = pick('atom', ['all', ...ATOMS, 'menu', 'nav'] as const, 'all');
+const atomParam = pick('atom', ['all', ...ATOMS, 'menu', 'nav', 'sheet'] as const, 'all');
 const navForm = pick('form', NAV_FORMS, 'bar') as NavLabForm;
+const sheetForm = pick('form', SHEET_FORMS, 'bottom-sheet') as SheetLabForm;
 const stateParam = pick('state', ['all', ...FORCEABLE_STATES, ...MENU_STATES] as const, 'all');
 const backdrop = pick('backdrop', BACKDROPS, 'light') as Backdrop;
 const glass = pick('glass', ['1', '0', 'touch'] as const, '1');
@@ -84,6 +86,16 @@ function gallery(): void {
   if (atomParam === 'menu') {
     const wanted = (MENU_STATES as readonly string[]).includes(stateParam) ? [stateParam as MenuLabState] : MENU_STATES;
     menuGallery(rows, wanted, { size, glass, sample: upgrade ? sample : null });
+    return;
+  }
+  if (atomParam === 'sheet') {
+    sheetGallery(stage, rows, sheetForm, {
+      glass,
+      sample: upgrade ? sample : null,
+      detent: params.get('detent'),
+      force: params.get('state') ?? undefined,
+      kind: params.get('kind'),
+    });
     return;
   }
   if (atomParam === 'nav') {
@@ -157,11 +169,12 @@ async function reference(): Promise<void> {
   const height = BUTTON_SIZES[size].height;
   const src = `/__reference/file?path=${encodeURIComponent(control.file)}`;
   sample = await paintReferenceStage(stage, control, height, src);
-  const atom = atomParam === 'all' || atomParam === 'menu' || atomParam === 'nav' ? control.atom : atomParam;
+  const atom = atomParam === 'all' || atomParam === 'menu' || atomParam === 'nav' || atomParam === 'sheet' ? control.atom : atomParam;
   rows.append(make(atom, stateParam === 'all' ? (control.state ?? 'rest') : stateParam));
 }
 
 let navHandle: NavSandboxHandle | undefined;
+let sheetHandle: SheetSandboxHandle | undefined;
 const dp = (name: string, fallback: number) => Number(params.get(name)) || fallback;
 const navAttrs = Object.fromEntries(
   ['form', 'collapsed', 'panes', 'minimize', 'scroller', 'search-key', 'toggle-label']
@@ -183,6 +196,16 @@ else if (view === 'nav') {
     extra: dp('extra', 0),
   });
 }
+else if (view === 'sheet') {
+  stage.style.width = 'max-content';
+  sheetHandle = sheetSandbox(document.getElementById('rows')!, note, {
+    glass,
+    sample: upgrade ? sample : null,
+    width: dp('w', 390),
+    height: dp('h', 720),
+    detents: params.get('detents'),
+  });
+}
 else if (view === 'menu') menuSandbox(document.getElementById('rows')!, note, { size, glass, sample: upgrade ? sample : null });
 else if (view === 'reference') await reference();
 else if (view === 'menu-reference') await menuReference(stage, document.getElementById('rows')!);
@@ -199,7 +222,7 @@ function buildChrome(): void {
     `<label><input type="checkbox" data-flag="${name}"${params.get(name) === '1' ? ' checked' : ''}>${label}</label>`;
   bar.innerHTML = [
     select('view', VIEWS, view),
-    select('atom', ['all', ...ATOMS, 'menu', 'nav'], atomParam),
+    select('atom', ['all', ...ATOMS, 'menu', 'nav', 'sheet'], atomParam),
     select('state', ['all', ...(atomParam === 'menu' ? MENU_STATES : FORCEABLE_STATES)], stateParam),
     select('backdrop', BACKDROPS, backdrop),
     select('glass', ['1', '0', 'touch'], glass),
@@ -273,5 +296,6 @@ window.__lab = {
   define: () => defineVireElements(),
   upgraded: upgrade,
   ...(navHandle ? { nav: navHandle } : {}),
+  ...(sheetHandle ? { sheet: sheetHandle } : {}),
 };
 document.documentElement.dataset.ready = '1';
