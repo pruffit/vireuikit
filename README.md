@@ -233,8 +233,8 @@ and changes form through the selected destination.
 - Attributes: `form` (`bar`, `rail` or `sidebar`: fixes the form), `collapsed` (the sidebar held as a rail; the toggle
   sets and clears it and the host remembers it), `panes` (panes the content shows; two on a medium window take the bar),
   `minimize="scroll"` with `scroller` (the id of the scrolling element, resolved in the element's root; or set the
-  `scroller` property to an element), `search-key` (default `/`), `collapse-label` and `expand-label` (the toggle's
-  names, default "Collapse sidebar" and "Show sidebar"), `glass` (empty or `present`: glass; otherwise a plain body).
+  `scroller` property to an element), `search-key` (default `/`), `toggle-label` (the toggle's name, default "Sidebar";
+  it never changes, `aria-expanded` says whether the sidebar is shown), `glass` (empty or `present`: glass; otherwise a plain body).
 - Minimising: the bar becomes a circle with the selected icon, and the search a second circle, after 24 dp scrolled
   down in the scroller, and expands after 24 dp up, at the top, on a tap on it and when focus enters it.
 - `[data-accessory]` is the bottom accessory. It sits over the bar, in the minimised bar's row, or along the bottom of
@@ -244,7 +244,7 @@ and changes form through the selected destination.
   clear, and fires `vire-nav-layout` with `{ form, minimized, insets, accessoryPlacement }` whenever any changes.
 - Toggle: in the sidebar a button in its head collapses it into a rail (`collapsed`, and `vire-nav-collapse` with
   `{ collapsed: true }`); an expandable rail beside the content clears it (`{ collapsed: false }`); on an expanded window
-  a rail opens the sidebar over the content behind a scrim, closed by Escape, a press on the scrim or a link chosen;
+  a rail opens the sidebar over the content behind a scrim (`aria-expanded` is true then too), closed by Escape, a press on the scrim or a link chosen;
   Escape and the scrim return focus to the toggle if it was inside the navigation. The element stores nothing.
 - Where the model gives a shortcut (a large window, or a keyboard in use), `search-key` pressed outside a field clicks
   the search link, which carries `aria-keyshortcuts` only then.

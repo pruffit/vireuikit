@@ -989,7 +989,7 @@ test.describe('the toggle', () => {
     await openNav(page, 'glass=0&accessory=0', 1280, 800);
     const toggle = page.locator('vire-nav button[data-vk-toggle]');
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await expect(toggle).toHaveAccessibleName('Collapse sidebar');
+    await expect(toggle).toHaveAccessibleName('Sidebar');
     expect(await toggle.getAttribute('type')).toBe('button');
     await toggle.click();
     await expect(page.locator('vire-nav')).toHaveAttribute('collapsed', '');
@@ -998,7 +998,7 @@ test.describe('the toggle', () => {
     expect(await clicks(page)).toEqual([]);
     expect((await log(page)).filter((line) => line.startsWith('collapse:'))).toEqual(['collapse:true']);
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(toggle).toHaveAccessibleName('Show sidebar');
+    await expect(toggle).toHaveAccessibleName('Sidebar');
     await toggle.click();
     await expect(page.locator('vire-nav')).not.toHaveAttribute('collapsed', '');
     await page.waitForFunction(() => document.querySelector('vire-nav')!.getAttribute('data-form') === 'sidebar');
@@ -1007,16 +1007,22 @@ test.describe('the toggle', () => {
     expect(await page.evaluate(() => [localStorage.length, sessionStorage.length, document.cookie])).toEqual([0, 0, '']);
   });
 
-  test('keeps focus on itself through the change, and takes its names from the attributes', async ({ page }) => {
-    await openNav(page, 'glass=0&accessory=0&nav-collapse-label=Hide&nav-expand-label=Show', 1280, 800);
+  test('keeps focus on itself through the change, and its name is the toggle-label attribute, constant while aria-expanded carries the state', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0&nav-toggle-label=Menu', 1280, 800);
     const toggle = page.locator('vire-nav button[data-vk-toggle]');
-    await expect(toggle).toHaveAccessibleName('Hide');
+    await expect(toggle).toHaveAccessibleName('Menu');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     await toggle.focus();
     await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.querySelector('vire-nav')!.getAttribute('data-form') === 'rail');
     await settle(page);
     await expect(toggle).toBeFocused();
-    await expect(toggle).toHaveAccessibleName('Show');
+    await expect(toggle).toHaveAccessibleName('Menu');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await page.evaluate(() => document.querySelector('vire-nav')!.setAttribute('toggle-label', 'Navigation'));
+    await expect(toggle).toHaveAccessibleName('Navigation');
+    await page.evaluate(() => document.querySelector('vire-nav')!.removeAttribute('toggle-label'));
+    await expect(toggle).toHaveAccessibleName('Sidebar');
   });
 
   test('the bar has none', async ({ page }) => {

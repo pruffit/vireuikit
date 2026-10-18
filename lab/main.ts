@@ -164,7 +164,7 @@ async function reference(): Promise<void> {
 let navHandle: NavSandboxHandle | undefined;
 const dp = (name: string, fallback: number) => Number(params.get(name)) || fallback;
 const navAttrs = Object.fromEntries(
-  ['form', 'collapsed', 'panes', 'minimize', 'scroller', 'search-key', 'collapse-label', 'expand-label']
+  ['form', 'collapsed', 'panes', 'minimize', 'scroller', 'search-key', 'toggle-label']
     .map((name) => [name, params.get(`nav-${name}`)] as const)
     .filter((pair): pair is readonly [string, string] => pair[1] !== null),
 );

@@ -192,7 +192,8 @@ here the anchor is the selected destination. `<vire-nav>` builds it:
 - **The person's choices stay theirs.** The `collapsed` attribute is the sidebar collapsed into a rail: the toggle sets
   and clears it and fires `vire-nav-collapse`; the host remembers it (a cookie, so the server renders the right form).
   An expandable rail on an expanded window opens the sidebar over the content with a scrim and closes on Escape, a press
-  outside or a choice. The kit stores nothing.
+  outside or a choice. The toggle's name is constant (`toggle-label`, default "Sidebar"); `aria-expanded` alone says
+  whether the sidebar is shown, so name and state never contradict each other. The kit stores nothing.
 - **Search.** The model's search form decides where the search destination shows. Where the model gives a shortcut,
   `search-key` (default `/`) pressed outside a field activates the search link, announced by `aria-keyshortcuts`. The
   field itself is the search atom (order 7).

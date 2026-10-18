@@ -46,8 +46,7 @@ const MATERIAL_STEPS = 10;
 const DRAG_SLOP = 6;
 const LENS_MAGNIFY = 0.15;
 const SWALLOW_MS = 100;
-const DEFAULT_COLLAPSE = 'Collapse sidebar';
-const DEFAULT_EXPAND = 'Show sidebar';
+const DEFAULT_TOGGLE_LABEL = 'Sidebar';
 const TOGGLE_GLYPH =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg>';
 
@@ -127,8 +126,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       'minimize',
       'scroller',
       'search-key',
-      'collapse-label',
-      'expand-label',
+      'toggle-label',
       FORCE_ATTRIBUTE,
     ];
 
@@ -306,7 +304,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       else if (name === 'minimize' || name === 'scroller') {
         this.#bindScroller();
         this.#replan();
-      } else if (name === 'collapse-label' || name === 'expand-label') this.#syncToggle();
+      } else if (name === 'toggle-label') this.#syncToggle();
       else this.#replan();
     }
 
@@ -804,10 +802,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       if (!toggle || !shown) return;
       const expanded = shown.nav.form === 'sidebar';
       toggle.setAttribute('aria-expanded', String(expanded));
-      toggle.setAttribute(
-        'aria-label',
-        expanded ? this.getAttribute('collapse-label') || DEFAULT_COLLAPSE : this.getAttribute('expand-label') || DEFAULT_EXPAND,
-      );
+      toggle.setAttribute('aria-label', this.getAttribute('toggle-label') || DEFAULT_TOGGLE_LABEL);
     }
 
     #syncKeyShortcut(plan: Plan): void {
