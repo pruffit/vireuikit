@@ -1,3 +1,5 @@
+import { NAV_SIZES } from '../kit/nav';
+
 const HOST = ':is(vire-button,vire-icon-button)[data-vk]';
 const BODY = `${HOST}>button`;
 const MENU = 'vire-menu[data-vk]';
@@ -128,7 +130,8 @@ ${NAV}[data-lens]>[data-vk-lens]{display:flex}
 ${NAV}>[data-vk-lens]>div{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
  transform:scale(calc(1 + .15*var(--vk-lift,0)));opacity:var(--vk-lift,0)}
 ${NAV}>[data-vk-lens]>div>svg{width:var(--vk-nav-icon);height:var(--vk-nav-icon);flex:none}
-${NAV}>[data-vk-lens][data-form=sidebar]>div{flex-direction:row;gap:12px;font-size:15px;line-height:20px}
+${NAV}>[data-vk-lens][data-form=sidebar]{justify-content:flex-start}
+${NAV}>[data-vk-lens][data-form=sidebar]>div{flex-direction:row;gap:12px;font-size:15px;line-height:20px;padding-inline-start:calc(12px + ${NAV_SIZES.lens.inflate}px*var(--vk-lift,0))}
 ${NAV}>[data-vk-lens][data-dragging]>div{opacity:0}
 ${NAV}[data-minimized]>[data-vk-lens]>div,${NAV}[data-form=bar][data-minimized]>[data-vk-lens]>div{font-size:0}
 ${NAV}>[data-vk-scrim]{position:absolute;inset:0;pointer-events:auto;background:color-mix(in srgb,CanvasText 28%,transparent)}
