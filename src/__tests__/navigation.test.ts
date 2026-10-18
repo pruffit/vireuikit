@@ -491,6 +491,8 @@ describe('the morph state', () => {
     near(after.lens!.box, before.lens!.box, 1e-9);
     expect(after.ink.outgoing).toBeCloseTo(Math.max(before.ink.outgoing, before.ink.incoming), 9);
     expect(after.showing).toBe('from');
+    expect(before.showing).toBe('to');
+    expect(state.from.form).toBe('rail');
     stepNavMorph(state, 0.1);
     expect(currentNavFrame(state).lens).not.toBeNull();
     drive(state, 3);
@@ -506,10 +508,14 @@ describe('the morph state', () => {
       const state = createNavMorph(layouts[run % 3]!);
       for (let i = 0; i < 12; i += 1) {
         const prev: NavMorphFrame = currentNavFrame(state);
+        const shownBefore = (prev.showing === 'from' ? state.from : state.to).form;
+        const inkBefore = prev.showing === 'from' ? prev.ink.outgoing : prev.ink.incoming;
         const next = layouts[Math.floor(rnd() * 3)]!;
         aimNavMorph(state, next);
         const frame = currentNavFrame(state);
         near(frame.body, prev.body, 0.5);
+        // The form whose content is in sight never flips under an aim; one already defocused to nothing may.
+        if (inkBefore > 1e-6) expect((frame.showing === 'from' ? state.from : state.to).form).toBe(shownBefore);
         if (prev.lens) {
           expect(frame.lens).not.toBeNull();
           near(frame.lens!.box, prev.lens.box, 0.5);

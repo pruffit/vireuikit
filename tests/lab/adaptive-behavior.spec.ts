@@ -189,7 +189,6 @@ test.describe('one body', () => {
   });
 
   test('the form it draws flows bar, rail, sidebar, rail, bar', async ({ page }) => {
-    test.fail(true, 'a class that arrives while the last morph is still settling pivots from the current frame, and the body then reports the form it left');
     const { frames } = await sweep(page);
     expect(flow(frames.map((f) => f.form))).toEqual(['bar', 'rail', 'sidebar', 'rail', 'bar']);
   });

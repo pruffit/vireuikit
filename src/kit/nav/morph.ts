@@ -282,7 +282,10 @@ export function aimNavMorph(state: NavMorphState, next: NavLayout, via: 'lens' |
     return;
   }
 
-  state.pivot = currentNavFrame(state);
+  const frozen = currentNavFrame(state);
+  // The new start's content is what showed at the freeze, so `from` names that form, not the one first left.
+  if (frozen.showing === 'to') state.from = state.to;
+  state.pivot = frozen;
   state.pivotAt = 0;
   state.to = next;
   state.via = via;
