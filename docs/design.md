@@ -51,7 +51,9 @@ attribute, a development aid of the elements that the lab and the snapshots use.
 - **Adaptive stage** (`?view=adaptive&w=673&h=841&posture=book&input=touch`, or `preset=…`) draws a window at a size
   in dp with a resize handle, presets from a folded phone to an ultrawide desktop, a fold (posture, `fold` position,
   `band`, `occluding`) and the input layers (`touch`, `pointer`, `mixed`, `tablet-keyboard`, `keyboard`). The real atoms
-  inside take their adaptive forms; the patterns not built yet are labelled outlines placed by the model. A readout
+  and the real `<vire-nav>` inside take their adaptive forms (the navigation covers the window frame, takes its form from
+  its own box and the stage's overrides, and the panes are laid out by the insets it publishes); the other patterns not
+  built yet (panes, sheets, the toolbar) are labelled outlines placed by the model. A readout
   lists every decision, and scenarios sweep the width, fold and unfold, rotate and attach a keyboard, checking the
   person's state on each step. `foldaware=0` hides the fold from the atoms only, for the canary.
 
