@@ -24,11 +24,13 @@ import {
   type RoundedRect,
 } from '../index';
 
+// Delete is a native disabled button (focus cannot land on it); Pin is aria-disabled (it can, WAI-ARIA APG).
 const ITEMS: MenuItem[] = [
   { label: 'Copy link', disabled: false },
   { label: 'Rename', disabled: false },
   { label: 'Delete', disabled: true },
   { label: 'Remove from list', disabled: false },
+  { label: 'Pin', disabled: true, focusable: true },
   { label: 'Copy text', disabled: false },
 ];
 
@@ -36,53 +38,58 @@ const open = (focus: 'menu' | 'first' | 'last' = 'menu'): MenuState => stepMenu(
 const at = (state: MenuState, active: number): MenuState => ({ ...state, active });
 
 describe('the menu-button keyboard', () => {
-  it('opens on the first or last item, or on the menu itself', () => {
+  it('opens on the first or last item it can reach, or on the menu itself', () => {
     expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, ITEMS).focus).toEqual({ to: 'item', index: 0 });
-    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'last' }, ITEMS).focus).toEqual({ to: 'item', index: 4 });
+    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'last' }, ITEMS).focus).toEqual({ to: 'item', index: 5 });
     const pointer = stepMenu(MENU_CLOSED, { type: 'open', focus: 'menu' }, ITEMS);
     expect(pointer.focus).toEqual({ to: 'menu' });
     expect(pointer.state).toMatchObject({ open: true, active: -1 });
   });
 
-  // WAI-ARIA APG: disabled menu items are focusable but cannot be activated.
-  it('a disabled item at either end is where the keyboard lands', () => {
-    const items = [{ label: 'A', disabled: true }, { label: 'B', disabled: false }, { label: 'C', disabled: true }];
-    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, items).focus).toEqual({ to: 'item', index: 0 });
-    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'last' }, items).focus).toEqual({ to: 'item', index: 2 });
+  it('a natively disabled item at either end is passed over, an aria-disabled one is landed on', () => {
+    const native = [{ label: 'A', disabled: true }, { label: 'B', disabled: false }, { label: 'C', disabled: true }];
+    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, native).focus).toEqual({ to: 'item', index: 1 });
+    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'last' }, native).focus).toEqual({ to: 'item', index: 1 });
+    const aria = native.map((item) => ({ ...item, focusable: true }));
+    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, aria).focus).toEqual({ to: 'item', index: 0 });
+    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'last' }, aria).focus).toEqual({ to: 'item', index: 2 });
   });
 
-  it('an empty menu opens on itself', () => {
+  it('an empty menu, or one of natively disabled items only, opens on itself', () => {
     expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, []).focus).toEqual({ to: 'menu' });
     expect(stepMenu(open(), { type: 'move', to: 'next' }, []).focus).toEqual({ to: 'stay' });
+    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, [{ label: 'A', disabled: true }]).focus).toEqual({ to: 'menu' });
   });
 
-  it('arrows move to the next and previous item, a disabled one included, and wrap', () => {
-    expect(stepMenu(at(open(), 1), { type: 'move', to: 'next' }, ITEMS).state.active).toBe(2);
-    expect(stepMenu(at(open(), 3), { type: 'move', to: 'previous' }, ITEMS).state.active).toBe(2);
-    expect(stepMenu(at(open(), 4), { type: 'move', to: 'next' }, ITEMS).state.active).toBe(0);
-    expect(stepMenu(at(open(), 0), { type: 'move', to: 'previous' }, ITEMS).state.active).toBe(4);
+  it('arrows pass over a natively disabled item, land on an aria-disabled one, and wrap', () => {
+    expect(stepMenu(at(open(), 1), { type: 'move', to: 'next' }, ITEMS).state.active).toBe(3);
+    expect(stepMenu(at(open(), 3), { type: 'move', to: 'previous' }, ITEMS).state.active).toBe(1);
+    expect(stepMenu(at(open(), 3), { type: 'move', to: 'next' }, ITEMS).state.active).toBe(4);
+    expect(stepMenu(at(open(), 5), { type: 'move', to: 'next' }, ITEMS).state.active).toBe(0);
+    expect(stepMenu(at(open(), 0), { type: 'move', to: 'previous' }, ITEMS).state.active).toBe(5);
   });
 
   it('from the menu itself the arrows land on the first and the last item', () => {
     expect(stepMenu(open(), { type: 'move', to: 'next' }, ITEMS).state.active).toBe(0);
-    expect(stepMenu(open(), { type: 'move', to: 'previous' }, ITEMS).state.active).toBe(4);
+    expect(stepMenu(open(), { type: 'move', to: 'previous' }, ITEMS).state.active).toBe(5);
   });
 
   it('Home and End go to the first and last item', () => {
     expect(stepMenu(at(open(), 3), { type: 'move', to: 'first' }, ITEMS).focus).toEqual({ to: 'item', index: 0 });
-    expect(stepMenu(at(open(), 0), { type: 'move', to: 'last' }, ITEMS).focus).toEqual({ to: 'item', index: 4 });
+    expect(stepMenu(at(open(), 0), { type: 'move', to: 'last' }, ITEMS).focus).toEqual({ to: 'item', index: 5 });
   });
 
-  it('the pointer makes the item under it active, and moving within it changes nothing', () => {
+  it('the pointer makes the item under it active, an aria-disabled one too, but not a natively disabled one', () => {
     expect(stepMenu(open(), { type: 'point', index: 3 }, ITEMS).focus).toEqual({ to: 'item', index: 3 });
-    expect(stepMenu(at(open(), 1), { type: 'point', index: 2 }, ITEMS).focus).toEqual({ to: 'item', index: 2 });
-    expect(stepMenu(at(open(), 2), { type: 'point', index: 2 }, ITEMS).focus).toEqual({ to: 'stay' });
-    expect(stepMenu(at(open(), 2), { type: 'point', index: 9 }, ITEMS).focus).toEqual({ to: 'stay' });
+    expect(stepMenu(at(open(), 1), { type: 'point', index: 4 }, ITEMS).focus).toEqual({ to: 'item', index: 4 });
+    expect(stepMenu(at(open(), 1), { type: 'point', index: 2 }, ITEMS).focus).toEqual({ to: 'stay' });
+    expect(stepMenu(at(open(), 4), { type: 'point', index: 4 }, ITEMS).focus).toEqual({ to: 'stay' });
+    expect(stepMenu(at(open(), 4), { type: 'point', index: 9 }, ITEMS).focus).toEqual({ to: 'stay' });
   });
 
   it('typeahead goes to the next item starting with the letter, and a repeated letter cycles', () => {
     const c = stepMenu(at(open(), 0), { type: 'type', key: 'c', at: 10 }, ITEMS);
-    expect(c.state.active).toBe(4);
+    expect(c.state.active).toBe(5);
     const cc = stepMenu(c.state, { type: 'type', key: 'c', at: 10.2 }, ITEMS);
     expect(cc.state.active).toBe(0);
   });
@@ -96,20 +103,21 @@ describe('the menu-button keyboard', () => {
     expect(rem.state.active).toBe(3);
     const later = stepMenu(rem.state, { type: 'type', key: 'c', at: 2 }, ITEMS);
     expect(later.state.typed).toBe('c');
-    expect(later.state.active).toBe(4);
+    expect(later.state.active).toBe(5);
   });
 
   it('an arrow or the pointer ends a typed word, so the next letter starts a new one', () => {
-    const d = stepMenu(at(open(), 0), { type: 'type', key: 'd', at: 1 }, ITEMS);
-    const home = stepMenu(d.state, { type: 'move', to: 'first' }, ITEMS);
+    const c = stepMenu(at(open(), 0), { type: 'type', key: 'c', at: 1 }, ITEMS);
+    const home = stepMenu(c.state, { type: 'move', to: 'first' }, ITEMS);
     expect(home.state.typed).toBe('');
     expect(stepMenu(home.state, { type: 'type', key: 'r', at: 1.1 }, ITEMS).state.active).toBe(1);
-    const pointed = stepMenu(d.state, { type: 'point', index: 4 }, ITEMS);
+    const pointed = stepMenu(c.state, { type: 'point', index: 3 }, ITEMS);
     expect(stepMenu(pointed.state, { type: 'type', key: 'r', at: 1.1 }, ITEMS).state.active).toBe(1);
   });
 
-  it('typeahead reaches a disabled item too, and stays put without a match', () => {
-    expect(stepMenu(at(open(), 1), { type: 'type', key: 'd', at: 0 }, ITEMS).focus).toEqual({ to: 'item', index: 2 });
+  it('typeahead reaches an aria-disabled item, passes over a natively disabled one, and stays put without a match', () => {
+    expect(stepMenu(at(open(), 1), { type: 'type', key: 'p', at: 0 }, ITEMS).focus).toEqual({ to: 'item', index: 4 });
+    expect(stepMenu(at(open(), 1), { type: 'type', key: 'd', at: 0 }, ITEMS).focus).toEqual({ to: 'stay' });
     const none = stepMenu(at(open(), 1), { type: 'type', key: 'x', at: 0 }, ITEMS);
     expect(none.state.active).toBe(1);
     expect(none.focus).toEqual({ to: 'stay' });
@@ -122,10 +130,12 @@ describe('the menu-button keyboard', () => {
     expect(step.chosen).toBe(3);
   });
 
-  it('a disabled item cannot be chosen and closes nothing', () => {
-    const step = stepMenu(at(open(), 1), { type: 'choose', index: 2 }, ITEMS);
-    expect(step.state.open).toBe(true);
-    expect(step.chosen).toBeNull();
+  it('neither kind of disabled item can be chosen, and choosing one closes nothing', () => {
+    for (const index of [2, 4]) {
+      const step = stepMenu(at(open(), 1), { type: 'choose', index }, ITEMS);
+      expect(step.state.open).toBe(true);
+      expect(step.chosen).toBeNull();
+    }
   });
 
   it('Escape, Tab and the trigger return focus to the trigger; a press outside leaves it alone', () => {
