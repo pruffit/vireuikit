@@ -249,7 +249,10 @@ and changes form through the selected destination.
 - Where the model gives a shortcut (a large window, or a keyboard in use), `search-key` pressed outside a field clicks
   the search link, which carries `aria-keyshortcuts` only then.
 - Every link keeps a 44 dp hit area wherever a coarse input is present, without changing the layout. A `[data-badge]`
-  inside a link is a count (or a dot, when empty) at the icon's corner. `sample` and `a11y` work as on the buttons.
+  inside a link is a count (or a dot, when empty) at the icon's corner, and only a picture: the element sets
+  `aria-hidden="true"` on it and restores the attribute on removal. To say it, put a `[data-badge-label]` in the link;
+  it is visually hidden but stays in the link's name:
+  `<a href="/messages"><svg>…</svg>Messages<span data-badge>3</span><span data-badge-label>, 3 new</span></a>`. `sample` and `a11y` work as on the buttons.
 
 Sizes, behaviour state machines and accessibility modes are exported from `vireuikit` and shared by every
 target. How an atom is accepted:

@@ -31,7 +31,7 @@ const PRIMARY = [
   { label: 'Home', href: '/', icon: ICONS.home },
   { label: 'Library', href: '/library', icon: ICONS.library },
   { label: 'Friends', href: '/friends', icon: ICONS.friends },
-  { label: 'Messages', href: '/messages', icon: ICONS.messages, badge: '3' },
+  { label: 'Messages', href: '/messages', icon: ICONS.messages, badge: '3', badgeLabel: ', 3 new' },
 ] as const;
 const SECONDARY = [
   { label: 'Feed', href: '/feed', icon: ICONS.feed },
@@ -50,8 +50,8 @@ export type NavSpec = {
   attrs?: Record<string, string>;
 };
 
-const link = (item: { label: string; href: string; icon: string; badge?: string }, current: boolean) =>
-  `<li><a href="${item.href}"${current ? ' aria-current="page"' : ''}>${item.icon}${item.label}${item.badge ? `<span data-badge>${item.badge}</span>` : ''}</a></li>`;
+const link = (item: { label: string; href: string; icon: string; badge?: string; badgeLabel?: string }, current: boolean) =>
+  `<li><a href="${item.href}"${current ? ' aria-current="page"' : ''}>${item.icon}${item.label}${item.badge ? `<span data-badge>${item.badge}</span>${item.badgeLabel ? `<span data-badge-label>${item.badgeLabel}</span>` : ''}` : ''}</a></li>`;
 
 /** The first HTML of a navigation: a working list of links that needs nothing defined. */
 export function makeNav(spec: NavSpec): HTMLElement {
@@ -178,7 +178,9 @@ export function navSandbox(rows: HTMLElement, note: (text: string) => void, opti
       for (const other of nav.querySelectorAll('[aria-current]')) other.removeAttribute('aria-current');
       link.setAttribute('aria-current', 'page');
     }
-    note(`click:${link.textContent!.replace(/\d+$/, '')}`);
+    const name = link.cloneNode(true) as HTMLElement;
+    for (const extra of name.querySelectorAll('[data-badge],[data-badge-label]')) extra.remove();
+    note(`click:${name.textContent}`);
   });
   nav.addEventListener('vire-nav-layout', (e) => {
     const d = (e as CustomEvent<{ form: string; minimized: boolean; accessoryPlacement: string | null; insets: { bottom: number; start: number } }>).detail;

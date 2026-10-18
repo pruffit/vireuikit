@@ -197,6 +197,8 @@ here the anchor is the selected destination. `<vire-nav>` builds it:
 - **Search.** The model's search form decides where the search destination shows. Where the model gives a shortcut,
   `search-key` (default `/`) pressed outside a field activates the search link, announced by `aria-keyshortcuts`. The
   field itself is the search atom (order 7).
+- **Badges.** A `[data-badge]` is a picture, `aria-hidden` by the element, so a count is never read glued to the label;
+  a `[data-badge-label]` in the link says it and is visually hidden, not hidden from the tree.
 - **Sizes and input.** Rows and items keep the 44 dp hit area wherever any coarse input is present (AD2); the sidebar's
   rows are 44 dp on the touch tier and 36 dp on the pointer tier. Focus shows as a ring on the link; a morph keeps
   focus on the same link while that link stays shown, and a link the new form hides hands it to the selected link (or

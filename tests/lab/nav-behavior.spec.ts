@@ -150,7 +150,7 @@ test.describe('before the upgrade', () => {
       await page.keyboard.press('Tab');
       walked.push(await page.evaluate(() => document.activeElement?.textContent?.trim() ?? ''));
     }
-    expect(walked).toEqual(['Library', 'Friends', 'Messages3', 'Feed', 'Dashboard', 'Search']);
+    expect(walked).toEqual(['Library', 'Friends', 'Messages3, 3 new', 'Feed', 'Dashboard', 'Search']);
     await Promise.all([page.waitForURL(/\/friends$/), page.getByRole('link', { name: 'Friends' }).click()]);
   });
 });
@@ -244,6 +244,40 @@ test.describe('roles', () => {
         }),
     );
     expect(late).toBe('bar');
+  });
+});
+
+test.describe('badges', () => {
+  test('a badge is a picture and a [data-badge-label] says it: the link reads "Messages, 3 new", the count is not read glued to the label', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    // The link is a flex container, so the browsers put a space between the text and the label's element.
+    await expect(page.getByRole('link', { name: /^Messages ?, 3 new$/ })).toHaveCount(1);
+    await expect(page.getByRole('link', { name: /Messages ?3/ })).toHaveCount(0);
+    expect(await page.locator('vire-nav [data-badge]').getAttribute('aria-hidden')).toBe('true');
+    const label = (await page.locator('vire-nav [data-badge-label]').boundingBox())!;
+    expect(label.width).toBeLessThanOrEqual(1);
+    expect(label.height).toBeLessThanOrEqual(1);
+    const badge = (await page.locator('vire-nav [data-badge]').boundingBox())!;
+    expect(badge.width).toBeGreaterThan(8);
+  });
+
+  test('a badge added later is hidden from the tree too, and removing the element gives the authors attribute back', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    await page.evaluate(() => {
+      const link = [...document.querySelectorAll('vire-nav nav a')].find((a) => a.textContent === 'Friends')!;
+      link.insertAdjacentHTML('beforeend', '<span data-badge></span><span data-badge-label>, new activity</span>');
+      document.querySelector('vire-nav [data-badge]')!.setAttribute('aria-hidden', 'false');
+    });
+    await settle(page);
+    await expect(page.getByRole('link', { name: /^Friends ?, new activity$/ })).toHaveCount(1);
+    const hidden = await page.locator('vire-nav [data-badge]').evaluateAll((els) => els.map((el) => el.getAttribute('aria-hidden')));
+    expect(hidden).toEqual(['true', 'true']);
+    const restored = await page.evaluate(() => {
+      const host = document.querySelector('vire-nav')!;
+      host.remove();
+      return [...host.querySelectorAll('[data-badge]')].map((el) => el.getAttribute('aria-hidden'));
+    });
+    expect(restored).toEqual(['false', null]);
   });
 });
 
@@ -1074,7 +1108,7 @@ test.describe('the toggle', () => {
 const focusedName = (page: Page) =>
   page.evaluate(() => {
     const el = document.activeElement as HTMLElement | null;
-    return !el || el === document.body ? 'body' : el.matches('a') ? (el.textContent ?? '').trim().replace(/\d+$/, '') : el.localName;
+    return !el || el === document.body ? 'body' : el.matches('a') ? (el.textContent ?? '').trim().replace(/[0-9]+(, [0-9]+ new)?$/, '') : el.localName;
   });
 
 test.describe('a link the form hides', () => {

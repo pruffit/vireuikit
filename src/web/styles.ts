@@ -110,6 +110,7 @@ ${NAV}[data-form=bar]>nav>a[data-search],${NAV}[data-minimized]>nav a{font-size:
 ${LINKS} [data-badge]{position:absolute;top:4px;inset-inline-start:calc(50% + 6px);min-width:16px;height:16px;box-sizing:border-box;padding:0 4px;
  border-radius:8px;background:var(--vire-nav-badge,#e5484d);color:#fff;font-size:11px;line-height:16px;text-align:center}
 ${LINKS} [data-badge]:empty{min-width:8px;width:8px;height:8px;padding:0;top:8px}
+${NAV} [data-badge-label]{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 ${NAV}[data-form=sidebar]>nav [data-badge]{inset-inline-start:30px}
 ${NAV}[data-form=sidebar]>nav [data-badge]:not(:empty){inset-inline-start:auto;inset-inline-end:12px;top:calc(50% - 8px)}
 ${NAV}>nav>[data-vk-pill]{position:absolute;left:calc(var(--vk-px,0px) - var(--vk-x,0px));top:calc(var(--vk-py,0px) - var(--vk-y,0px));

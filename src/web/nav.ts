@@ -142,6 +142,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     #hadStyle = { host: false, nav: false, parent: false };
     #linkStyle = new Map<HTMLElement, boolean>();
     #hiddenWas = new Map<HTMLElement, boolean>();
+    #badgeWas = new Map<HTMLElement, string | null>();
     #mine = new Set<Node>();
     #own: A11yOverride = {};
     #mode: A11yMode | null = null;
@@ -249,6 +250,11 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       if (this.#accessory) dropEmptyStyle(this.#accessory, this.#accessoryHadStyle);
       for (const [el, was] of this.#hiddenWas) el.toggleAttribute('hidden', was);
       this.#hiddenWas.clear();
+      for (const [badge, was] of this.#badgeWas) {
+        if (was === null) badge.removeAttribute('aria-hidden');
+        else badge.setAttribute('aria-hidden', was);
+      }
+      this.#badgeWas.clear();
       for (const [link, had] of this.#linkStyle) {
         for (const name of Array.from(link.style)) if (name.startsWith('--vk-')) link.style.removeProperty(name);
         dropEmptyStyle(link, had);
@@ -480,6 +486,14 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       return { lists, secondaryList, primary, secondary, search };
     }
 
+    /** A badge is a picture; what it says reaches a screen reader through a [data-badge-label] the author puts in the link. */
+    #hideBadges(): void {
+      for (const badge of this.#navEl!.querySelectorAll<HTMLElement>('a [data-badge]')) {
+        if (!this.#badgeWas.has(badge)) this.#badgeWas.set(badge, badge.getAttribute('aria-hidden'));
+        if (badge.getAttribute('aria-hidden') !== 'true') badge.setAttribute('aria-hidden', 'true');
+      }
+    }
+
     #tier(): 'touch' | 'pointer' {
       return sizeTier(effectiveInput()) === 'touch' ? 'touch' : 'pointer';
     }
@@ -538,6 +552,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       const ctx = this.#ctx;
       if (!this.#navEl || !ctx) return;
       this.#rebindScrollerIfMissing();
+      this.#hideBadges();
       const forced = this.#forced();
       const minimized = forced?.kind === 'minimized' || this.#minState.minimized;
       const plan = this.#makePlan(ctx, { minimized, over: this.#over });
