@@ -9,14 +9,26 @@ export type GlassParams = {
   onTouch: boolean;
   /** The backdrop as the host knows it; null leaves it to the lens's probe. */
   sample: BackdropSample | null;
+  /** The lens's own pointer response; off where the element's children take the pointer. */
+  interactive?: boolean;
+};
+
+export type GlassFrame = {
+  material?: VireGlassMaterial;
+  geometry?: VireGlassGeometry;
+  morph?: GlassMorph | null;
 };
 
 export type GlassSession = {
   setMaterial(material: VireGlassMaterial): void;
   setGeometry(geometry: VireGlassGeometry): void;
+  /** Material, geometry and morph together, for one repaint instead of three. */
+  frame(next: GlassFrame): void;
   setAppear(t: number): void;
   setMorph(morph: GlassMorph | null): void;
   setSample(sample: BackdropSample | null): void;
+  /** What the probe reads behind the element where it is now. */
+  probe(): BackdropSample;
   destroy(): void;
 };
 
@@ -27,7 +39,7 @@ export async function attachControlGlass(
   params: GlassParams,
   stillWanted: () => boolean,
 ): Promise<GlassSession | null> {
-  const { attachGlass } = await import('vireglass/dom');
+  const { attachGlass, probeBackdrop } = await import('vireglass/dom');
   if (!stillWanted()) return null;
 
   // `attachGlass` re-reads these on `update()`. The geometry is passed in because a pressed
@@ -41,6 +53,7 @@ export async function attachControlGlass(
     // near black under reduced transparency with light ink (docs/acceptance.md, "Resting body").
     body: false,
   };
+  if (params.interactive === false) opts.interactive = false;
   if (params.sample) opts.sample = params.sample;
   const handle: GlassHandle = attachGlass(el, opts);
 
@@ -53,9 +66,16 @@ export async function attachControlGlass(
       opts.geometry = geometry;
       handle.update();
     },
+    frame(next) {
+      if (next.material) opts.material = next.material;
+      if (next.geometry) opts.geometry = next.geometry;
+      if (next.morph !== undefined) handle.setMorph(next.morph);
+      else handle.update();
+    },
     setAppear: (t) => handle.setAppear(t),
     setMorph: (morph) => handle.setMorph(morph),
     setSample: (sample) => handle.setSample(sample),
+    probe: () => probeBackdrop(el),
     destroy: () => handle.destroy(),
   };
 }

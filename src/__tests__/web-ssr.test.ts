@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { BUTTON_TAG, ICON_BUTTON_TAG, defineVireElements, setA11yOverride, systemA11y } from '../web';
+import { BUTTON_TAG, ICON_BUTTON_TAG, MENU_TAG, defineVireElements, setA11yOverride, systemA11y } from '../web';
 
 describe('the web entry on a server', () => {
   it('loads without a DOM', () => {
     expect(typeof document).toBe('undefined');
     expect(BUTTON_TAG).toBe('vire-button');
     expect(ICON_BUTTON_TAG).toBe('vire-icon-button');
+    expect(MENU_TAG).toBe('vire-menu');
   });
 
   it('defining elements is a no-op where there is no registry', () => {

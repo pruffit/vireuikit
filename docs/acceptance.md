@@ -1,4 +1,4 @@
-# Acceptance: button and icon button
+# Acceptance: button, icon button and menu
 
 Each criterion is written in the kit's own words from the reference analysis. Sources are cited by code and
 timestamp (`M 3:52`), and this is the one place the codes are defined:
@@ -37,11 +37,20 @@ How a criterion is checked:
 | Button horizontal padding | 10 / 14 / 18 / 22 / 20 dp (small … xlarge, touch) | **Derived:** about 0.45 × height, so the label starts after the curve of a capsule. The reference has no padding figures. |
 | Hit area | 44 dp on a coarse pointer for every tier, 24 dp on a fine one | HIG; W 2.5.8. The body keeps its size; the hit area reaches past it. The Android client raises the finger floor to 48. |
 | Press growth | 18 % icon button, 6 % button | **Chosen** from M 3:51–3:52: the lifted icon button visibly grows by about a fifth, and S says the lift exists because the finger covers a small target, so the button, which sinks, grows less. |
+| Menu row | the tier's height (44 dp at touch) | **Measured**, M 5:11: the rows are 287.5 px apart in a frame where the toolbar they grew from is 282 px tall (44.9 dp at 44). |
+| Menu padding | 0.3 × the row: 7 / 10 / 12 / 14 / 13 dp (small … xlarge, touch) | **Measured**, M 5:11: the first glyph's centre is 34.6 dp below the top edge and 33.8 dp in from the leading edge, which is the padding plus half a row, so 12 to 13 dp at 44. |
+| Item glyph and label | the glyph centred in a square of the row at the item's leading edge, the label after it, a square of the row left free after the longest label (a check mark or a chevron goes there) | **Measured**, M 5:11: the label starts 58.8 dp from the menu's edge (ours: padding + row = 57) and 60.5 dp are left after the longest one (ours 57). An item without a glyph starts its label at the button's padding. |
+| Menu radius | the item's radius plus the padding, so the active item's highlight is concentric with the menu: 13 / 18 / 32 / 38 / 35 dp | D 3:53, M 7:53 (concentricity). **Measured**, M 5:11: a circle of 37 dp fits the head of the corner (the continuous corner's tail runs a few pixels longer). |
 
-Checked by `sizes.test.ts` (floors, monotonic tiers, radius rule, nested radius, hit slop) and the `size` and
-`hit area` tests in `behavior.spec.ts` (rendered boxes are 44 and 24, a capsule's computed radius is half its
-height, and under touch emulation a tap `slop − 1` dp outside a `small` or `medium` body clicks it while a point
-beyond the slop does not).
+Checked by `sizes.test.ts` (floors, monotonic tiers, radius rule, nested radius, hit slop, the menu's rows, padding
+and concentric radius) and the `size` and `hit area` tests in `behavior.spec.ts` (rendered boxes are 44 and 24, a
+capsule's computed radius is half its height, and under touch emulation a tap `slop − 1` dp outside a `small` or
+`medium` body clicks it while a point beyond the slop does not), and the `size` test in `menu-behavior.spec.ts`
+(rendered rows of 44, a menu radius of 35).
+
+The reference frames of M 5:11 are every frame of the video from 311.478 to 312.446 s (opening) and from 313.414 to
+313.847 s (closing), at 29.97 fps, kept locally under `m511/` like the others; lengths are converted with the toolbar's
+282 px as 44 dp (6.41 px/dp).
 
 ## Button
 
@@ -53,7 +62,7 @@ A button is an action: nothing grows out of it, and it sinks under press rather 
 | B2 | A press grows the body slightly, and the response is visible while the finger is down (M 3:51–3:52; S). | behaviour "the labeled button grows by about six percent" (scale between 1.055 and 1.07 while held) |
 | B3 | The pressed body turns milkier and the label goes out of focus under the finger (M 3:52). | side-by-side M 3:52; snapshots of the pressed state on every backdrop |
 | B4 | A button sinks, it does not lift (`atomLift('button') = 0`); it never becomes an enlarged lens. | unit |
-| B5 | A button does not grow into anything. `setMorph` exists on both elements as a hook for a host, but the button never calls it and nothing opens out of it. | unit (`pressResponse` only grows the body); `setMorph` itself is not tested (step 2) |
+| B5 | A button that is an action does not grow into anything; it grows only when it is the trigger of a `<vire-menu>`, and then the menu grows out of it (N8). `setMorph` exists on both elements as a hook for a host, but nothing in the kit calls it. | unit (`pressResponse` only grows the body); `setMorph` itself is not tested |
 | B6 | The press is cancelled when the pointer leaves, and releasing outside does not activate. | unit; behaviour "the pointer leaving cancels the press" |
 | B7 | A release outside never swallows a later click: a keyboard or scripted click, and a real click, still fire. | behaviour "after a release outside…", "a release outside followed by a real click…" |
 | B8 | Hover exists only with a cursor; keyboard focus draws a ring on any device (W 2.4.7), a click does not. A key press does not stay held when focus moves away. | unit; behaviour "hover comes with the cursor", "keyboard focus shows the ring…", "a key shows the focus ring even though the pointer is coarse", "a key press does not stick…" |
@@ -91,8 +100,89 @@ The carrier of lift into the glass, and later of growth into a menu.
 | I4 | The finger response is physical: the glow starts at the point of contact and the body is pulled by the finger. | `vireglass` does this on a real pointer; not asserted here |
 | I5 | It is a circle (a capsule of equal sides) of the tier's height with a glyph box of half of it. | unit; behaviour size tests |
 | I6 | It returns to rest after release without leaving the press value behind. | behaviour (press value below 0.01 after release) |
-| I7 | The growth hook exists: `setMorph` hands a merge shape to the lens. | not tested; the menu is step 2 |
+| I7 | A menu grows out of it: `setCarried` hands its body to the menu's surface and takes its glyph out of focus, and `null` takes the body back (N12). | behaviour "the trigger hands its body over…" |
 | I8 | Cancel on leave, release-outside, hover, disabled, glass opt-in and the three accessibility modes behave as for the button. | the same behaviour tests, run against both elements |
+
+## Menu
+
+The menu is the result of growth out of its trigger, and closing it is the same growth run backwards. It closes after
+a choice: a scenario that needs several picks without closing is a popover, which is another atom (S, the Tide Guide
+case, where a menu that "deconstructs every time" was replaced by a glass popover). The trigger is an icon button, a
+button or a bare `<button>`; it grows only because it opens a menu (B5). Behaviour tests are in
+`tests/lab/menu-behavior.spec.ts`.
+
+| # | Criterion | Check |
+|---|---|---|
+| N1 | It works before the kit: a `<button popovertarget>` opens the list (a `popover`), the items are buttons with `popovertargetaction="hide"`, so a choice clicks the item once and closes the list; Escape and a press outside close it; Escape and a choice return focus to the trigger; Tab reaches the items. None of it needs the element's script or glass. | behaviour "before the upgrade" |
+| N2 | The upgrade adds the menu-button semantics, and only together with the keyboard they promise: the trigger gets `aria-haspopup="menu"`, `aria-expanded` and `aria-controls`; the list `role="menu"`, named by the trigger; the items `role="menuitem"`, out of the tab order. `disabled` and `aria-disabled` stay the author's: the element never rewrites either, and both can be set and cleared after the upgrade, by attribute or by property (React clears `disabled` with `removeAttribute`). Removing the element takes all of it away, leaves no attribute or empty `style` of its own behind and gives the list back to the platform popover; an item taken out of the list gets its markup back at once. | behaviour "roles", "removing the element gives the markup back", "an item taken out of the menu gets its markup back", "disabled items stay the author's" (set, cleared and set again, for each attribute) |
+| N3 | On the trigger, Enter, Space and ArrowDown open the menu with focus on the first item focus can land on, ArrowUp on the last. A pointer opens it with focus on the menu itself and no item highlighted. | unit `stepMenu`; behaviour "the trigger opens it from the keyboard…", "a pointer opens it…" |
+| N4 | In the menu, ArrowDown and ArrowUp move to the next and previous item and wrap, Home and End go to the first and last, and a printable character moves to the next item whose label starts with what was typed in the last half second (an arrow or the pointer ends the word). An item disabled the native way is passed over by all of these, because a disabled button cannot take focus; an `aria-disabled="true"` item is landed on, as the WAI-ARIA APG has it: focusable, not activatable. The pointer moving over an item it can focus makes it the active one. A focused item that turns natively disabled hands focus to the menu instead of dropping it to the page. | unit; behaviour "arrows, Home, End and typeahead pass over a natively disabled item, land on an aria-disabled one…", "the pointer makes an item active", "native disabled set, cleared and set again…" |
+| N5 | A choice closes the menu, returns focus to the trigger and fires the item's own click exactly once, even when the item's own handler stops the click; neither kind of disabled item can be chosen, by pointer or key, and choosing one closes nothing. | unit; behaviour "a choice closes the menu…", "…even when the item's own handler stops the click", "an aria-disabled item can be reached but not chosen…" |
+| N6 | Escape closes and returns focus to the trigger; a press outside closes without taking focus back, in the document or inside a closed shadow root; Tab closes, and focus moves on from the trigger as if the menu were not there. | unit; behaviour "Escape…", "a press outside…", "Tab…", "inside a closed shadow root" |
+| N7 | There is no way to choose and stay open. | by construction (no such option); unit (`choose` always closes) |
+| N8 | The glass grows out of the trigger: the surface's first frame is the trigger's body (box and radius), it contracts into a drop smaller than the trigger, the drop grows into the menu with a small overshoot, and the content comes into focus only near size (M 5:11, frame by frame; M 5:05 "the bubble simply pops open to reveal the content"). | unit (frames at the boundaries, the drop, the overshoot, the ink); behaviour "the surface starts on the trigger, passes a drop and lands on the menu", canary "a menu that pops open without growing fails it" |
+| N9 | The timing is the reference's: the drop forms in about 0.10 s, the menu is at size at about 0.3 s and overshoots by about 3.5 % at about 0.37 s; closing reaches the drop at about 0.25 s and is back in the trigger at about 0.42 s (M 5:11, "Against the reference"). | unit `DEFAULT_GROWTH_TIMING` against these numbers |
+| N10 | It stays under the finger: the menu shares the trigger's corner that points to the nearest viewport corner and grows into the open space, covering the trigger; it flips or slides only to stay in the viewport, and `corner` fixes the corner (S: the button morphs into the menu so that the grip does not change). | unit `menuPlacement`; behaviour "the menu pins to the trigger's corner" |
+| N11 | Closing retraces the growth: the content defocuses first, the menu flows back into a drop and the drop into the trigger, ending on the trigger's body; reopening midway turns back from where it is. | unit (reverse path, turning back); behaviour "closing runs back through the drop into the trigger" |
+| N12 | One body: on every frame the menu is out (growing, open, retracting) the trigger draws no lens, no body and no rim of its own and takes no pointer events, and its glyph goes out of focus as the growth begins, so there is never glass on glass; it takes the body back when the menu has retracted into it, and a trigger whose lens appears only under the finger goes back to no lens (M 13:24; M 5:11, the toolbar's glyphs defocus as it gathers into the drop). Under forced colours the trigger fades with its glyph. | behaviour "while the menu grows, is out and retracts, the trigger draws no lens, body or rim" (sampled every frame, glass on and `touch`), "the trigger hands its body over and takes it back", "a trigger whose lens appears only under the finger…", "the carried trigger fades…"; snapshots `menu-*` |
+| N13 | Glass only on the menu's surface: the items are content on it and carry no lens, and the active item's highlight is ink on the glass (the nearer half of a press), concentric with the menu. | unit `menuItemFill`; behaviour "the surface is the only lens"; snapshots |
+| N14 | The growth goes through the core's morph: while the drop and the menu are joined, the second shape is handed to the surface's lens through `setMorph`, offset from the surface's centre, and nothing is handed once they are one. | unit `menuSurfaceFrame`; behaviour "the lens is handed the second shape while they are joined" (a recording stand-in for `vireglass/dom`) |
+| N15 | The drop and the menu are one medium. As a drop it is the gathered medium lit by a concentrate of its surroundings: the reference drop is white over its light grey (L 0.97 to 1.00 over 0.79 to 0.82), and over a dark backdrop it can only brighten (§5). As a menu at rest it carries the control's resting body: the reference menu is 0.058 to 0.072 lighter than what it covers, with ΔC 0.000 (M 5:11, two text-free regions, the open frame minus the same pixels before it opened). | unit `menuActivity`, `menuBody`; behaviour "the resting menu on the mid grey lifts what it covers as the reference menu does" (within 0.05 of it, ours +0.043), "…stands off what it covers…" (dark +0.019, photo +0.026, light +0.017, ΔC within 0.02), "the drop … is lit well above its surround" (ΔL above 0.1, under 0.7 over dark); canaries "a clear menu fails it", "the resting body in the drop's place fails the drop's bound" |
+| N16 | A large element does not flip between light and dark (M 15:29): the backdrop is read once as the menu opens and held while it is out. | behaviour "the ink holds while the menu is out" |
+| N17 | A larger piece is thicker glass, with a deeper shadow, more lensing and a softer scattering of light (M 7:02–7:25), and Regular turns text under it into soft spots (M 11:47). The menu's surface is the control material with the core's sheet scattering (roughness 0.85, a blur of about 10 dp where the control's is 0.4); the thickness and the shadow follow the geometry in the core. | unit `menuGlass`; behaviour "the surface scatters what lies under it far more softly…"; snapshot `menu-text-glass-on`; thickness and shadow owned by `vireglass`, not asserted |
+| N18 | Reduced motion: no growth; the menu is at its size in its first frame and gone in the first frame of closing, its content in focus at once (M 18:35). | unit; behaviour "reduced motion opens and closes in one frame" |
+| N19 | Reduced transparency frosts the surface (the lens stays, its blur rises, the body goes to `vireglass`'s density and the ink follows it); increased contrast borders it (M 18:22, 18:29). | behaviour; snapshots `menu-busy-reduce-transparency`, `menu-busy-increase-contrast` |
+| N20 | Glass off leaves a complete menu: an opaque surface, the same keyboard and choice, and the same growth on the plain surface. | behaviour "glass off…"; snapshots `menu-*-glass-off` |
+| N21 | A lens that cannot be loaded leaves the menu working on its plain surface, with no unhandled error. | behaviour "a lens that fails to load…" |
+| N22 | Under forced colours the menu uses system colours: a Canvas surface with a border, the active item in Highlight, disabled items in GrayText. | behaviour "forced colours" (colours asserted, not the look) |
+| N23 | Upgrading while the page is parsed adopts the trigger and the list and synthesizes nothing; items added later get their role. | behaviour "upgrade while the page is parsed" |
+| N24 | `sample` on the menu reaches its surface, set before or after the lens attaches. | behaviour "a sample on the menu reaches its surface" |
+| N25 | The press that opened the menu chooses nothing. The menu grows in under the pointer, so its first item lands where the trigger was: the second click of a double click, a pointer click before the menu has arrived (its content in focus and the surface past its overshoot, about 0.37 s) or whose press began before it had, and a held Enter or Space all leave it as it is; a pointer click once it has arrived chooses. A deliberate key is not under the pointer, so Enter or Space on an item chooses as soon as the content is in focus (about 0.31 s), before the surface settles; only a key before the content shows is dropped. The platform's own popover never puts an item under the pointer, so it needs none of this. | behaviour "input that began on the trigger" (a double click, second clicks 40 to 250 ms later, Enter and Space held on the trigger and on an item, a second Enter before the content, a key that chooses in the first frame the content shows while a pointer click there is still dropped, and a later click that does choose) |
+| N26 | A scroll or a resize while the menu is out puts it back over its trigger once a frame, measures nothing and hands the lens nothing when the surface's shape has not changed; the lens is handed a morph only when it changes. | behaviour "a scroll or a resize while the menu is out costs the lens nothing…" (a recording stand-in for `vireglass/dom`) |
+| N27 | `glass` parses as on the buttons: empty, `present` or `touch` is a lens, anything else none. Taking a forced state away closes the menu and resets `aria-expanded`. | behaviour "glass is parsed as on the buttons…", "taking a forced state away…" |
+| N28 | The list's own `toggle` event fires once the growth has run back, when the list leaves the top layer; `aria-expanded` turns false as the closing begins. | behaviour "the list's own toggle event fires once the growth has run back…" |
+
+### Against the reference
+
+M 5:11 against ours at the touch tier, with the same label width:
+
+| | reference | ours |
+|---|---|---|
+| row | 44.9 dp | 44 |
+| first glyph centre from the top / from the leading edge | 34.6 / 33.8 dp | 35 / 35 |
+| label start | 58.8 dp | 57 |
+| room after the longest label | 60.5 dp | 57 |
+| width, four rows, "Three" the longest | 167 dp | 162 |
+| height, four rows | 206 dp | 202 |
+| corner | ≈ 37 dp | 35 |
+| body over what it covers, ΔL / ΔC | +0.058 to +0.072 / 0.000, over a grey of L 0.66 to 0.80 | +0.043 / 0.000 over the mid grey (L 0.62); +0.019 dark, +0.026 photo, +0.017 light |
+| the drop's lightness | 0.97 to 1.00 over 0.79 to 0.82 (ΔL ≈ +0.2) | +0.220 over the mid grey; 0.99 over light; 0.46 over dark (+0.146) |
+| the drop's size | ≈ 63 dp, from a 172 × 44 dp toolbar | 48 dp (1.1 × the source's smaller side) |
+| the drop's shape | a flat-bottomed drop with a ridge, then a bulb on a neck while closing | a circle; the neck is in the lens (N14), not in the silhouette |
+| the content | none until 95 % of the height (0.30 s), heavily blurred, sharp by about 0.40 s | none until 90 % of the growth, sharp at size (0.31 s) |
+| where it sits | the toolbar's bottom-leading corner, 6 dp further out and 9.5 dp lower | flush on the trigger's corner |
+
+Timing. The reference is tracked frame by frame (the box of everything lighter than the frame before the menu opened,
+so ±0.033 s), from the first frame that changes (311.578 s opening, 313.447 s closing); the model is the growth
+springs, with the drop "formed" when growth begins and "reached" on closing when growth is below 0.12 (a 66 dp body
+for this menu, where the reference drop measures 67 to 77 dp):
+
+| | reference | `DEFAULT_GROWTH_TIMING` before | after |
+|---|---|---|---|
+| the drop has formed and rises out of the source | 0.10 s | 0.18 | 0.10 |
+| at size (95 % of the height) | 0.30 to 0.33 s | 0.40 | 0.28 |
+| overshoot | 3.5 % of the height at 0.37 s (the top edge, 46 px past its rest) | 3.3 % at 0.51 | 3.2 % at 0.37 |
+| settled | 0.83 s, sliding 13 dp down into its window-concentric place after reaching size | 0.69 | 0.52 |
+| closing reaches the drop | 0.25 s | 0.23 | 0.23 |
+| closing is back in the source, its ridge gone | 0.42 s | 0.57 | 0.44 |
+
+The rows and their spacing, the timing up to the overshoot and the closing, the resting body and the drop's lightness
+are held (unit tests and N15). The drop's size, the menu's offset from the toolbar and the slide that settles it there
+are layout of the reference (a wide toolbar gathers more glass; the menu sits concentric with the window, which the kit
+does not know), so they are reported, not held. The silhouette is one element's box, so the neck between the drop and
+the menu shapes the refraction but not the outline. The lab's `view=menu-reference` puts ten of the frames (opening
+and closing) next to ours at the same time since the start, over the frame before the menu opened with the toolbar
+filled in from its surround.
 
 ## Resting body
 
@@ -199,10 +289,16 @@ to the core's lens that moves the body or the rim fails it in either direction.
 
 ## What is not covered
 
-- Menu, switch, slider, segmented control, chip, field; the Android target (`src/native/` does not exist yet).
+- Switch, slider, segmented control, chip, field; the Android target (`src/native/` does not exist yet).
 - `accent` tinting for the one primary action: nothing in the kit sets it.
 - `glass="touch"` (glass only under the finger): wired through `vireglass`'s interactive variant, not tested.
-- `setMorph`: no test until the menu uses it.
+- `setMorph` on the button and the icon button: a hook for a host that nothing in the kit calls. The menu morphs its
+  own surface's lens (N14).
+- The menu: submenus, groups and separators, checkable items (`menuitemcheckbox`, `menuitemradio`), a context menu
+  on a long press, and choosing by pressing the trigger, sliding onto an item and releasing. A menu taller than the
+  viewport scrolls inside its surface; that is not tested.
+- The growth is measured through what the element renders and what it hands the lens, not on pixels: the drop's
+  shape (the neck between the drop and the menu) is not compared with M 5:11.
 - System `prefers-contrast` and `prefers-reduced-transparency`: the lab only emulates reduced motion, so those two
   modes are tested through the programmatic override.
 - Real finger gestures: touch is emulated (tap, coarse pointer), and the finger glow of B1/I4 is `vireglass`'s.

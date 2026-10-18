@@ -56,6 +56,9 @@ export interface VireControlElement extends HTMLElement {
   a11y: A11yOverride;
   sample: BackdropSample | null;
   setMorph(morph: GlassMorph | null): void;
+  /** A menu growing out of this control carries its body: no lens and no body of its own, the glyph in
+   *  focus by `ink` (1 sharp, 0 gone). `null` takes the body back. */
+  setCarried(ink: number | null): void;
 }
 
 export type ControlElementOptions = { nonce?: string | undefined };
@@ -89,6 +92,8 @@ export function createControlElementClass(
     #slop = { x: 0, y: 0 };
     #morph: GlassMorph | null = null;
     #sample: BackdropSample | null = null;
+    #carried: number | null = null;
+    #hadStyle = { host: false, control: false };
 
     get a11y(): A11yOverride {
       return this.#own;
@@ -113,6 +118,17 @@ export function createControlElementClass(
       this.#glass?.setMorph(morph);
     }
 
+    setCarried(ink: number | null): void {
+      const handedOver = (this.#carried === null) !== (ink === null);
+      this.#carried = ink === null ? null : Math.min(Math.max(ink, 0), 1);
+      this.toggleAttribute('data-carried', this.#carried !== null);
+      if (this.#carried === null) this.style.removeProperty('--vk-carry');
+      else this.style.setProperty('--vk-carry', this.#carried.toFixed(3));
+      // The lens materialises out rather than being removed, so taking the body back is one synchronous repaint;
+      // a lens that appears only under the finger goes back to absent.
+      if (handedOver) this.#glass?.setAppear(this.#carried === null && this.#glassMode() !== 'touch' ? 1 : 0);
+    }
+
     connectedCallback(): void {
       // Set before the element was defined, a property lands on the instance and hides the accessor.
       for (const key of ['a11y', 'sample']) {
@@ -121,6 +137,7 @@ export function createControlElementClass(
         Reflect.deleteProperty(this, key);
         Reflect.set(this, key, value);
       }
+      this.#hadStyle.host = this.hasAttribute('style');
       ensureStyles(this, options.nonce);
       this.#cleanups.push(watchCoarsePointer(() => this.#onInputChange()));
       this.#cleanups.push(watchSystemA11y(() => this.#refreshMode()));
@@ -134,11 +151,14 @@ export function createControlElementClass(
       clearTimeout(this.#suppressTimer);
       this.#frame = 0;
       this.#dropGlass();
+      if (this.#control && !this.#hadStyle.control && this.#control.getAttribute('style') === '') this.#control.removeAttribute('style');
       this.#control = null;
       this.#state = CONTROL_IDLE;
       this.#suppressClick = false;
-      for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-size']) this.removeAttribute(name);
+      this.#carried = null;
+      for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-size', 'data-carried']) this.removeAttribute(name);
       for (const name of Array.from(this.style)) if (name.startsWith('--vk-')) this.style.removeProperty(name);
+      if (!this.#hadStyle.host && this.getAttribute('style') === '') this.removeAttribute('style');
       this.#presentation = null;
       this.#mode = null;
     }
@@ -176,6 +196,7 @@ export function createControlElementClass(
 
     #upgrade(control: HTMLButtonElement): void {
       this.#control = control;
+      this.#hadStyle.control = control.hasAttribute('style');
       this.setAttribute('data-vk', '');
       this.#caps = isCoarsePointer() ? TOUCH_INPUT : POINTER_INPUT;
       this.#listen(control);
@@ -440,6 +461,7 @@ export function createControlElementClass(
           if (!session) return;
           this.#glass = session;
           if (this.#morph) session.setMorph(this.#morph);
+          if (this.#carried !== null) session.setAppear(0);
           if (this.#sample !== sample) session.setSample(this.#sample);
           this.#pushMaterial(true);
           this.dispatchEvent(new CustomEvent('vire-glass-ready'));
