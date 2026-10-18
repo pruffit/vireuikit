@@ -15,10 +15,9 @@ import {
   type MenuFocus,
   type MenuItem,
   type MenuState,
-  type Rect,
   type RoundedRect,
-  type Size,
 } from '../kit/menu';
+import type { Rect, Size } from '../kit/geometry';
 import { createGrowthState, growthPhase, stepGrowth, type GrowthPhase, type GrowthPoint } from '../kit/morph';
 import { CONTROL_SIZES, defaultSize, menuSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';

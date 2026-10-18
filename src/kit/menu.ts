@@ -2,6 +2,7 @@
 // trigger, and what its glass surface is on each frame of the growth. Boxes are in dp.
 import { VIREGLASS_SHEET_MATERIAL, type VireGlassMaterial, type VireGlassMorph } from 'vireglass';
 import { ATOM_AT_REST, atomBody, atomMaterial, type AtomBody } from './atom';
+import type { Rect, Size } from './geometry';
 import { growthFrame, type GrowthInk, type GrowthPhase, type GrowthPoint } from './morph';
 
 /**
@@ -110,8 +111,6 @@ export function stepMenu(state: MenuState, event: MenuEvent, items: readonly Men
   }
 }
 
-export type Rect = { x: number; y: number; width: number; height: number };
-export type Size = { width: number; height: number };
 /** -1 is left or top, 1 is right or bottom. */
 export type MenuCorner = { x: -1 | 1; y: -1 | 1 };
 
@@ -129,11 +128,17 @@ export type MenuPlacement = {
   anchor: GrowthPoint;
 };
 
-/** The trigger's corner nearest the viewport corner it sits in: the open space lies away from it. */
-export function menuCorner(trigger: Rect, viewport: Size): MenuCorner {
+/** Where a menu must stay: its trigger's segment of the window, the whole viewport when nothing folds it. A size
+ *  alone is a region at the origin. */
+export type MenuRegion = Size & { x?: number; y?: number };
+
+/** The trigger's corner nearest the corner of its region it sits in: the open space lies away from it. */
+export function menuCorner(trigger: Rect, region: MenuRegion): MenuCorner {
+  const x0 = region.x ?? 0;
+  const y0 = region.y ?? 0;
   return {
-    x: trigger.x + trigger.width / 2 <= viewport.width / 2 ? -1 : 1,
-    y: trigger.y + trigger.height / 2 <= viewport.height / 2 ? -1 : 1,
+    x: trigger.x + trigger.width / 2 <= x0 + region.width / 2 ? -1 : 1,
+    y: trigger.y + trigger.height / 2 <= y0 + region.height / 2 ? -1 : 1,
   };
 }
 
@@ -141,42 +146,47 @@ function along(start: number, length: number, size: number, side: -1 | 1): numbe
   return side < 0 ? start : start + length - size;
 }
 
-function fits(at: number, size: number, limit: number, margin: number): boolean {
-  return at >= margin && at + size <= limit - margin;
+function fits(at: number, size: number, lo: number, hi: number, margin: number): boolean {
+  return at >= lo + margin && at + size <= hi - margin;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
 /**
- * The menu shares a corner with its trigger and covers it. An automatic corner flips on an axis
- * where the menu would leave the viewport and the other side fits; then it slides in.
+ * The menu shares a corner with its trigger and covers it. An automatic corner flips on an axis where the menu would
+ * leave its region and the other side fits; then it slides in. The region is the trigger's segment, so a menu never
+ * crosses a fold.
  */
 export function menuPlacement(
   trigger: Rect,
   menu: Size,
-  viewport: Size,
+  region: MenuRegion,
   options: { corner?: MenuCorner | undefined; margin?: number } = {},
 ): MenuPlacement {
   const margin = options.margin ?? 8;
-  const width = Math.min(menu.width, viewport.width - 2 * margin);
-  const height = Math.min(menu.height, viewport.height - 2 * margin);
-  const corner: { x: -1 | 1; y: -1 | 1 } = { ...(options.corner ?? menuCorner(trigger, viewport)) };
+  const x0 = region.x ?? 0;
+  const y0 = region.y ?? 0;
+  const x1 = x0 + region.width;
+  const y1 = y0 + region.height;
+  const width = Math.max(0, Math.min(menu.width, region.width - 2 * margin));
+  const height = Math.max(0, Math.min(menu.height, region.height - 2 * margin));
+  const corner: { x: -1 | 1; y: -1 | 1 } = { ...(options.corner ?? menuCorner(trigger, region)) };
   let x = along(trigger.x, trigger.width, width, corner.x);
   let y = along(trigger.y, trigger.height, height, corner.y);
   if (!options.corner) {
     const fx = along(trigger.x, trigger.width, width, corner.x === -1 ? 1 : -1);
-    if (!fits(x, width, viewport.width, margin) && fits(fx, width, viewport.width, margin)) {
+    if (!fits(x, width, x0, x1, margin) && fits(fx, width, x0, x1, margin)) {
       corner.x = corner.x === -1 ? 1 : -1;
       x = fx;
     }
     const fy = along(trigger.y, trigger.height, height, corner.y === -1 ? 1 : -1);
-    if (!fits(y, height, viewport.height, margin) && fits(fy, height, viewport.height, margin)) {
+    if (!fits(y, height, y0, y1, margin) && fits(fy, height, y0, y1, margin)) {
       corner.y = corner.y === -1 ? 1 : -1;
       y = fy;
     }
   }
-  x = clamp(x, margin, viewport.width - margin - width);
-  y = clamp(y, margin, viewport.height - margin - height);
+  x = clamp(x, x0 + margin, x1 - margin - width);
+  y = clamp(y, y0 + margin, y1 - margin - height);
   const rect = { x, y, width, height };
   return {
     rect,
