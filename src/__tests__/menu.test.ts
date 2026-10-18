@@ -36,7 +36,7 @@ const open = (focus: 'menu' | 'first' | 'last' = 'menu'): MenuState => stepMenu(
 const at = (state: MenuState, active: number): MenuState => ({ ...state, active });
 
 describe('the menu-button keyboard', () => {
-  it('opens on the first or last enabled item, or on the menu itself', () => {
+  it('opens on the first or last item, or on the menu itself', () => {
     expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, ITEMS).focus).toEqual({ to: 'item', index: 0 });
     expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'last' }, ITEMS).focus).toEqual({ to: 'item', index: 4 });
     const pointer = stepMenu(MENU_CLOSED, { type: 'open', focus: 'menu' }, ITEMS);
@@ -44,20 +44,21 @@ describe('the menu-button keyboard', () => {
     expect(pointer.state).toMatchObject({ open: true, active: -1 });
   });
 
-  it('skips disabled items at the ends too', () => {
+  // WAI-ARIA APG: disabled menu items are focusable but cannot be activated.
+  it('a disabled item at either end is where the keyboard lands', () => {
     const items = [{ label: 'A', disabled: true }, { label: 'B', disabled: false }, { label: 'C', disabled: true }];
-    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, items).focus).toEqual({ to: 'item', index: 1 });
-    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'last' }, items).focus).toEqual({ to: 'item', index: 1 });
+    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, items).focus).toEqual({ to: 'item', index: 0 });
+    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'last' }, items).focus).toEqual({ to: 'item', index: 2 });
   });
 
-  it('a menu with nothing enabled opens on itself', () => {
-    const items = [{ label: 'A', disabled: true }];
-    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, items).focus).toEqual({ to: 'menu' });
+  it('an empty menu opens on itself', () => {
+    expect(stepMenu(MENU_CLOSED, { type: 'open', focus: 'first' }, []).focus).toEqual({ to: 'menu' });
+    expect(stepMenu(open(), { type: 'move', to: 'next' }, []).focus).toEqual({ to: 'stay' });
   });
 
-  it('arrows move to the next and previous enabled item and wrap', () => {
-    expect(stepMenu(at(open(), 1), { type: 'move', to: 'next' }, ITEMS).state.active).toBe(3);
-    expect(stepMenu(at(open(), 3), { type: 'move', to: 'previous' }, ITEMS).state.active).toBe(1);
+  it('arrows move to the next and previous item, a disabled one included, and wrap', () => {
+    expect(stepMenu(at(open(), 1), { type: 'move', to: 'next' }, ITEMS).state.active).toBe(2);
+    expect(stepMenu(at(open(), 3), { type: 'move', to: 'previous' }, ITEMS).state.active).toBe(2);
     expect(stepMenu(at(open(), 4), { type: 'move', to: 'next' }, ITEMS).state.active).toBe(0);
     expect(stepMenu(at(open(), 0), { type: 'move', to: 'previous' }, ITEMS).state.active).toBe(4);
   });
@@ -67,16 +68,16 @@ describe('the menu-button keyboard', () => {
     expect(stepMenu(open(), { type: 'move', to: 'previous' }, ITEMS).state.active).toBe(4);
   });
 
-  it('Home and End go to the first and last enabled item', () => {
+  it('Home and End go to the first and last item', () => {
     expect(stepMenu(at(open(), 3), { type: 'move', to: 'first' }, ITEMS).focus).toEqual({ to: 'item', index: 0 });
     expect(stepMenu(at(open(), 0), { type: 'move', to: 'last' }, ITEMS).focus).toEqual({ to: 'item', index: 4 });
   });
 
-  it('the pointer makes an enabled item active and passes over a disabled one', () => {
+  it('the pointer makes the item under it active, and moving within it changes nothing', () => {
     expect(stepMenu(open(), { type: 'point', index: 3 }, ITEMS).focus).toEqual({ to: 'item', index: 3 });
-    const over = stepMenu(at(open(), 1), { type: 'point', index: 2 }, ITEMS);
-    expect(over.state.active).toBe(1);
-    expect(over.focus).toEqual({ to: 'stay' });
+    expect(stepMenu(at(open(), 1), { type: 'point', index: 2 }, ITEMS).focus).toEqual({ to: 'item', index: 2 });
+    expect(stepMenu(at(open(), 2), { type: 'point', index: 2 }, ITEMS).focus).toEqual({ to: 'stay' });
+    expect(stepMenu(at(open(), 2), { type: 'point', index: 9 }, ITEMS).focus).toEqual({ to: 'stay' });
   });
 
   it('typeahead goes to the next item starting with the letter, and a repeated letter cycles', () => {
@@ -98,9 +99,20 @@ describe('the menu-button keyboard', () => {
     expect(later.state.active).toBe(4);
   });
 
-  it('typeahead skips disabled items and stays put without a match', () => {
-    expect(stepMenu(at(open(), 1), { type: 'type', key: 'd', at: 0 }, ITEMS).focus).toEqual({ to: 'stay' });
-    expect(stepMenu(at(open(), 1), { type: 'type', key: 'x', at: 0 }, ITEMS).state.active).toBe(1);
+  it('an arrow or the pointer ends a typed word, so the next letter starts a new one', () => {
+    const d = stepMenu(at(open(), 0), { type: 'type', key: 'd', at: 1 }, ITEMS);
+    const home = stepMenu(d.state, { type: 'move', to: 'first' }, ITEMS);
+    expect(home.state.typed).toBe('');
+    expect(stepMenu(home.state, { type: 'type', key: 'r', at: 1.1 }, ITEMS).state.active).toBe(1);
+    const pointed = stepMenu(d.state, { type: 'point', index: 4 }, ITEMS);
+    expect(stepMenu(pointed.state, { type: 'type', key: 'r', at: 1.1 }, ITEMS).state.active).toBe(1);
+  });
+
+  it('typeahead reaches a disabled item too, and stays put without a match', () => {
+    expect(stepMenu(at(open(), 1), { type: 'type', key: 'd', at: 0 }, ITEMS).focus).toEqual({ to: 'item', index: 2 });
+    const none = stepMenu(at(open(), 1), { type: 'type', key: 'x', at: 0 }, ITEMS);
+    expect(none.state.active).toBe(1);
+    expect(none.focus).toEqual({ to: 'stay' });
   });
 
   it('a choice closes the menu, returns focus to the trigger and names the item', () => {

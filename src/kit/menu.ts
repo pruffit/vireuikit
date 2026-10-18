@@ -39,15 +39,14 @@ export type MenuStep = { state: MenuState; focus: MenuFocus; chosen: number | nu
 
 export const TYPEAHEAD_SECONDS = 0.5;
 
-const enabled = (items: readonly MenuItem[], i: number) => i >= 0 && i < items.length && !items[i]!.disabled;
+// WAI-ARIA APG: a disabled item stays in the arrows' and typeahead's way; it only cannot be chosen.
+const exists = (items: readonly MenuItem[], i: number) => i >= 0 && i < items.length;
+const enabled = (items: readonly MenuItem[], i: number) => exists(items, i) && !items[i]!.disabled;
 
 function seek(items: readonly MenuItem[], from: number, step: 1 | -1): number {
   const n = items.length;
-  for (let k = 1; k <= n; k += 1) {
-    const i = (((from + step * k) % n) + n) % n;
-    if (enabled(items, i)) return i;
-  }
-  return -1;
+  if (n === 0) return -1;
+  return (((from + step) % n) + n) % n;
 }
 
 const first = (items: readonly MenuItem[]) => seek(items, -1, 1);
@@ -65,7 +64,7 @@ function typeahead(state: MenuState, items: readonly MenuItem[], key: string, at
   const n = items.length;
   for (let k = 1; k <= n; k += 1) {
     const i = (((start + k) % n) + n) % n;
-    if (enabled(items, i) && items[i]!.label.trim().toLowerCase().startsWith(needle)) {
+    if (items[i]!.label.trim().toLowerCase().startsWith(needle)) {
       return { state: { ...state, active: i, typed, typedAt: at }, focus: { to: 'item', index: i }, chosen: null };
     }
   }
@@ -88,11 +87,12 @@ export function stepMenu(state: MenuState, event: MenuEvent, items: readonly Men
             ? last(items)
             : seek(items, state.active < 0 && event.to === 'previous' ? items.length : state.active, event.to === 'next' ? 1 : -1);
       if (active < 0) return stay;
-      return { state: { ...state, active }, focus: { to: 'item', index: active }, chosen: null };
+      // Moving by other means ends a typed word: the next letter starts a new one.
+      return { state: { ...state, active, typed: '' }, focus: { to: 'item', index: active }, chosen: null };
     }
     case 'point':
-      if (!enabled(items, event.index) || event.index === state.active) return stay;
-      return { state: { ...state, active: event.index }, focus: { to: 'item', index: event.index }, chosen: null };
+      if (!exists(items, event.index) || event.index === state.active) return stay;
+      return { state: { ...state, active: event.index, typed: '' }, focus: { to: 'item', index: event.index }, chosen: null };
     case 'type':
       return typeahead(state, items, event.key, event.at);
     case 'choose':
