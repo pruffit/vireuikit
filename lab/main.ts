@@ -104,7 +104,7 @@ function gallery(): void {
     return;
   }
   if (atomParam === 'toolbar') {
-    toolbarGallery(stage, rows, {
+    toolbarHandle = toolbarGallery(stage, rows, {
       stage: toolbarStage,
       place: toolbarPlace,
       glass,

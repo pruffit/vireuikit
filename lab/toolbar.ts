@@ -203,7 +203,7 @@ export type ToolbarGalleryOptions = {
 };
 
 /** One toolbar in a window frame over the backdrop, held at a stage. */
-export function toolbarGallery(stage: HTMLElement, rows: HTMLElement, options: ToolbarGalleryOptions): void {
+export function toolbarGallery(stage: HTMLElement, rows: HTMLElement, options: ToolbarGalleryOptions): ToolbarSandboxHandle {
   ensureCss();
   const size = TOOLBAR_FRAMES[options.place];
   stage.style.width = `${size.width + 72}px`;
@@ -223,6 +223,7 @@ export function toolbarGallery(stage: HTMLElement, rows: HTMLElement, options: T
   bar.setAttribute('data-vire-force-state', [`stage:${options.stage}`, options.force].filter(Boolean).join(','));
   frame.append(content(), bar);
   rows.append(frame);
+  return handleOf(frame, bar);
 }
 
 export type ToolbarSandboxOptions = {
@@ -302,10 +303,36 @@ export type ToolbarSandboxHandle = {
   frame: HTMLElement;
   toolbar: HTMLElement;
   resize(width: number, height: number): void;
+  /** The toolbar's own width, for a window that stays as it is. */
+  setWidth(width: number | null): void;
   snapshot(): ToolbarSnapshot;
   /** Removes the item with this label from the toolbar and returns a way to put it back. */
   remove(label: string, what?: 'item' | 'trigger'): () => void;
 };
+
+function handleOf(frame: HTMLElement, bar: HTMLElement): ToolbarSandboxHandle {
+  return {
+    frame,
+    toolbar: bar,
+    resize(width, height) {
+      frame.style.width = `${width}px`;
+      frame.style.height = `${height}px`;
+    },
+    setWidth(width) {
+      bar.style.width = width === null ? '' : `${width}px`;
+    },
+    snapshot: () => snapshot(bar),
+    remove(label, what = 'item') {
+      const button = [...bar.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.getAttribute('aria-label') === label || b.textContent?.trim() === label)!;
+      const host = button.closest<HTMLElement>('[data-group] > *')!;
+      const node = what === 'trigger' ? (button.parentElement!.matches('vire-icon-button, vire-button') ? button.parentElement! : button) : host;
+      const parent = node.parentElement!;
+      const next = node.nextSibling;
+      node.remove();
+      return () => parent.insertBefore(node, next);
+    },
+  };
+}
 
 /** A resizable window with a toolbar among content, the events and the clicks logged. */
 export function toolbarSandbox(rows: HTMLElement, note: (text: string) => void, options: ToolbarSandboxOptions): ToolbarSandboxHandle {
@@ -326,22 +353,5 @@ export function toolbarSandbox(rows: HTMLElement, note: (text: string) => void, 
     note(`layout:${d.edge}:${d.stage}:${d.overflow}`);
   });
   rows.append(frame);
-  return {
-    frame,
-    toolbar: bar,
-    resize(width, height) {
-      frame.style.width = `${width}px`;
-      frame.style.height = `${height}px`;
-    },
-    snapshot: () => snapshot(bar),
-    remove(label, what = 'item') {
-      const button = [...bar.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.getAttribute('aria-label') === label || b.textContent?.trim() === label)!;
-      const host = button.closest<HTMLElement>('[data-group] > *')!;
-      const node = what === 'trigger' ? (button.parentElement!.matches('vire-icon-button, vire-button') ? button.parentElement! : button) : host;
-      const parent = node.parentElement!;
-      const next = node.nextSibling;
-      node.remove();
-      return () => parent.insertBefore(node, next);
-    },
-  };
+  return handleOf(frame, bar);
 }

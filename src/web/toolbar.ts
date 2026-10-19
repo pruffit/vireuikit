@@ -184,6 +184,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
 
     #current: HTMLButtonElement | null = null;
     #lastFocus: Element | null = null;
+    #lastOwner: Item | null = null;
     #focusMore = false;
     #choosing: (() => void) | null = null;
 
@@ -263,7 +264,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       this.#ctx = this.#probed = null;
       this.#presentation = this.#mode = null;
       this.#modeKey = '';
-      this.#current = this.#lastFocus = null;
+      this.#current = this.#lastFocus = this.#lastOwner = null;
       this.#focusMore = false;
       this.#textWidths = {};
       this.#spacerAfter = undefined;
@@ -1221,6 +1222,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       };
       on<FocusEvent>(this, 'focusin', (e) => {
         this.#lastFocus = e.target as Element;
+        this.#lastOwner = this.#items.find((i) => i.host.contains(e.target as Node)) ?? null;
         const order = this.#order();
         if (e.target instanceof HTMLButtonElement && order.includes(e.target) && this.#current !== e.target) {
           this.#current = e.target;
@@ -1254,9 +1256,8 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       );
 
       const markup = new MutationObserver((records) => {
-        const focused = this.#lastFocus;
         const order = this.#order();
-        const owner = focused ? this.#items.find((i) => i.host.contains(focused)) : undefined;
+        const owner = this.#lastOwner;
         const index = owner ? order.indexOf(owner.button) : -1;
         let changed = false;
         for (const record of records) {
@@ -1272,12 +1273,18 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
         // An item that held the focus, or whose surface did, is gone: the neighbour that takes its place gets it,
         // once the surface has let go of it.
         if (owner && !this.#items.some((i) => i.host === owner.host && i.button === owner.button)) {
-          requestAnimationFrame(() => {
+          const handOver = (frames: number) => {
             const active = deepActive(this.ownerDocument);
-            if (!this.isConnected || (active && active !== this.ownerDocument.body && this.contains(active))) return;
+            if (!this.isConnected) return;
+            if (active && active !== this.ownerDocument.body) {
+              // Still with the surface of the item that went: it lets go once it has closed.
+              if (owner.host.contains(active) && frames > 0) requestAnimationFrame(() => handOver(frames - 1));
+              return;
+            }
             const next = this.#order();
             next[Math.min(Math.max(index, 0), next.length - 1)]?.focus({ preventScroll: true });
-          });
+          };
+          requestAnimationFrame(() => handOver(30));
         }
       });
       markup.observe(this, {

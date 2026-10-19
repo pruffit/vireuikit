@@ -274,7 +274,9 @@ async function sampleFrames(page: Page, steps: { at: number; w: number; h: numbe
             next += 1;
           }
           const s = window.__lab.toolbar!.snapshot();
-          const lenses = ((window as unknown as { __lenses?: { alive: boolean; appear?: number }[] }).__lenses ?? []).filter((l) => l.alive).map((l) => l.appear);
+          const lenses = ((window as unknown as { __lenses?: { alive: boolean; kind: string; appear?: number }[] }).__lenses ?? [])
+            .filter((l) => l.alive && l.kind === 'capsule')
+            .map((l) => l.appear);
           out.push({ ...s, now: elapsed, lenses });
           calm = next >= plan.length && !s.moving ? calm + 1 : 0;
           if (calm >= 6 || elapsed > max) resolve(out);
@@ -462,5 +464,496 @@ test.describe('a stage change', () => {
     const failures = leaversGate(samples);
     expect(failures.length).toBeGreaterThan(0);
     expect(failures.join('\n')).toMatch(/defocuses in/);
+  });
+});
+
+// ---- the lens ---------------------------------------------------------------------------------------------------------
+
+// The recording stand-in for `vireglass/dom` sees which lens is attached to what, what it is handed, and which are alive.
+const RECORDING_LENS = `
+const flat = { luma: 0.9, busy: 0, lo: 0.9, hi: 0.9, r: 0.9, g: 0.9, b: 0.9 };
+export function probeBackdrop() { return flat; }
+export function statsFromSamples() { return flat; }
+export function attachGlass(el, opts) {
+  const kind = el.hasAttribute('data-vk-capsule') ? 'capsule' : el.matches('vire-menu > [popover]') ? 'menu' : el.matches('vire-popover > *, vire-sheet > *') ? 'surface' : 'other';
+  const rec = { kind, alive: true, calls: [], appear: 1, appears: [], sample: opts.sample ?? null, id: el.id };
+  (window.__lenses ??= []).push(rec);
+  el.style.setProperty('backdrop-filter', 'blur(1px)');
+  const note = (morph) => rec.calls.push({ geometry: { ...opts.geometry }, morph });
+  return {
+    update() { note(undefined); },
+    setMorph(m) { note(m); },
+    setAppear(t) { rec.appear = t; rec.appears.push(t); },
+    setSample(s) { rec.sample = s; }, setAccent() {}, setNeighbourGlow() {},
+    destroy() { rec.alive = false; },
+  };
+}`;
+
+type Rec = {
+  kind: string;
+  alive: boolean;
+  appear: number;
+  appears: number[];
+  sample: unknown;
+  calls: { geometry: { width: number; height: number; cornerRadius: number }; morph: unknown }[];
+};
+const lenses = (page: Page) => page.evaluate(() => (window as unknown as { __lenses?: Rec[] }).__lenses ?? []);
+const stubGlass = (page: Page) => page.route('**/vireglass_dom.js*', (route) => route.fulfill({ contentType: 'text/javascript', body: RECORDING_LENS }));
+
+test.describe('the glass', () => {
+  test('a lens for each capsule, all handed the one backdrop, and no lens on a control: never glass on glass', async ({ page }) => {
+    await stubGlass(page);
+    await openToolbar(page, `${TOP}&glass=1`, 720, 400);
+    await page.waitForFunction(() => ((window as unknown as { __lenses?: unknown[] }).__lenses ?? []).length > 8);
+    const recs = (await lenses(page)).filter((r) => r.alive);
+    const capsules = recs.filter((r) => r.kind === 'capsule');
+    const s = await snap(page);
+    expect(capsules).toHaveLength(live(s as Sample).length);
+    expect(recs.filter((r) => r.kind === 'other')).toEqual([]);
+    expect(capsules.every((r) => r.sample !== null)).toBe(true);
+    expect(new Set(capsules.map((r) => JSON.stringify(r.sample))).size).toBe(1);
+    const sizes = capsules.map((r) => r.calls.at(-1)!.geometry).map((g) => `${g.width}x${g.height}`).sort();
+    const boxes = live(s as Sample).map((c) => `${Math.round(c.box.w)}x${Math.round(c.box.h)}`).sort();
+    expect(sizes).toEqual(boxes);
+    for (const rec of capsules) expect(rec.calls.at(-1)!.morph).toBeUndefined();
+  });
+
+  test('capsules that join are one lens over their outline, and come apart into their own lenses', async ({ page }) => {
+    await stubGlass(page);
+    await openToolbar(page, `${NO_SPACER.replace('glass=0', 'glass=1')}`, 720, 400);
+    const t = await thresholds(page);
+    await reflow(page, t.separate + 60, 400);
+    const samples = await sampleFrames(page, [{ at: 60, w: t.separate - 24, h: 400 }]);
+    const neck = samples.find((s) => live(s).some((c) => c.clipped))!;
+    const clipped = live(neck).filter((c) => c.clipped);
+    expect(clipped.length).toBeGreaterThan(0);
+    // The joined capsules are wider than any capsule that is not joined.
+    expect(Math.max(...clipped.map((c) => c.box.w))).toBeGreaterThan(Math.max(...live(samples[0]!).map((c) => c.box.w)) * 1.5);
+    const recs = await lenses(page);
+    expect(recs.filter((r) => r.kind === 'other')).toEqual([]);
+    expect(samples.at(-1)!.capsules.filter((c) => !c.hidden && c.clipped)).toHaveLength(0);
+  });
+
+  test('a change of place dematerialises the old form and materialises the new one through the lens, never through opacity', async ({ page }) => {
+    await stubGlass(page);
+    await openToolbar(page, 'glass=1', 720, 500);
+    await page.waitForFunction(() => ((window as unknown as { __lenses?: unknown[] }).__lenses ?? []).length > 6);
+    await expect(page.locator('vire-toolbar')).toHaveAttribute('data-edge', 'top');
+    const samples = await sampleFrames(page, [{ at: 60, w: 740, h: 360 }]);
+    const edges = samples.map((s) => s.edge);
+    expect(edges.at(-1)).toBe('trailing');
+    const flips = edges.map((e, i) => (i > 0 && e !== edges[i - 1] ? i : -1)).filter((i) => i >= 0);
+    expect(flips).toHaveLength(1);
+    const appears = (s: Sample) => s.lenses.filter((a): a is number => a !== undefined);
+    const at = samples[flips[0]!]!;
+    expect(Math.max(...appears(at))).toBeLessThan(0.15);
+    const before = samples.slice(0, flips[0]).map((s) => Math.min(...appears(s)));
+    expect(before.some((v) => v < 0.5 && v > 0.02)).toBe(true);
+    const after = samples.slice(flips[0]).map((s) => Math.min(...appears(s)));
+    expect(after.at(-1)).toBeCloseTo(1, 1);
+    expect(after.some((v) => v > 0.02 && v < 0.98)).toBe(true);
+    // Presence is the lens's: no capsule is faded by opacity while it has one.
+    for (const s of samples) for (const c of live(s)) expect(c.opacity).toBe(1);
+    // The new form is laid out for its own container: a column of glyphs.
+    const last = samples.at(-1)!;
+    const glyphs = last.items.filter((i) => !i.hidden && !i.text);
+    expect(new Set(glyphs.map((g) => Math.round(g.box.x))).size).toBe(1);
+    expect(last.orientation).toBe('vertical');
+  });
+});
+
+// ---- the overflow menu ------------------------------------------------------------------------------------------------
+
+/** A window in which these items have gone into "…" (and no fewer), at the medium tier. */
+async function widthWithout(page: Page, labels: string[]): Promise<number> {
+  const all = items(await doneWidth(page));
+  for (let available = 700; available > 0; available -= 1) {
+    const layout = toolbarLayout(all, { available, tier: TIER });
+    if (labels.every((l) => layout.overflow.includes(l))) return available + 16;
+  }
+  throw new Error(`nothing overflows ${labels.join()}`);
+}
+
+const more = (page: Page) => page.locator('vire-toolbar [data-vk-more] > vire-icon-button > button');
+const rows = (page: Page) => page.locator('vire-toolbar [data-vk-more] > [popover] > button');
+
+test.describe('the overflow menu', () => {
+  test('"…" is a menu button, named, that opens a menu of the overflowed items in toolbar order, each with its icon and label', async ({ page }) => {
+    await openToolbar(page, `${TOP}&glass=0&toolbar-more-label=More%20actions`, 720, 400);
+    await reflow(page, await widthWithout(page, ['Queue', 'Edit', 'Delete']), 400);
+    const button = more(page);
+    await expect(button).toHaveAttribute('aria-haspopup', 'menu');
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+    await expect(button).toHaveAttribute('aria-label', 'More actions');
+    expect(await page.evaluate(() => document.querySelector('[data-vk-more] > vire-icon-button')!.hasAttribute('data-vk'))).toBe(true);
+    await button.click();
+    await expect(button).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('[data-vk-more]')).toHaveAttribute('data-phase', 'open');
+    const texts = await rows(page).evaluateAll((els) => els.map((el) => ({ text: el.textContent?.trim(), icon: el.querySelector('svg') !== null })));
+    expect(texts).toEqual([
+      { text: 'Queue', icon: true },
+      { text: 'Edit', icon: true },
+      { text: 'Delete', icon: true },
+    ]);
+    expect(await page.locator('[data-vk-more] [data-badge]').count()).toBe(0);
+  });
+
+  test('a row clicks the original button exactly once and closes the menu', async ({ page }) => {
+    await openToolbar(page, `${TOP}&glass=0`, 720, 400);
+    await reflow(page, await widthWithout(page, ['Edit', 'Delete']), 400);
+    await more(page).click();
+    await expect(page.locator('[data-vk-more]')).toHaveAttribute('data-phase', 'open');
+    await rows(page).filter({ hasText: 'Edit' }).click();
+    await expect.poll(() => clicks(page)).toEqual(['click:Edit']);
+    await expect(more(page)).toHaveAttribute('aria-expanded', 'false');
+    await page.waitForTimeout(300);
+    expect(await clicks(page)).toEqual(['click:Edit']);
+  });
+
+  for (const surface of [
+    { name: 'menu', label: 'Add', host: '#toolbar-add', follows: true, close: null },
+    { name: 'popover', label: 'Info', host: '#toolbar-info', follows: true, close: null },
+    { name: 'sheet', label: 'Queue', host: '#toolbar-queue', follows: false, close: '#toolbar-queue-close' },
+  ]) {
+    test(`a row for the ${surface.name}'s trigger opens it grown from "…", and the anchor is cleared when it closes`, async ({ page }) => {
+      await openToolbar(page, `${TOP}&glass=0`, 720, 500);
+      await reflow(page, await widthWithout(page, [surface.label]), 500);
+      await more(page).click();
+      await expect(page.locator('[data-vk-more]')).toHaveAttribute('data-phase', 'open');
+      const grown = page.evaluate(
+        (host) =>
+          new Promise<{ anchor: boolean; distance: number }>((resolve) => {
+            const el = document.querySelector<HTMLElement & { anchor: Element | null }>(host)!;
+            const moreHost = document.querySelector('[data-vk-more] > vire-icon-button')!;
+            const watch = () => {
+              const surfaceEl = el.querySelector<HTMLElement>(':scope > [popover], :scope > dialog')!;
+              const r = surfaceEl.getBoundingClientRect();
+              const m = moreHost.getBoundingClientRect();
+              if (el.anchor && r.width > 0 && surfaceEl.matches(':popover-open')) {
+                resolve({ anchor: el.anchor === moreHost, distance: Math.hypot(r.x + r.width / 2 - (m.x + m.width / 2), r.y + r.height / 2 - (m.y + m.height / 2)) });
+                return;
+              }
+              requestAnimationFrame(watch);
+            };
+            requestAnimationFrame(watch);
+          }),
+        surface.host,
+      );
+      await rows(page).filter({ hasText: surface.label }).click();
+      const first = await grown;
+      expect(first.anchor).toBe(true);
+      if (surface.follows) expect(first.distance).toBeLessThan(120);
+      await expect.poll(() => page.locator(surface.host).evaluate((el) => (el as unknown as { open: boolean }).open)).toBe(true);
+      expect(await clicks(page)).toEqual([`click:${surface.label}`]);
+      if (surface.close) await page.locator(surface.close).click();
+      else await page.keyboard.press('Escape');
+      await expect.poll(() => page.locator(surface.host).evaluate((el) => (el as unknown as { anchor: Element | null }).anchor)).toBeNull();
+    });
+  }
+});
+
+// ---- an open surface whose trigger leaves -----------------------------------------------------------------------------
+
+const SURFACES = [
+  { name: 'menu', label: 'Add', host: '#toolbar-add', trigger: '#toolbar-add-trigger', surface: '#toolbar-add-list', grown: true },
+  { name: 'popover', label: 'Info', host: '#toolbar-info', trigger: '#toolbar-info-trigger', surface: '#toolbar-info-surface', grown: true },
+  { name: 'sheet', label: 'Queue', host: '#toolbar-queue', trigger: '#toolbar-queue-trigger', surface: '#toolbar-queue-surface', grown: false },
+] as const;
+type SurfaceCase = (typeof SURFACES)[number];
+
+const isOpen = (page: Page, host: string) => page.locator(host).evaluate((el) => (el as unknown as { open: boolean }).open);
+
+/** Opens the surface with a real press on its trigger and waits until it is out and still. */
+async function openSurface(page: Page, s: SurfaceCase): Promise<void> {
+  await page.locator(s.trigger).click();
+  await expect.poll(() => isOpen(page, s.host)).toBe(true);
+  await page.waitForFunction(
+    (selector) => {
+      const el = document.querySelector<HTMLElement>(selector)!;
+      return el.matches(':popover-open') && !document.querySelector('vire-toolbar')!.hasAttribute('data-moving');
+    },
+    s.surface,
+  );
+  await page.waitForTimeout(500);
+}
+
+const boxOf = (page: Page, selector: string) => page.locator(selector).evaluate((el) => {
+  const r = el.getBoundingClientRect();
+  return { x: r.x, y: r.y, w: r.width, h: r.height };
+});
+
+const activeLabel = (page: Page) =>
+  page.evaluate(() => {
+    const a = document.activeElement as HTMLElement | null;
+    return a && a.closest('vire-toolbar') && !a.closest('[popover]') ? (a.getAttribute('aria-label') ?? a.textContent?.trim() ?? '') : null;
+  });
+
+test.describe('an open surface whose trigger goes', () => {
+  for (const s of SURFACES) {
+    test(`${s.name}: into "…" it runs back into "…" and closes, and focus goes to "…"`, async ({ page }) => {
+      await openToolbar(page, `${TOP}&glass=0`, 720, 500);
+      await openSurface(page, s);
+      const target = await widthWithout(page, [s.label]);
+      const trace = await page.evaluate(
+        ([host, surface, w, h]) =>
+          new Promise<{ popoverOpen: boolean; open: boolean; w: number; cx: number; cy: number; mx: number; my: number; active: string | null; anchor: boolean }[]>((resolve) => {
+            const el = document.querySelector<HTMLElement & { open: boolean; anchor: Element | null }>(host as string)!;
+            const surf = document.querySelector<HTMLElement>(surface as string)!;
+            const moreHost = document.querySelector('[data-vk-more] > vire-icon-button')!;
+            const rows: { popoverOpen: boolean; open: boolean; w: number; cx: number; cy: number; mx: number; my: number; active: string | null; anchor: boolean }[] = [];
+            window.__lab.toolbar!.resize(w as number, h as number);
+            let settled = 0;
+            const tick = () => {
+              const r = surf.getBoundingClientRect();
+              const m = moreHost.getBoundingClientRect();
+              const popoverOpen = surf.matches(':popover-open');
+              rows.push({
+                popoverOpen,
+                open: el.open,
+                w: r.width,
+                cx: r.x + r.width / 2,
+                cy: r.y + r.height / 2,
+                mx: m.x + m.width / 2,
+                my: m.y + m.height / 2,
+                active: document.activeElement?.getAttribute('aria-label') ?? null,
+                anchor: el.anchor !== null,
+              });
+              settled = popoverOpen ? 0 : settled + 1;
+              if (settled > 8 || rows.length > 300) resolve(rows);
+              else requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+          }),
+        [s.host, s.surface, target, 500] as const,
+      );
+      const last = trace.at(-1)!;
+      expect(last.popoverOpen).toBe(false);
+      expect(last.open).toBe(false);
+      expect(last.active).toBe('More');
+      expect(last.anchor).toBe(false);
+      expect(trace.some((r) => r.anchor && r.popoverOpen)).toBe(true);
+      if (s.grown) {
+        const out = trace.filter((r) => r.popoverOpen);
+        const near = out.at(-1)!;
+        expect(Math.hypot(near.cx - near.mx, near.cy - near.my)).toBeLessThan(80);
+        expect(near.w).toBeLessThan(out[0]!.w * 0.7);
+      }
+      await expect(more(page)).toBeFocused();
+    });
+
+    test(`${s.name}: when it only merges it stays open on its trigger's new box`, async ({ page }) => {
+      await openToolbar(page, NO_SPACER, 720, 500);
+      const t = await thresholds(page);
+      // The window stays as it is, so the surface keeps its form; the toolbar alone gets narrower.
+      await page.evaluate((w) => window.__lab.toolbar!.setWidth(w), t.separate - 16 + 60);
+      await settle(page);
+      await openSurface(page, s);
+      const before = { trigger: await boxOf(page, s.trigger), surface: await boxOf(page, s.surface) };
+      await page.evaluate((w) => window.__lab.toolbar!.setWidth(w), t.separate - 16 - 24);
+      await page.waitForTimeout(400);
+      expect((await snap(page)).stage).toBe('merged');
+      expect(await isOpen(page, s.host)).toBe(true);
+      expect(await page.locator(s.surface).evaluate((el) => el.matches(':popover-open'))).toBe(true);
+      expect(await page.locator(s.host).evaluate((el) => (el as unknown as { anchor: Element | null }).anchor)).toBeNull();
+      const after = { trigger: await boxOf(page, s.trigger), surface: await boxOf(page, s.surface) };
+      const moved = after.trigger.x - before.trigger.x;
+      expect(Math.abs(moved)).toBeGreaterThan(4);
+      if (s.grown) {
+        expect(Math.abs(after.surface.x - before.surface.x - moved)).toBeLessThan(2.5);
+        expect(Math.abs(after.surface.y - before.surface.y - (after.trigger.y - before.trigger.y))).toBeLessThan(2.5);
+      }
+    });
+
+    for (const what of ['item', 'trigger'] as const) {
+      test(`${s.name}: when its ${what} is removed from the toolbar it closes, and focus goes to the neighbouring item`, async ({ page }) => {
+        await openToolbar(page, `${TOP}&glass=0`, 720, 500);
+        await openSurface(page, s);
+        await page.evaluate(([label, kind]) => window.__lab.toolbar!.remove(label as string, kind as 'item' | 'trigger'), [s.label, what] as const);
+        await expect.poll(() => page.evaluate((selector) => !document.querySelector(selector)?.matches(':popover-open'), s.surface)).toBe(true);
+        await expect.poll(() => activeLabel(page)).not.toBeNull();
+        const label = await activeLabel(page);
+        expect(label).not.toBe(s.label);
+        expect(['Share', 'Like', 'Add', 'Info', 'Queue', 'Edit']).toContain(label);
+        await nextFrame(page);
+        expect(await snap(page).then((x) => x.items.some((i) => i.label === s.label))).toBe(false);
+      });
+    }
+  }
+});
+
+// ---- focus ------------------------------------------------------------------------------------------------------------
+
+test.describe('focus', () => {
+  test('a focused item that goes into "…" hands focus to "…", and the roving tabindex covers what is in sight', async ({ page }) => {
+    await openToolbar(page, `${TOP}&glass=0`, 720, 400);
+    await page.locator('vire-toolbar button[aria-label="Delete"]').focus();
+    await reflow(page, await widthWithout(page, ['Delete']), 400);
+    await expect(more(page)).toBeFocused();
+    const stops = await page.evaluate(() => {
+      const buttons = [...document.querySelectorAll<HTMLButtonElement>('vire-toolbar button')].filter((b) => !b.closest('[popover]'));
+      return buttons.map((b) => ({ label: b.getAttribute('aria-label') ?? b.textContent!.trim(), tab: b.getAttribute('tabindex'), shown: b.closest('[hidden]') === null }));
+    });
+    expect(stops.filter((s) => s.tab === '0')).toHaveLength(1);
+    expect(stops.find((s) => s.tab === '0')).toMatchObject({ label: 'More', shown: true });
+    for (const s of stops.filter((x) => !x.shown)) expect(s.tab).toBe('-1');
+    // "…" stands where the model puts it: after the last capsule and before the main action.
+    const sight = await snap(page);
+    const before = sight.items.filter((i) => !i.hidden && i.label !== 'Done').reduce((a, b) => (b.box.x > a.box.x ? b : a));
+    await page.keyboard.press('ArrowLeft');
+    expect(await activeLabel(page)).toBe(before.label);
+    await page.keyboard.press('ArrowRight');
+    expect(await activeLabel(page)).toBe('More');
+    await page.keyboard.press('ArrowRight');
+    expect(await activeLabel(page)).toBe('Done');
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
+    await expect(more(page)).toBeFocused();
+  });
+
+  test('with motion the hand-over waits for "…" to come into sight', async ({ page }) => {
+    await openToolbar(page, `${NO_SPACER}`, 720, 400);
+    const t = await thresholds(page);
+    await reflow(page, t.merged + 30, 400);
+    await page.locator('vire-toolbar button[aria-label="Delete"]').focus();
+    await resize(page, t.merged - 40, 400);
+    await expect(more(page)).toBeFocused();
+    await settle(page);
+    await expect(more(page)).toBeFocused();
+  });
+});
+
+// ---- hit areas and modes ----------------------------------------------------------------------------------------------
+
+test.describe('hit areas', () => {
+  for (const bare of [false, true]) {
+    test(`with any coarse input every item reaches 44 dp (${bare ? 'plain buttons' : 'the kit\'s controls'}), and with none it does not`, async ({ page }) => {
+      await emulateInput(page, { pointer: 'fine', anyCoarse: true, anyHover: true });
+      await openToolbar(page, `${TOP}&glass=0&rm=1${bare ? '&bare=1' : ''}`, 720, 400);
+      const probe = () =>
+        page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('vire-toolbar [data-vk-item]:not([hidden])')]
+            .filter((el) => !el.closest('[data-vk-more]'))
+            .map((el) => {
+              const r = el.getBoundingClientRect();
+              const hit = (dy: number) => document.elementsFromPoint(r.x + r.width / 2, r.y + dy).includes(el);
+              return { height: r.height, in5: hit(-5), in8: hit(-8), below5: hit(r.height + 5) };
+            }),
+        );
+      const coarse = await probe();
+      expect(coarse.length).toBeGreaterThan(8);
+      for (const p of coarse) {
+        expect(p.in5).toBe(true);
+        expect(p.below5).toBe(true);
+        expect(p.in8).toBe(false);
+        expect(p.height + 12).toBeGreaterThanOrEqual(44);
+      }
+      await page.evaluate(() => (window as unknown as { __input: { set(next: object): void } }).__input.set({ anyCoarse: false }));
+      await nextFrame(page);
+      await nextFrame(page);
+      for (const p of await probe()) expect(p.in5).toBe(false);
+    });
+  }
+
+  test('a coarse primary pointer makes the tier 44 dp and the toolbar follows it', async ({ page }) => {
+    await emulateInput(page, { pointer: 'coarse', anyCoarse: true, anyHover: false });
+    await openToolbar(page, `${TOP}&glass=0&rm=1`, 720, 400);
+    const s = await snap(page);
+    for (const i of s.items.filter((x) => !x.hidden)) expect(i.box.h).toBe(44);
+    expect(s.height).toBe(44);
+  });
+});
+
+const alpha = (color: string) => {
+  const slash = /\/\s*([\d.]+)\)\s*$/.exec(color);
+  if (slash) return Number(slash[1]);
+  const rgba = /^rgba\(([^)]+)\)$/.exec(color);
+  return rgba ? Number(rgba[1]!.split(',')[3] ?? 1) : 1;
+};
+
+test.describe('accessibility modes', () => {
+  const geometry = async (page: Page, query: string) => {
+    await openToolbar(page, `${TOP}&rm=1&${query}`, 720, 400);
+    const s = await snap(page);
+    return {
+      items: s.items.map((i) => [i.label, i.hidden, i.box] as const),
+      capsules: live(s as Sample)
+        .map((c) => c.box)
+        .sort((a, b) => a.x - b.x),
+    };
+  };
+
+  for (const [name, query] of [
+    ['glass off', 'glass=0'],
+    ['reduced transparency', 'glass=1&rt=1'],
+    ['increased contrast', 'glass=1&ic=1'],
+    ['increased contrast with glass off', 'glass=0&ic=1'],
+  ] as const) {
+    test(`${name}: the geometry is the same, the capsules are painted and the groups stay apart by their gap`, async ({ page }) => {
+      const base = await geometry(page, 'glass=1');
+      const mode = await geometry(page, query);
+      expect(mode.items).toEqual(base.items);
+      expect(mode.capsules).toEqual(base.capsules);
+      for (let i = 1; i < mode.capsules.length; i += 1) {
+        const gap = mode.capsules[i]!.x - (mode.capsules[i - 1]!.x + mode.capsules[i - 1]!.w);
+        expect(gap).toBeGreaterThanOrEqual(7.5);
+      }
+      const paint = await page.locator('vire-toolbar > [data-vk-capsule]:not([hidden])').evaluateAll((els) =>
+        els.map((el) => {
+          const cs = getComputedStyle(el);
+          return { background: cs.backgroundColor, shadow: cs.boxShadow, filter: cs.backdropFilter };
+        }),
+      );
+      expect(paint.length).toBeGreaterThan(8);
+      for (const p of paint) expect(alpha(p.background) > 0.05 || p.shadow !== 'none').toBe(true);
+      if (query.includes('ic=1')) {
+        for (const p of paint) expect(p.shadow.includes('inset') || alpha(p.background) > 0.8).toBe(true);
+        await expect(page.locator('vire-toolbar')).toHaveAttribute('data-contrast', '');
+      }
+      if (query.includes('rt=1')) await expect(page.locator('vire-toolbar')).toHaveAttribute('data-frost', '');
+    });
+  }
+});
+
+// ---- forced states ----------------------------------------------------------------------------------------------------
+
+test.describe('forced states', () => {
+  for (const stage of ['separate', 'merged', 'overflow'] as const) {
+    test(`stage:${stage} holds the toolbar at that stage in any place`, async ({ page }) => {
+      for (const place of ['bottom', 'top', 'trailing'] as const) {
+        await page.setViewportSize({ width: 1400, height: 1000 });
+        await openCase(page, `atom=toolbar&stage=${stage}&place=${place}&glass=0&backdrop=light`);
+        await settle(page);
+        const bar = page.locator('vire-toolbar');
+        await expect(bar).toHaveAttribute('data-stage', stage);
+        await expect(bar).toHaveAttribute('data-edge', place);
+        const more = await bar.evaluate((el) => !el.querySelector<HTMLElement>('[data-vk-more] > vire-icon-button')!.hidden);
+        expect(more).toBe(stage === 'overflow');
+      }
+    });
+  }
+
+  test('morph:0.6 freezes a merge at the neck and place:0.25 a change of place half-way', async ({ page }) => {
+    await page.setViewportSize({ width: 1400, height: 1000 });
+    await openCase(page, 'atom=toolbar&stage=merged&place=top&glass=0&force=morph:0.6');
+    await nextFrame(page);
+    const frozen = await snap(page);
+    expect(frozen.moving).toBe(false);
+    expect(frozen.capsules.some((c) => !c.hidden && c.clipped)).toBe(true);
+    await nextFrame(page);
+    expect(await snap(page)).toEqual(frozen);
+
+    const second = await page.context().newPage();
+    await stubGlass(second);
+    await second.setViewportSize({ width: 1400, height: 1000 });
+    await openCase(second, 'atom=toolbar&stage=separate&place=top&glass=1&force=place:0.25');
+    await second.waitForFunction(() => ((window as unknown as { __lenses?: unknown[] }).__lenses ?? []).length > 6);
+    await nextFrame(second);
+    const appear = (await lenses(second)).filter((r) => r.kind === 'capsule').map((r) => r.appear);
+    for (const a of appear) {
+      expect(a).toBeGreaterThan(0.3);
+      expect(a).toBeLessThan(0.7);
+    }
+    await second.close();
   });
 });
