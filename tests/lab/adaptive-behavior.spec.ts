@@ -442,6 +442,25 @@ test.describe('the real surfaces on the stage', () => {
   });
 });
 
+test.describe('the content accessory beside a side sheet', () => {
+  test('ends at the leading edge of a side sheet, and goes back to the margin when it closes', async ({ page }) => {
+    await openStage(page, 'preset=tablet-landscape&selected=2&surface=sheet', { width: 1280, height: 800 });
+    await whenOpen(page);
+    await expect(page.locator('#sheet')).toHaveAttribute('data-form', 'side-sheet');
+    await expect(page.locator('#accessory')).toHaveAttribute('data-placement', 'content-bottom');
+    const sheet = await box(page, '#sheet-surface');
+    const win = await box(page, '#window');
+    const acc = await box(page, '#nav [data-accessory]');
+    expect(acc.x + acc.width).toBeLessThanOrEqual(sheet.x - 8 + 0.5);
+    expect(acc.x + acc.width).toBeGreaterThan(sheet.x - 24);
+    await page.locator('#sheet-close').click();
+    await expect(page.locator('#sheet')).not.toHaveAttribute('data-phase', /./);
+    await settled(page);
+    const back = await box(page, '#nav [data-accessory]');
+    expect(back.x + back.width).toBeCloseTo(win.x + win.width - 8, 0);
+  });
+});
+
 test.describe('a surface on a folded stage', () => {
   test('in book posture a popover grows inside the half of its trigger on every frame', async ({ page }) => {
     await openStage(page, 'preset=foldable-book&selected=2', { width: 673, height: 841 });

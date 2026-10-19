@@ -36,7 +36,7 @@ import {
   type NavMorphState,
 } from '../kit/nav';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
-import { effectiveInput, isEditable, watchAdaptiveContext } from './environment';
+import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, effectiveInput, isEditable, shellOf, watchAdaptiveContext } from './environment';
 import { deepActive, dropEmptyStyle } from './dom';
 import { attachControlGlass, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
@@ -319,6 +319,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#mine.clear();
       this.#probe = null;
       this.#safeBottom = 0;
+      this.#endInset = 0;
       this.#linkStyle = new Map();
       this.#presentation = null;
       this.#mode = null;
@@ -424,6 +425,11 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#modeKey = '';
       this.#refreshMode();
       this.#bindScroller();
+      const shell = shellOf(this);
+      const inset = (e: Event) => e.target === shell && this.#insetChanged();
+      shell.addEventListener(SHEET_INSET_EVENT, inset);
+      this.#cleanups.push(() => shell.removeEventListener(SHEET_INSET_EVENT, inset));
+      this.#endInset = this.#readEndInset();
       this.#cleanups.push(
         watchAdaptiveContext(this, (ctx) => {
           this.#ctx = ctx;
@@ -581,6 +587,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
 
     #probe: HTMLElement | null = null;
     #safeBottom = 0;
+    #endInset = 0;
 
     #tier(): 'touch' | 'pointer' {
       return sizeTier(effectiveInput()) === 'touch' ? 'touch' : 'pointer';
@@ -630,7 +637,19 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         toggle: nav.collapsible || nav.expandable !== null,
         accessory: this.#accessory !== null,
         bottomInset: this.#safeBottom,
+        endInset: this.#endInset,
       });
+    }
+
+    #readEndInset(): number {
+      return parseFloat(getComputedStyle(this).getPropertyValue(SHEET_INSET_PROPERTY)) || 0;
+    }
+
+    #insetChanged(): void {
+      const next = this.#readEndInset();
+      if (next === this.#endInset) return;
+      this.#endInset = next;
+      this.#replan();
     }
 
     #forcedState: Forced | null = null;

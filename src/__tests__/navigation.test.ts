@@ -190,6 +190,13 @@ describe('navLayout: the rail', () => {
     expect(l.insets.bottom).toBe(8 + 56);
     expect(rail({ accessory: true, bottomInset: 34 }).accessory!.y + 56).toBe(900 - 34);
   });
+
+  it('ends the accessory at the leading edge of what a side sheet takes, and by the margin when that is less', () => {
+    const l = rail({ accessory: true, endInset: 376 });
+    expect(l.accessory!.x + l.accessory!.width).toBe(800 - 376);
+    expect(rail({ accessory: true, endInset: 3 }).accessory!.width).toBe(800 - l.insets.start - 8);
+    expect(rail({ accessory: true, endInset: 5000 }).accessory!.width).toBe(0);
+  });
 });
 
 describe('navLayout: the sidebar', () => {
@@ -230,6 +237,8 @@ describe('navLayout: the sidebar', () => {
     const l = sidebar({ accessory: true });
     expect(l.accessory).toMatchObject({ x: 296, height: 56 });
     expect(l.insets.bottom).toBe(64);
+    const beside = sidebar({ accessory: true, endInset: 376 });
+    expect(beside.accessory!.x + beside.accessory!.width).toBe(1300 - 376);
   });
 });
 
