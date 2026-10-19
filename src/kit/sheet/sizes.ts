@@ -6,8 +6,8 @@ export const SHEET_SIZES = {
   /** 12 dp up to 30 % of the window, 6 dp at 55 %, flush from 90 %; linear between. */
   inset: { rest: 12, mid: 6, restUntil: 0.3, midAt: 0.55, flushAt: 0.9 },
   radius: { inset: 32, flush: 28 },
-  /** Glass up to 55 %, opaque from 90 %. */
-  opacity: { glassUntil: 0.55, opaqueFrom: 0.9 },
+  /** Glass up to a quarter of the window, opaque from 90 %; any surface over a scrim, a popover as a sheet included, is never thinner than `overScrim`. */
+  opacity: { glassUntil: 0.25, opaqueFrom: 0.9, overScrim: 0.6 },
   grabber: { width: 32, height: 4, hit: 44, top: 8 },
   /** The content's inset from the surface, and the strip at the top where a drag moves the sheet. */
   content: { pad: 16, handle: 28 },

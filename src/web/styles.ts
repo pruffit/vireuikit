@@ -1,4 +1,5 @@
 import { NAV_SIZES } from '../kit/nav';
+import { SURFACE_INK } from '../kit/sheet';
 
 const HOST = ':is(vire-button,vire-icon-button)[data-vk]';
 const BODY = `${HOST}>button`;
@@ -183,9 +184,11 @@ ${GRAB}::before{content:'';position:absolute;left:50%;top:var(--vk-grab-top);wid
 ${GRAB}:focus-visible::before{outline:2px solid currentColor;outline-offset:6px}
 ${SH}[data-height=dragging]>:is(dialog,[popover])>[data-vk-grabber]{cursor:grabbing}
 
-${SH}[data-surface=glass]>:is(dialog,[popover]){color:color-mix(in srgb,CanvasText calc(var(--vk-opaque)*100%),var(--vireglass-ink-color,CanvasText));
+${SH}[data-surface=glass]>:is(dialog,[popover]){color:CanvasText;
  ${GLASS_BODY.replaceAll('background:','background-color:')};
  background-image:linear-gradient(var(--vk-solid),var(--vk-solid))}
+${SH}[data-surface=glass][data-ink=dark]>:is(dialog,[popover]){color:${SURFACE_INK.dark}}
+${SH}[data-surface=glass][data-ink=light]>:is(dialog,[popover]){color:${SURFACE_INK.light}}
 ${SH}[data-surface=plain]>:is(dialog,[popover]){background:Canvas;color:CanvasText;${SHADOW}}
 ${SH}[data-form=full-screen]>:is(dialog,[popover]){box-shadow:none}
 ${SH}[data-form=side-pane]>:is(dialog,[popover]){box-shadow:0 0 0 1px color-mix(in srgb,currentColor 14%,transparent)}

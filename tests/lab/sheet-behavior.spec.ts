@@ -484,7 +484,9 @@ test.describe('the inset, the radius and the body follow the height', () => {
     const m = BOTTOM(360);
     expect([medium.left, medium.right, medium.bottom].map((v) => Math.round(v * 10) / 10)).toEqual([7.2, 7.2, 7.2]);
     expect(near(medium.radius, m.radius, 0.2)).toBe(true);
-    expect(medium.opaque).toBe(0);
+    expect(medium.opaque).toBeCloseTo(m.opaque, 2);
+    expect(medium.opaque).toBeGreaterThan(0.2);
+    expect(medium.opaque).toBeLessThan(0.6);
     expect(await page.locator('#sup').getAttribute('data-glass')).toBe('on');
     await page.locator('#sup').evaluate((el) => ((el as unknown as { detent: string }).detent = 'large'));
     await expect.poll(async () => Math.round((await read()).left)).toBe(0);
@@ -495,7 +497,7 @@ test.describe('the inset, the radius and the body follow the height', () => {
     expect(large.opaque).toBe(1);
   });
 
-  test('up to 30 % of the window the inset is 12 dp and the radius 32', async ({ page }) => {
+  test('up to 30 % of the window the inset is 12 dp and the radius 32, and a popover as a sheet keeps its floor under a scrim', async ({ page }) => {
     await sandbox(page, 'rm=1', { w: 390, h: 1000 });
     await page.locator('#pop-trigger').click();
     await resting(page, 'pop');
@@ -505,10 +507,10 @@ test.describe('the inset, the radius and the body follow the height', () => {
     expect(near(box.x - frame.x, 12, 0.1)).toBe(true);
     expect(near(frame.y + frame.height - (box.y + box.height), 12, 0.1)).toBe(true);
     expect(near(parseFloat(await css(page, 'pop', 'border-top-left-radius')), 32, 0.1)).toBe(true);
-    expect(await opaque(page, 'pop')).toBe(0);
+    expect(await opaque(page, 'pop')).toBe(SHEET_SIZES.opacity.overScrim);
   });
 
-  test('the blend runs with the height while the sheet is dragged: 3 dp and half opaque near 72 %', async ({ page }) => {
+  test('the blend runs with the height while the sheet is dragged: 3 dp and mostly opaque near 72 %', async ({ page }) => {
     await sandbox(page, 'rm=1');
     await page.locator('#sup-trigger').click();
     await resting(page, 'sup');
@@ -525,8 +527,8 @@ test.describe('the inset, the radius and the body follow the height', () => {
     const expected = BOTTOM(target);
     expect(near(box.x - frame.x, expected.inset, 0.2)).toBe(true);
     expect(near(await opaque(page, 'sup'), expected.opaque, 0.01)).toBe(true);
-    expect(expected.opaque).toBeGreaterThan(0.3);
-    expect(expected.opaque).toBeLessThan(0.7);
+    expect(expected.opaque).toBeGreaterThan(0.6);
+    expect(expected.opaque).toBeLessThan(0.95);
     await page.mouse.up();
   });
 });
@@ -1719,5 +1721,172 @@ test.describe('a touch on a touch screen', () => {
     await finger.up();
     expect(near(await sheetHeight(page, 'sup'), 360, 0.5)).toBe(true);
     expect(await surfaceOf(page, 'sup').evaluate((el) => el.scrollTop)).toBeGreaterThan(100);
+  });
+});
+
+// ---- legibility ----------------------------------------------------------------------------------------------------
+
+type Legibility = { text: string; contrast: number };
+type Surface = { name: string; query: string; lens: boolean };
+
+const SURFACES: Surface[] = [
+  { name: 'popover', query: 'form=popover', lens: true },
+  { name: 'popover as a sheet', query: 'form=popover-sheet', lens: true },
+  { name: 'bottom sheet at peek', query: 'form=bottom-sheet&detent=peek&content=filters', lens: true },
+  { name: 'bottom sheet at medium', query: 'form=bottom-sheet&detent=medium', lens: true },
+  { name: 'bottom sheet at large', query: 'form=bottom-sheet&detent=large', lens: false },
+  { name: 'side sheet', query: 'form=side-sheet', lens: true },
+  { name: 'third pane', query: 'form=side-pane', lens: false },
+  { name: 'centred sheet', query: 'form=centered-sheet', lens: true },
+  { name: 'full screen', query: 'form=full-screen', lens: false },
+  { name: 'basic dialog', query: 'form=basic-dialog', lens: true },
+  { name: 'alert', query: 'form=alert', lens: true },
+];
+
+async function settled(page: Page, lens: boolean): Promise<void> {
+  await page.waitForFunction(() => document.querySelector('vire-popover,vire-sheet')?.getAttribute('data-phase') === 'open');
+  if (lens) {
+    await page.waitForFunction(() => /url\(|blur/.test(document.querySelector<HTMLElement>('vire-popover > [popover], vire-sheet > dialog, vire-sheet > [popover]')!.style.backdropFilter));
+  }
+  await nextFrame(page);
+  await nextFrame(page);
+}
+
+/**
+ * The contrast of the first three runs of text in the open surface, from a screenshot: the strongest pixels in the run's
+ * box (the darkest for dark ink, the lightest for light) against the median of a ring just outside it.
+ */
+async function legibility(page: Page): Promise<Legibility[]> {
+  const runs = await page.evaluate(() => {
+    const surface = document.querySelector<HTMLElement>('vire-popover > [popover], vire-sheet > dialog, vire-sheet > [popover]')!;
+    const area = surface.getBoundingClientRect();
+    const walker = document.createTreeWalker(surface, NodeFilter.SHOW_TEXT);
+    const found: { text: string; x: number; y: number; w: number; h: number; ink: number }[] = [];
+    for (let node = walker.nextNode(); node && found.length < 3; node = walker.nextNode()) {
+      const text = node.textContent?.trim() ?? '';
+      const owner = node.parentElement!;
+      if (!text || owner.closest('[data-vk-grabber]') || getComputedStyle(owner).visibility === 'hidden') continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const r = range.getBoundingClientRect();
+      const inside = r.left >= area.left && r.right <= area.right && r.top >= area.top && r.bottom <= area.bottom && r.bottom <= innerHeight;
+      if (!inside || r.width < 8) continue;
+      const [cr, cg, cb] = (getComputedStyle(owner).color.match(/[\d.]+/g) ?? []).map(Number);
+      found.push({ text, x: r.x, y: r.y, w: r.width, h: r.height, ink: (0.2126 * cr! + 0.7152 * cg! + 0.0722 * cb!) / 255 });
+    }
+    return found;
+  });
+  expect(runs.length).toBe(3);
+  const png = (await page.screenshot()).toString('base64');
+  return page.evaluate(
+    async ({ png, runs }) => {
+      const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      ctx.drawImage(bitmap, 0, 0);
+      const channel = (v: number) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+      const lum = (d: Uint8ClampedArray, i: number) => 0.2126 * channel(d[i]!) + 0.7152 * channel(d[i + 1]!) + 0.0722 * channel(d[i + 2]!);
+      return runs.map((run) => {
+        const x0 = Math.floor(run.x);
+        const y0 = Math.floor(run.y);
+        const x1 = Math.ceil(run.x + run.w);
+        const y1 = Math.ceil(run.y + run.h);
+        const pad = 5;
+        const area = ctx.getImageData(x0 - pad, y0 - pad, x1 - x0 + 2 * pad, y1 - y0 + 2 * pad);
+        const inner: number[] = [];
+        const ring: number[] = [];
+        for (let y = 0; y < area.height; y += 1) {
+          for (let x = 0; x < area.width; x += 1) {
+            const inBox = x >= pad && x < area.width - pad && y >= pad && y < area.height - pad;
+            const l = lum(area.data, (y * area.width + x) * 4);
+            if (inBox) inner.push(l);
+            else if (x >= pad - 3 && x < area.width - pad + 3 && y >= pad - 3 && y < area.height - pad + 3) ring.push(l);
+          }
+        }
+        inner.sort((a, b) => a - b);
+        ring.sort((a, b) => a - b);
+        const back = ring[Math.floor(ring.length / 2)]!;
+        const edge = run.ink < 0.5 ? inner[Math.floor(inner.length * 0.01)]! : inner[Math.ceil(inner.length * 0.99) - 1]!;
+        return { text: run.text, contrast: (Math.max(back, edge) + 0.05) / (Math.min(back, edge) + 0.05) };
+      });
+    },
+    { png, runs },
+  );
+}
+
+const worst = (runs: Legibility[]) => Math.min(...runs.map((r) => r.contrast));
+
+test.describe('text on every surface', () => {
+  test.use({ viewport: { width: 1900, height: 1000 } });
+
+  for (const surface of SURFACES) {
+    for (const backdrop of ['light', 'photo']) {
+      for (const [glass, value] of [['glass on', '1'], ['glass off', '0']] as const) {
+        test(`text on every surface reaches 4.5:1 against what is behind it: ${surface.name} on ${backdrop}, ${glass}`, async ({ page }) => {
+          await openCase(page, `atom=sheet&${surface.query}&backdrop=${backdrop}&glass=${value}`);
+          await settled(page, surface.lens && value === '1');
+          const runs = await legibility(page);
+          for (const run of runs) expect(run.contrast, `"${run.text}"`).toBeGreaterThanOrEqual(4.5);
+        });
+      }
+    }
+  }
+
+  test('over a dark backdrop the ink turns light and still reaches 4.5:1', async ({ page }) => {
+    for (const query of ['form=centered-sheet', 'form=alert']) {
+      await openCase(page, `atom=sheet&${query}&backdrop=dark&glass=1`);
+      await settled(page, true);
+      await expect(page.locator('vire-popover,vire-sheet')).toHaveAttribute('data-ink', 'light');
+      for (const run of await legibility(page)) expect(run.contrast, `${query} "${run.text}"`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  test('the old mixing of the backdrop ink with the page ink fails the gate: the centred sheet on the light backdrop and the bottom sheet at medium on the photo', async ({ page }) => {
+    const old = ':is(vire-popover,vire-sheet)[data-vk][data-surface=glass]>:is(dialog,[popover]){color:color-mix(in srgb,CanvasText calc(var(--vk-opaque)*100%),var(--vireglass-ink-color,CanvasText))!important}';
+    for (const [query, backdrop] of [['form=centered-sheet', 'light'], ['form=bottom-sheet&detent=medium', 'photo']] as const) {
+      await openCase(page, `atom=sheet&${query}&backdrop=${backdrop}&glass=1`);
+      await settled(page, true);
+      expect(worst(await legibility(page))).toBeGreaterThanOrEqual(4.5);
+      await page.addStyleTag({ content: old });
+      await nextFrame(page);
+      expect(worst(await legibility(page)), `${query} on ${backdrop}`).toBeLessThan(4.5);
+    }
+  });
+});
+
+test.describe('the density follows the height from the bottom', () => {
+  test('peek is glass, medium about half dense, large opaque; a centred surface keeps a floor', async ({ page }) => {
+    const read = async (query: string) => {
+      await openCase(page, `atom=sheet&${query}&backdrop=photo&glass=1`);
+      await settled(page, true);
+      return page.locator('vire-sheet > dialog, vire-sheet > [popover]').evaluate((el) => Number((el as HTMLElement).style.getPropertyValue('--vk-opaque')));
+    };
+    expect(await read('form=bottom-sheet&detent=peek&content=filters')).toBeLessThan(0.1);
+    const medium = await read('form=bottom-sheet&detent=medium');
+    expect(medium).toBeCloseTo(sheetOpacity(0.5), 2);
+    expect(medium).toBeGreaterThan(0.2);
+    expect(medium).toBeLessThan(0.6);
+    expect(await read('form=centered-sheet')).toBe(SHEET_SIZES.opacity.overScrim);
+    expect(await read('form=alert')).toBe(SHEET_SIZES.opacity.overScrim);
+  });
+});
+
+test.describe('the bottom safe area', () => {
+  test('a floating bottom sheet stays clear of the inset the probe reads', async ({ page }) => {
+    await sandbox(page, 'rm=1&glass=0');
+    await page.locator('#sup-trigger').click();
+    await resting(page, 'sup');
+    const gap = async () => {
+      const frame = await frameBox(page);
+      const box = await boxOf(page, 'sup');
+      return frame.y + frame.height - (box.y + box.height);
+    };
+    expect(await gap()).toBeLessThan(20);
+    await page.addStyleTag({ content: '[data-vk-probe]{padding-bottom:34px !important}' });
+    await resize(page, 391, 720);
+    await expect.poll(gap).toBeCloseTo(34, 0);
+    expect(await page.locator('vire-sheet [data-vk-probe]').count()).toBe(0);
   });
 });

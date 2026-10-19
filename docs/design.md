@@ -256,8 +256,19 @@ while it stays open.
   - The side and bottom inset shrinks as the sheet rises: 12 dp up to 30 % of the window, 6 dp at 55 %, flush from
     90 % (`sheetInset`). The radius is 32 dp while inset and 28 dp when flush; a flush sheet runs its bottom corners
     past the window's edge.
-  - The body is glass up to 55 % of the window and opaque from 90 %, blended with the height as it rises (U 407.0 s:
-    about 0.47 s, opaque by the large detent).
+  - The density follows the height from the bottom: glass up to a quarter of the window (`peek`), about half dense at
+    `medium` (0.55 gives 0.44, a smoothstep from 0.25 to 0.9) and opaque from 90 % (`sheetOpacity`; U 407.0 s: about
+    0.47 s, opaque by the large detent). Glass cannot carry text over vivid content, so a surface over a scrim (a
+    centred sheet, a basic dialog, an alert, a popover that became a sheet) is never thinner than
+    `SHEET_SIZES.opacity.overScrim` (0.6). A popover that keeps its anchored form keeps the menu's body.
+  - The ink follows the body as it is drawn, not the page: `surfaceInk` lays the opaque body (the colour the kit paints,
+    read from `Canvas`) over the backdrop's luma, with the scrim in it, at the surface's density and takes the polarity
+    with the higher contrast. The element sets `data-ink` (`dark` or `light`) and the styles paint a near-black or a
+    near-white from it. Reduced transparency and increased contrast are opaque already and keep `Canvas` and
+    `CanvasText`. The lab's gate measures it on screenshots: the title and two labels of every form on both backdrops
+    reach 4.5:1 (SH21).
+  - A floating sheet stays clear of the bottom safe area: the element reads `env(safe-area-inset-bottom)` through a
+    probe, as `<vire-nav>` does, and gives it to `sheetLayout` as `bottomInset`.
   - The background only dims; it is never scaled or moved.
 - **The grabber** shows whenever a sheet has more than one detent or closes by a swipe. It is a 32 × 4 dp line with a
   44 dp hit area and `role="slider"`: `aria-valuetext` names the detent, the arrows change it, and a tap moves to the

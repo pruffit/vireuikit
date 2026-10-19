@@ -30,6 +30,7 @@ import {
   sheetPeekContent,
   sheetOpacity,
   sheetRadius,
+  surfaceInk,
   sheetResistance,
   stepGrowth,
   stepSheetGrowth,
@@ -74,14 +75,22 @@ describe('sheetInset, sheetRadius and sheetOpacity', () => {
     expect(sheetRadius(0.55)).toBeLessThan(32);
   });
 
-  it('is glass up to 55 % and opaque from 90 %, blended between', () => {
-    expect(sheetOpacity(0.3)).toBe(0);
-    expect(sheetOpacity(0.55)).toBe(0);
+  it('is glass up to a quarter of the window, about half dense at medium and opaque from 90 %', () => {
+    expect(sheetOpacity(0.1)).toBe(0);
+    expect(sheetOpacity(0.25)).toBe(0);
+    expect(sheetOpacity(0.55)).toBeGreaterThan(0.4);
+    expect(sheetOpacity(0.55)).toBeLessThan(0.5);
     expect(sheetOpacity(0.9)).toBe(1);
     expect(sheetOpacity(1)).toBe(1);
-    const mid = sheetOpacity(0.725);
-    expect(mid).toBeGreaterThan(0.4);
-    expect(mid).toBeLessThan(0.6);
+  });
+
+  it('never thins as the sheet rises', () => {
+    let last = -1;
+    for (let f = 0; f <= 1; f += 0.01) {
+      const o = sheetOpacity(f);
+      expect(o).toBeGreaterThanOrEqual(last);
+      last = o;
+    }
   });
 });
 
@@ -125,7 +134,7 @@ describe('sheetLayout, bottom sheet', () => {
     expect(l.box.y + l.box.height).toBeCloseTo(phone.height - 12, 9);
     expect(l.box.radius).toBe(32);
     expect(l.glass).toBe(true);
-    expect(l.opacity).toBe(0);
+    expect(l.opacity).toBeLessThan(0.05);
   });
 
   it('is flush, opaque and runs its bottom corners off the window at large', () => {
@@ -173,10 +182,45 @@ describe('sheetLayout, bottom sheet', () => {
     expect(at(400).grabber).toBeNull();
   });
 
+  it('keeps the floor under a scrim: a popover that became a sheet is never thinner than a dialog', () => {
+    const form = formFor('popover', phone);
+    expect(form.form).toBe('bottom-sheet');
+    expect(form.scrim).toBe(true);
+    const l = sheetLayout({ form, window: phone, source: null, content, height: 240 });
+    expect(l.opacity).toBe(SHEET_SIZES.opacity.overScrim);
+    expect(sheetLayout({ form, window: phone, source: null, content, height: 744 }).opacity).toBe(1);
+  });
+
   it('carries the form scrim', () => {
     expect(at(400).scrim).toBe(false);
     const modal = sheetLayout({ form: formFor('modal-sheet', phone), window: phone, source: null, content, height: 744 });
     expect(modal.scrim).toBe(true);
+  });
+});
+
+describe('surfaceInk', () => {
+  it('writes dark over a light body and light over a dark one', () => {
+    expect(surfaceInk(0.9, 0, 1)).toBe('dark');
+    expect(surfaceInk(0.1, 0, 1)).toBe('light');
+  });
+
+  it('reads the backdrop as the body lets it through: a mid-grey glass body takes dark ink, a dense one follows its own colour', () => {
+    expect(surfaceInk(0.63, 0, 1)).toBe('dark');
+    expect(surfaceInk(0.2, 1, 1)).toBe('dark');
+    expect(surfaceInk(0.9, 1, 0.07)).toBe('light');
+  });
+
+  it('flips where the two inks read equally well, never inside a pole', () => {
+    const flips: number[] = [];
+    let last = surfaceInk(0, 0, 1);
+    for (let l = 0; l <= 1; l += 0.01) {
+      const now = surfaceInk(l, 0, 1);
+      if (now !== last) flips.push(l);
+      last = now;
+    }
+    expect(flips).toHaveLength(1);
+    expect(flips[0]!).toBeGreaterThan(0.35);
+    expect(flips[0]!).toBeLessThan(0.65);
   });
 });
 
@@ -233,6 +277,16 @@ describe('sheetLayout, other forms', () => {
     expect(sheetLayout({ form: basic, window: desktop, source: null, content }).box.width).toBe(560);
     const narrow = { width: 600, height: 900 };
     expect(sheetLayout({ form: formFor('dialog', narrow), window: narrow, source: null, content }).box.width).toBe(552);
+  });
+
+  it('gives a centred sheet, a basic dialog and an alert the density floor over their scrim', () => {
+    for (const kind of ['modal-sheet', 'dialog', 'alert'] as const) {
+      const form = formFor(kind, desktop);
+      const l = sheetLayout({ form, window: desktop, source: null, content });
+      expect(form.scrim).toBe(true);
+      expect(l.opacity).toBe(SHEET_SIZES.opacity.overScrim);
+      expect(l.glass).toBe(true);
+    }
   });
 
   it('makes an alert min(320, window - 48) wide', () => {

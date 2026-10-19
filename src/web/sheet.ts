@@ -34,6 +34,7 @@ import {
   sheetPeekContent,
   sheetTouchAction,
   sheetUsesGlass,
+  surfaceInk,
   stepSheetGrowth,
   stepSheetHeight,
   type SheetDetent,
@@ -129,6 +130,9 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #sample: BackdropSample | null = null;
     #held: BackdropSample | null = null;
     #probed: BackdropSample | null = null;
+    #probe: HTMLElement | null = null;
+    #safeBottom = 0;
+    #canvasLuma: number | null = null;
 
     #open = false;
     #out = false;
@@ -235,7 +239,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#lifted.clear();
       for (const restore of this.#restore.splice(0).reverse()) restore();
       if (surface) dropEmptyStyle(surface, this.#hadStyle.surface);
-      for (const name of ['data-vk', 'data-kind', 'data-form', 'data-surface', 'data-glass', 'data-frost', 'data-contrast', 'data-phase', 'data-height', 'data-measure']) {
+      for (const name of ['data-vk', 'data-kind', 'data-form', 'data-surface', 'data-glass', 'data-frost', 'data-contrast', 'data-ink', 'data-phase', 'data-height', 'data-measure']) {
         this.removeAttribute(name);
       }
       for (const name of Array.from(this.style)) if (name.startsWith('--vk-')) this.style.removeProperty(name);
@@ -406,7 +410,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       };
 
       const markup = new MutationObserver((records) => {
-        const own = (node: Node) => node === this.#grabber || this.#grabber?.contains(node);
+        const own = (node: Node) => node === this.#grabber || node === this.#probe || this.#grabber?.contains(node);
         let changed = false;
         for (const record of records) {
           if (record.type === 'childList' && ![...record.addedNodes, ...record.removedNodes].every(own)) changed = true;
@@ -792,6 +796,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       const client = this.#sourceClient();
       const source = client ? { ...client, x: client.x - win.x, y: client.y - win.y } : null;
       this.#sourceLocal = source;
+      this.#readEnvironment();
       const next = presentationForm(this.#kind(), ctx, source ?? undefined);
       const window = ctx.window;
       const content = this.#contentFor(next, window);
@@ -877,7 +882,41 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         content: this.#content,
         height: this.#kb ? Math.min(this.#drag.height.x, ctx.window.height - this.#kb.lift - SHEET_SIZES.detent.largeTopGap) : this.#drag.height.x,
         grabber,
+        bottomInset: this.#safeBottom,
       });
+    }
+
+    /** The bottom safe area and the colour the kit paints an opaque body in, read through a probe that is in the element only while it is read. */
+    #readEnvironment(): void {
+      const probe = (this.#probe ??= this.#makeProbe());
+      this.append(probe);
+      const style = getComputedStyle(probe);
+      const inset = parseFloat(style.paddingBottom);
+      const canvas = /rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)/.exec(style.backgroundColor);
+      probe.remove();
+      this.#safeBottom = Number.isFinite(inset) ? Math.max(inset, 0) : 0;
+      this.#canvasLuma = canvas ? (0.2126 * Number(canvas[1]) + 0.7152 * Number(canvas[2]) + 0.0722 * Number(canvas[3])) / 255 : null;
+    }
+
+    #makeProbe(): HTMLElement {
+      const probe = this.ownerDocument.createElement('div');
+      probe.setAttribute('data-vk-probe', '');
+      probe.setAttribute('aria-hidden', 'true');
+      probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;width:0;height:0;padding-bottom:env(safe-area-inset-bottom,0px);background-color:Canvas';
+      return probe;
+    }
+
+    /** The polarity of the text: the body as it is drawn, not the page behind it. */
+    #syncInk(opaque: number): void {
+      const sample = this.#probed ?? this.#held;
+      const canvas = this.#canvasLuma;
+      if (this.getAttribute('data-surface') !== 'glass' || !sample || canvas === null) {
+        this.removeAttribute('data-ink');
+        return;
+      }
+      const dimmed = !this.#probed && this.#layout?.scrim ? 1 - SHEET_SIZES.scrimAlpha : 1;
+      const ink = surfaceInk(sample.luma * dimmed, opaque, canvas);
+      if (this.getAttribute('data-ink') !== ink) this.setAttribute('data-ink', ink);
     }
 
     // ---- motion -------------------------------------------------------------------------------------------------
@@ -1057,6 +1096,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       s.setProperty('--vk-content-w', px(Math.max(0, (this.#layout?.box.width ?? box.width) - 2 * SHEET_SIZES.content.pad)));
       s.setProperty('--vk-ink-in', (Math.round(c.ink * 1000) / 1000).toFixed(3));
       s.setProperty('--vk-opaque', (this.#opaque ? 1 : c.opacity).toFixed(3));
+      this.#syncInk(this.#opaque ? 1 : c.opacity);
       s.setProperty('--vk-scrim', (c.scrim * SHEET_SIZES.scrimAlpha).toFixed(3));
       const body = menuBody(VIREGLASS_CONTROL_MATERIAL, c.activity, false);
       s.setProperty('--vk-body-alpha', body.alpha.toFixed(3));

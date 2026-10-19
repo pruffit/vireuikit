@@ -76,7 +76,7 @@ export function sheetLayout(input: SheetLayoutInput): SheetLayout {
       const fraction = window.height > 0 ? height / window.height : 0;
       const inset = sheetInset(fraction);
       const radius = sheetRadius(fraction);
-      const opacity = sheetOpacity(fraction);
+      const opacity = form.scrim ? Math.max(sheetOpacity(fraction), SHEET_SIZES.opacity.overScrim) : sheetOpacity(fraction);
       // Under 2 dp of inset the bottom corners are already running off the window's edge.
       const k = Math.min(inset / 2, 1);
       const gap = k * Math.max(inset, input.bottomInset ?? 0);
@@ -120,7 +120,7 @@ export function sheetLayout(input: SheetLayoutInput): SheetLayout {
         width,
         height,
         radius: dialog.radius,
-      });
+      }, { opacity: form.scrim ? SHEET_SIZES.opacity.overScrim : 0 });
     }
     case 'full-screen':
       return result({ x: 0, y: 0, width: window.width, height: window.height, radius: 0 }, { opacity: 1, glass: false });
