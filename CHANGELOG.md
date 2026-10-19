@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **The toolbar model** (`vireuikit`). `toolbarGeometry` places a `ToolbarLayout` in the toolbar's own coordinates (capsules, slots, "…", the strip's text row, and a spacer that aligns trailing capsules to the end); `toolbarLayoutWithHysteresis` keeps a stage or overflow set until the container is 8 dp past its threshold; `toolbarMorphFrame`, `createToolbarMorph`, `aimToolbarMorph`, `stepToolbarMorph` and `currentToolbarFrame` merge capsules through a neck, collapse leaving slots into "…" and bud it out of the trailing end, rebasing a new target from the current frame; `toolbarPlaceFrame` fades one toolbar out and the next one in. `TOOLBAR_MORPH_TIMING` passes 95 % at about 0.38 s, `TOOLBAR_PLACE_TIMING` at about 0.3 s.
+
 ## 0.10.0
 
 - **`<vire-popover>` and `<vire-sheet>`** (`vireuikit/web`). Upgrade a `popovertarget` popover, a `<dialog>` opened by `command` and a `popover="manual"` into one surface that grows out of its trigger, runs back into it before it leaves the top layer, and takes the form `presentationForm` gives it on every window class (popover or bottom sheet, bottom, side and third-pane sheets, centred sheet, dialog, alert, full screen), reshaping while it stays open. A bottom sheet has detents, an inset that shrinks and a glass body that turns opaque as it rises, a grabber (`role="slider"`), a drag that follows the finger and a keyboard lift; a side sheet publishes `--vire-sheet-inset-end`. `docs/acceptance.md` holds the SH criteria; the model gained `defaultSheetDetents`, `sheetUsesGlass`, `scrimCloses`, `sheetContentDrag` and `sheetTouchAction`.
