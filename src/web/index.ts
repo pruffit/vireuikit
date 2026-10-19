@@ -1,6 +1,7 @@
 import { createControlElementClass } from './element';
 import { createMenuElementClass } from './menu';
 import { createNavElementClass } from './nav';
+import { createSurfaceElementClass } from './sheet';
 
 export { getA11yOverride, setA11yOverride, systemA11y } from './a11y';
 export type { VireControlElement } from './element';
@@ -16,12 +17,15 @@ export {
 export type { InputOverride, ViewportOverride } from './environment';
 export type { VireMenuElement } from './menu';
 export type { VireNavElement } from './nav';
+export type { VirePopoverElement, VireSheetElement, VireSurfaceElement } from './sheet';
 export { STYLES } from './styles';
 
 export const BUTTON_TAG = 'vire-button';
 export const ICON_BUTTON_TAG = 'vire-icon-button';
 export const MENU_TAG = 'vire-menu';
 export const NAV_TAG = 'vire-nav';
+export const POPOVER_TAG = 'vire-popover';
+export const SHEET_TAG = 'vire-sheet';
 
 export type DefineOptions = {
   /** CSP nonce for the stylesheet the elements inject. Alternatively, ship `STYLES` yourself. */
@@ -42,4 +46,6 @@ export function defineVireElements(options: DefineOptions = {}): void {
   }
   if (!registry.get(MENU_TAG)) registry.define(MENU_TAG, createMenuElementClass({ nonce: options.nonce }));
   if (!registry.get(NAV_TAG)) registry.define(NAV_TAG, createNavElementClass({ nonce: options.nonce }));
+  if (!registry.get(POPOVER_TAG)) registry.define(POPOVER_TAG, createSurfaceElementClass('popover', { nonce: options.nonce }));
+  if (!registry.get(SHEET_TAG)) registry.define(SHEET_TAG, createSurfaceElementClass('sheet', { nonce: options.nonce }));
 }

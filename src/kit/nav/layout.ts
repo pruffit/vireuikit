@@ -31,6 +31,8 @@ export type NavLayoutInput = {
   accessory?: boolean;
   /** The safe area at the bottom. */
   bottomInset?: number;
+  /** What a side sheet takes at the trailing edge; a content accessory ends at its leading edge. */
+  endInset?: number;
 };
 
 export type NavLayout = {
@@ -119,7 +121,7 @@ function contentAccessory(input: NavLayoutInput, start: number): { box: MorphBox
   const base = input.bottomInset ?? 0;
   if (!input.accessory) return { box: null, bottom: base };
   const bottom = Math.max(base, accessory.margin);
-  const width = Math.max(0, input.window.width - start - accessory.margin);
+  const width = Math.max(0, input.window.width - start - Math.max(accessory.margin, input.endInset ?? 0));
   const acc = box(start, input.window.height - bottom - accessory.content, width, accessory.content, accessory.content / 2);
   return { box: acc, bottom: bottom + accessory.content };
 }

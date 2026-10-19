@@ -100,6 +100,25 @@ export function setViewportOverride(next: ViewportOverride | null): void {
   for (const listener of [...viewportListeners]) listener();
 }
 
+/** The element the host made the window, if any. */
+export function viewportRoot(): Element | null {
+  return viewportOverride?.root ?? null;
+}
+
+/** What the open side sheets of a shell take at its trailing edge, published on the shell and announced when it changes. */
+export const SHEET_INSET_PROPERTY = '--vire-sheet-inset-end';
+export const SHEET_INSET_EVENT = 'vire-sheet-inset';
+
+/** The app's window an element lives in: its nearest `data-vire-shell`, else the override root that holds it, else the document. */
+export function shellOf(el: Element): Element {
+  const override = viewportRoot();
+  for (let node: Element | null = el; node; ) {
+    if (node.hasAttribute('data-vire-shell')) return node;
+    node = node.parentElement ?? ((node.getRootNode() as ShadowRoot).host ?? null);
+  }
+  return override?.isConnected && override.contains(el) ? override : el.ownerDocument.documentElement;
+}
+
 type SegmentsApi = { viewport?: { segments?: readonly DOMRectReadOnly[] | null } };
 
 /** The window and its segments in client coordinates. */
@@ -127,8 +146,16 @@ export function watchViewport(onChange: () => void): () => void {
   };
 }
 
-function contextOf(root: Element): AdaptiveContext {
+/** The window an element stands for: its box, or for the document the viewport (the root element's box is the whole page). */
+export function windowRect(root: Element): Rect {
+  const doc = root.ownerDocument.documentElement;
+  if (root === doc) return { x: 0, y: 0, width: doc.clientWidth, height: doc.clientHeight };
   const r = root.getBoundingClientRect();
+  return { x: r.x, y: r.y, width: r.width, height: r.height };
+}
+
+function contextOf(root: Element): AdaptiveContext {
+  const r = windowRect(root);
   const window = { width: r.width, height: r.height };
   const box = { x: r.x, y: r.y, width: r.width, height: r.height };
   const local = viewportSegments()
