@@ -244,7 +244,9 @@ and changes form through the selected destination.
   bounce past either end of the scroll range counts as the end. A step back of less than 4 dp does not break a run.
 - `[data-accessory]` is the bottom accessory. It sits over the bar, in the minimised bar's row, or along the bottom of
   the content beside a rail or sidebar, and says which in its `data-placement` (`above-bar`, `in-bar`,
-  `content-bottom`): show the transport only when `in-bar`.
+  `content-bottom`): show the transport only when `in-bar`. Beside a side sheet a `content-bottom` accessory ends at the
+  sheet's leading edge: the element reads `--vire-sheet-inset-end` on its shell (see the sheet) and re-lays out when
+  the sheet publishes it.
 - Insets: the element sets `--vire-nav-inset-bottom` and `--vire-nav-inset-start` (px) on its parent for the content to
   clear, and fires `vire-nav-layout` with `{ form, minimized, insets, accessoryPlacement }` whenever any changes.
 - Toggle: in the sidebar a button in its head collapses it into a rail (`collapsed`, and `vire-nav-collapse` with
@@ -301,12 +303,19 @@ modal sheet is centred from 600 dp, a dialog with fields is full screen below 60
   `role="slider"`.
 - After the upgrade the element runs the show and the hide, so the growth can run back before the surface leaves the
   top layer. A popover becomes `manual` and its buttons' `popovertarget` is lifted; a dialog's `command` and `cancel`
-  events, a `<form method="dialog">` submit and a `close()` through `command="close"` are intercepted and run back first.
-  A host calling `close()` or `hidePopover()` itself gets no animation, only a clean settle, and one calling `showModal()`
-  itself should set `sample`: a modal dialog makes the page inert, and the lens reads the backdrop before it opens. Everything lifted is
-  restored when the element is removed, along with the inline properties, the created grabber and the inset below.
+  events, a dialog submit (a `<form method="dialog">`, or a submitter with `formmethod="dialog"`) and a close through
+  `command="close"` are intercepted and run back first, but only while the element runs the surface: a dialog it has
+  not picked up yet closes natively. A host calling `close()` or `hidePopover()` itself gets no animation, only a clean
+  settle, and one calling `showModal()` itself should set `sample`: a modal dialog makes the page inert, and the lens
+  reads the backdrop before it opens. Escape closes a popover unless a modal dialog outside it is open, which keeps the
+  key. Everything the element added is removed with it: the lifted attributes, the inline properties, the created
+  grabber, the `detent` it reflected (an authored one is put back) and its share of the shell's inset.
+- A surface's trigger must be inside the element. A `popovertarget` button outside it toggles the platform popover
+  with no growth, no carried body and no retraction, and the element only adopts what it sees open.
 - The window is the nearest ancestor marked `data-vire-shell`, else the root given to `setViewportOverride`, else the
-  viewport. The form, the placement and the detents are measured in it; a positioned ancestor is not a window.
+  viewport. The form, the placement and the detents are measured in it; a positioned ancestor is not a window. A
+  bottom sheet's height and detents stand in the part of the window it opens in (one half of a folded screen), and the
+  content's size is measured again when it changes after the surface is out (a `<details>` opened, an element shown).
 - Growth. A popover grows as the menu does (the trigger's body, a drop, the panel with a small overshoot). A sheet grows
   straight out of its trigger into its box with no drop. The trigger hands its body over while the surface is out
   (`setCarried`), so there is never glass on glass, and takes it back on close. Reduced motion lands opening, closing and
@@ -318,15 +327,20 @@ modal sheet is centred from 600 dp, a dialog with fields is full screen below 60
   resists past the largest detent, springs to the detent the position and velocity choose, and closes below the lowest
   one unless `persistent` is set. The content scrolls first: a drag moves the sheet only from the content's top, and on
   the grabber and the top strip always. `[data-sheet-handle]` marks more chrome that drags.
-- The grabber is a created `<div role="slider" aria-orientation="vertical">` with a 44 dp hit area, whose
-  `aria-valuetext` is the detent's name and `aria-label` is `grabber-label` (default "Sheet height"). The arrows, Home and
-  End change the detent, a tap moves to the next. With a field focused and the visual viewport shrunk by a keyboard, the
-  sheet takes its largest detent above the keyboard and goes back when it leaves, unless the person moved it.
-- A side sheet publishes `--vire-sheet-inset-end` on its parent (the width and gaps it takes from the content), removed
-  on close. From 1600 dp the third pane is opaque and not glass, like full screen.
+- With more than one detent the grabber is a created `<div role="slider" aria-orientation="vertical">` with a 44 dp hit
+  area, whose `aria-label` is `grabber-label` (default "Sheet height") and whose `aria-valuetext` is the detent's name;
+  `detent-labels="peek=Compact; medium=Half; large=Full"` says them in the page's language (a name left out keeps the
+  English one). The arrows, Home and End change the detent, a tap moves to the next. With one detent it is only a picture
+  of the swipe (`aria-hidden="true"`, not focusable, no role); a swipe, Escape and the close button still close the
+  sheet. With a field focused and the visual viewport shrunk by a keyboard, the sheet takes its largest detent above the
+  keyboard and goes back when it leaves, unless the person moved it.
+- A side sheet publishes `--vire-sheet-inset-end` on its shell (the width and gaps it takes from the content; custom
+  properties inherit, so every layout inside the shell can read it) and fires a bubbling `vire-sheet-inset` event
+  there with `{ inset }` when it changes. With several side sheets open the shell carries the widest; the last one to
+  close gives back what the shell had. From 1600 dp the third pane is opaque and not glass, like full screen.
 - The scrim is 32 % black under a modal surface and under a popover's sheet form. A press on it closes a bottom sheet or
   a popover, never a centred sheet, a dialog, an alert or a `persistent` surface. The background is never scaled or moved.
-- Attributes: `glass` (as on the menu), `kind`, `detents`, `detent`, `persistent`, `grabber-label`. Properties: `a11y`,
+- Attributes: `glass` (as on the menu), `kind`, `detents`, `detent`, `persistent`, `grabber-label`, `detent-labels`. Properties: `a11y`,
   `sample`, `detent`, `open`. Reduced transparency and increased contrast make every form opaque, with the same geometry
   and no lens; glass off is a plain opaque body with a shadow.
 - The lab forces states with `data-vire-force-state`: `open`, `open:<detent>` and `grow:<t>` (a growth frozen at `t`).
