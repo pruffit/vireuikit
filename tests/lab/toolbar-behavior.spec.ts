@@ -173,7 +173,7 @@ test.describe('layout', () => {
     const all = items(await doneWidth(page));
     const full = toolbarLayout(all, { available: 1e6, tier: TIER });
     let previous: ToolbarLayout | null = null;
-    const widths = [...Array.from({ length: 80 }, (_, i) => full.extent + 40 - i * 8), 12, 4, 0];
+    const widths = [...Array.from({ length: 88 }, (_, i) => full.extent + 40.37 - i * 7.3), 12, 4, 0];
     const failures: string[] = [];
     const check = async (w: number, down: boolean) => {
       await reflow(page, w + 16, 400);
