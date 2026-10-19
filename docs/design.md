@@ -354,6 +354,76 @@ while it stays open.
 
 Acceptance is the SH criteria in `docs/acceptance.md`.
 
+## The toolbar
+
+The research (outside this repository: the toolbar note of 19.10.2026) and the adaptive map decide what a toolbar keeps
+in sight. `toolbarLayout` and `toolbarPlacement` already hold the rules:
+- neighbours merge first, then the lowest priority goes into "…";
+- badged items and the main action stay;
+- "…" exists only for overflow;
+- text never stands in the vertical strip.
+
+What M 4:46–4:53 shows at 15 fps is how it moves: two capsules reach for each other, a neck forms, the bodies join, and
+the joined body contracts to the item that stays. Glyphs defocus and come back into focus; they never slide. `<vire-toolbar>` builds that:
+
+- **The first HTML is buttons in groups.** A `<vire-toolbar aria-label>` holds `[data-group]` elements of buttons.
+  - A button can be bare, `<vire-button>` or `<vire-icon-button>`, or the trigger of a `<vire-menu>`, `<vire-popover>`
+    or `<vire-sheet>`.
+  - Item attributes: `data-priority` (a number, higher stays longer), `data-primary` on the one main action, a
+    `[data-badge]` inside for a status.
+  - An icon button needs an `aria-label`, which is also its row's label in "…".
+  - Before the upgrade the groups wrap (`flex-wrap`) and every button is its own Tab stop, so nothing is hidden or
+    scrolled. There is no `role="toolbar"`: the role promises arrows and one Tab stop.
+- **After the upgrade the element is the APG toolbar.**
+  - `role="toolbar"` and `aria-orientation` from the placement.
+  - One Tab stop with a roving tabindex: the arrows along the axis, Home and End; disabled items are passed over.
+  - Removing the element gives the markup back.
+- **The form is the model's.**
+  - `toolbarPlacement(ctx)` on the shell gives the edge, the orientation and the most groups. The element reflects
+    `data-edge` and `data-orientation`.
+  - On the bottom edge it floats 8 dp above the navigation (the inherited `--vire-nav-inset-bottom`), in its
+    containing block. On the top edge it stays in flow at its pane's top. On the trailing edge it is a vertical strip,
+    with its text items in a horizontal row at the strip's foot (`aside`).
+  - `toolbarLayout` runs on the element's own width (its height in the strip) with the tier from the input. Groups,
+    merges and the overflow come from it; the element invents none.
+- **One glass surface for the whole toolbar.** The first capsule is the lens's body and every other capsule, "…"
+  included, is one of its `shapes` (`setMorph`). A toolbar of three groups therefore costs one surface, not four, and
+  neighbours join through the material's own smooth union.
+- **Stage changes move.**
+  - Merging closes the gap between two capsules: the smoothing builds a neck, the union becomes one capsule, and the
+    glyphs stay put.
+  - Overflow contracts the leaving item's slot into "…": its glyph defocuses, and "…" grows out of the trailing end
+    the first time.
+  - Splitting and coming back run the same path backwards.
+  - The springs are the growth's (about 0.35–0.4 s for the whole path, M 4:46–4:53).
+  - A threshold has 8 dp of hysteresis, so a capsule does not flicker on its edge.
+  - While the window is dragged the layout follows, and a stage change runs once per crossing.
+  - Under reduced motion every change lands in one frame.
+- **A change of place is not a morph.** Bottom, top and the strip are different places (B 0:28, 5:56): the old one
+  dematerialises (`setAppear`, never opacity) and the new one materialises, and its layout is computed for its own
+  container.
+- **"…" is a menu.**
+  - A `<vire-menu>` the element creates, with a row (icon and label) for each overflowed item in toolbar order.
+  - Choosing a row clicks the original button once.
+  - A row for an item that opens a menu, a popover or a sheet opens that surface from "…": the surface elements take an
+    `anchor` override for that.
+  - "…" carries no badge: badged items never overflow.
+- **An anchor that leaves closes its surface** (AD21). An open menu, popover or sheet whose trigger goes into "…" runs
+  its growth back into "…" and closes, and focus moves to "…". A trigger that only merges keeps its surface, which
+  follows the trigger's new box. A trigger removed from the toolbar closes its surface, and focus goes to the
+  neighbouring item.
+- **Focus.** A focused item that goes into "…" hands focus to "…"; the roving tabindex is recomputed over what is in
+  sight.
+- **Sizes and modes.**
+  - Slots are squares of the tier's height.
+  - Text buttons are padded as `<vire-button>`.
+  - The gap between capsules is 8.
+  - Every item meets the 44 dp hit area wherever any coarse input is present.
+  - Glass off, reduced transparency and increased contrast keep the same geometry. The gap is the one sign of a group
+    there.
+
+Acceptance is the TB criteria in `docs/acceptance.md`.
+
 ## Acceptance of an atom
 
 An atom is done when:

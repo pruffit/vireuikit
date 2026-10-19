@@ -415,6 +415,36 @@ rises (U 6:12–6:35, measured at t = 392, 400 and 411 s). Behaviour tests are i
 Side-by-side: the detents at U 6:12–6:35 (t = 392–411 s) against the gallery's bottom sheet, and the action sheet at
 D 6:54–7:10 against the popover's growth.
 
+## Toolbar
+
+Neighbours merge through a neck and the joined body contracts to the item that stays; glyphs defocus, never slide
+(M 4:46–4:53, 15 fps). Overflow goes into "…", which opens a menu of the same actions (B 11:40, 5:56). Behaviour tests
+are in `tests/lab/toolbar-behavior.spec.ts`.
+
+| # | Criterion | Check |
+|---|---|---|
+| TB1 | It works before the kit: groups of buttons that wrap, every button its own Tab stop, nothing hidden and nothing scrolled, no `role="toolbar"`. | behaviour "before the upgrade" |
+| TB2 | The upgrade makes it the APG toolbar. It has `role="toolbar"` with the author's label and `aria-orientation`, one Tab stop with a roving tabindex, the arrows along its axis, and Home and End; disabled items are passed over. Removing the element gives the markup back. | behaviour "roles and keys", "removing the element gives the markup back" |
+| TB3 | What shows is `toolbarLayout`'s at the element's own width (height in the strip) and tier, at every width from 0 to the widest (AD28). | behaviour (a sweep of widths, the visible items compared with the model's) |
+| TB4 | The placement is `toolbarPlacement`'s (AD29): floating 8 dp above the navigation on the bottom edge, at the pane's top above that, and a trailing vertical strip on a compact height with its text items in a horizontal row at the foot. | behaviour per edge (boxes, `data-edge`, `data-orientation`) |
+| TB5 | One glass surface for the whole toolbar: the first capsule is the body, the others and "…" are its `shapes`. | behaviour (lenses counted and what each is handed, a recording stand-in) |
+| TB6 | Merging closes the gap between neighbours through a neck: the shapes approach with a smoothing above 0 and become one capsule, with no frame where a capsule jumps. Splitting runs it back (M 4:46–4:53). | unit (the merge frames); behaviour, sampled frame by frame, canary "a toolbar that swaps its stage in one frame fails it" |
+| TB7 | Overflow contracts the leaving item's slot into "…" with its glyph defocusing. "…" grows out of the trailing end the first time and goes back into it when nothing overflows. | unit; behaviour, sampled |
+| TB8 | A whole stage change takes about 0.35–0.4 s on the growth's springs. A threshold has 8 dp of hysteresis, and a width held just across a threshold does not toggle the stage. Under reduced motion it lands in one frame. | unit (timing, hysteresis); behaviour "reduced motion…" |
+| TB9 | Glyphs never slide: through a stage change every glyph that stays in sight keeps its position, and the others defocus in or out. | behaviour (glyph boxes sampled) |
+| TB10 | A change of place (bottom ↔ top ↔ strip) dematerialises the old form and materialises the new one through `setAppear`, never opacity, and lays the new one out for its own container. | behaviour (what the lens is handed; boxes) |
+| TB11 | "…" is a menu button (`aria-haspopup="menu"`, `aria-expanded`, named) that opens a `<vire-menu>` grown from it. Its rows show an icon and a label, the item's `aria-label` or text, in toolbar order. | behaviour "the overflow menu…" |
+| TB12 | Choosing a row clicks the original button exactly once. A row for an item that opens a menu, a popover or a sheet opens that surface grown from "…". | behaviour "a row clicks…", "a row opens its surface from …" |
+| TB13 | Badged items and the main action never overflow, at any width. "…" has no badge. | unit (AD28 rules); behaviour |
+| TB14 | An open surface whose trigger goes into "…" runs back into "…" and closes, and focus moves to "…". One whose trigger only merges stays open on the trigger's new box. One whose trigger is removed closes, with focus on the neighbouring item (AD21). | behaviour (each case, for `<vire-menu>`, `<vire-popover>` and `<vire-sheet>`) |
+| TB15 | A focused item that goes into "…" hands focus to "…", and the roving tabindex covers only what is in sight. | behaviour |
+| TB16 | Hit areas: every item meets 44 dp wherever any coarse input is present (AD2). | behaviour (stubbed media queries) |
+| TB17 | With glass off, under reduced transparency and under increased contrast the geometry is the same and the groups stay apart by their gap. | behaviour (modes); snapshots |
+| TB18 | The lab shows the toolbar separate, merged and overflowing, in the strip, on two backdrops with glass on and off, and the stage draws the real toolbar in place of its outline. | snapshots `toolbar-*`, `adaptive-*` |
+
+Side-by-side: the merge at M 4:46–4:53 (15 fps) against the gallery's toolbar narrowing; the strip and its overflow
+menu at B 5:56 and 11:40 against `preset=phone-landscape`.
+
 ## What is not covered
 
 - Switch, slider, segmented control, chip, field; the Android target (`src/native/` does not exist yet).
