@@ -49,6 +49,12 @@ export interface VireMenuElement extends HTMLElement {
   a11y: A11yOverride;
   sample: BackdropSample | null;
   readonly open: boolean;
+  /** The box the menu grows from and returns into instead of its trigger; cleared once the menu has closed. */
+  anchor: Element | null;
+  /** Runs the growth back into `el` and closes; `null` closes at once, for an anchor that is gone. */
+  retractInto(el: Element | null): void;
+  /** Puts the menu back on its anchor; a host that moves the trigger calls it. */
+  follow(): void;
 }
 
 export type MenuElementOptions = { nonce?: string | undefined };
@@ -98,6 +104,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #lastLens = { material: '', morph: '', geometry: '' };
     #sample: BackdropSample | null = null;
     #held: BackdropSample | null = null;
+    #anchorEl: Element | null = null;
 
     get a11y(): A11yOverride {
       return this.#own;
@@ -121,6 +128,34 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
 
     get open(): boolean {
       return this.#state.open;
+    }
+
+    get anchor(): Element | null {
+      return this.#anchorEl;
+    }
+
+    set anchor(next: Element | null) {
+      if (next === this.#anchorEl) return;
+      const was = this.#liveCarrier();
+      this.#anchorEl = next;
+      if (!this.#out) return;
+      if (was !== this.#liveCarrier()) was?.setCarried?.(null);
+      this.#follow();
+    }
+
+    retractInto(el: Element | null): void {
+      if (!this.#out || !this.#list) return;
+      if (el === null) {
+        this.#dismissNow();
+        return;
+      }
+      this.anchor = el;
+      this.#place();
+      this.#close({ type: 'dismiss', reason: 'trigger' });
+    }
+
+    follow(): void {
+      this.#follow();
     }
 
     connectedCallback(): void {
@@ -153,7 +188,8 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         for (const name of Array.from(list.style)) if (name.startsWith('--vk-')) list.style.removeProperty(name);
         for (const item of this.#items()) item.removeAttribute('data-pressed');
       }
-      this.#carrier?.setCarried?.(null);
+      this.#liveCarrier()?.setCarried?.(null);
+      this.#anchorEl = null;
       for (const restore of this.#itemRestore.values()) restore();
       this.#itemRestore.clear();
       for (const restore of this.#restore.splice(0).reverse()) restore();
@@ -429,6 +465,12 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         on(root, 'scroll', (e: Event) => this.#follow(e), true);
       });
       this.#cleanups.push(watchViewport(() => this.#follow()));
+      // A trigger taken out of the document has nothing to grow back into.
+      const gone = new MutationObserver(() => {
+        if (this.#out && !this.#anchorEl && !trigger.isConnected) this.#dismissNow();
+      });
+      gone.observe(this, { childList: true, subtree: true });
+      this.#cleanups.push(() => gone.disconnect());
       // A trigger inside an element that upgrades after this one changes size under the menu.
       if (typeof ResizeObserver !== 'undefined') {
         const resized = new ResizeObserver(() => this.#out && this.#follow());
@@ -457,7 +499,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const list = this.#list!;
       if (focus.to === 'item') this.#items()[focus.index]?.focus({ preventScroll: true });
       else if (focus.to === 'menu') list.focus({ preventScroll: true });
-      else if (focus.to === 'trigger') this.#trigger!.focus({ preventScroll: true });
+      else if (focus.to === 'trigger') this.#anchorButton()?.focus({ preventScroll: true });
       else if (focus.to === 'none') {
         const active = deepActive(list.getRootNode() as Root);
         if (active instanceof HTMLElement && list.contains(active)) active.blur();
@@ -504,15 +546,15 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       if (!wasOut) this.#natural = null;
       this.#place();
       if (wasOut) return;
-      this.#carrier?.setCarried?.(1);
+      this.#liveCarrier()?.setCarried?.(1);
       this.#holdSample();
     }
 
     #triggerBox(): RoundedRect {
       const trigger = this.#trigger!;
       // The host's box is the unscaled one; a pressed button is still growing when the menu opens.
-      const r = (this.#carrier ?? trigger).getBoundingClientRect();
-      const radius = parseFloat(getComputedStyle(trigger).borderTopLeftRadius) || 0;
+      const r = (this.#anchorEl ?? this.#carrier ?? trigger).getBoundingClientRect();
+      const radius = parseFloat(getComputedStyle(this.#anchorButton() ?? trigger).borderTopLeftRadius) || 0;
       return { x: r.x, y: r.y, width: r.width, height: r.height, radius: Math.min(radius, r.width / 2, r.height / 2) };
     }
 
@@ -612,7 +654,35 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#held = null;
       this.#from = this.#to = this.#anchor = this.#region = null;
       this.#glass?.setSample(this.#sample);
-      this.#carrier?.setCarried?.(null);
+      this.#liveCarrier()?.setCarried?.(null);
+      this.#anchorEl = null;
+    }
+
+    /** What carries the menu's body while it is out: the anchor if it can, else the trigger's control. */
+    #liveCarrier(): Carrier | null {
+      const anchor = this.#anchorEl as Carrier | null;
+      if (!anchor) return this.#carrier;
+      if (typeof anchor.setCarried === 'function') return anchor;
+      const parent = anchor.parentElement as Carrier | null;
+      return parent && typeof parent.setCarried === 'function' ? parent : null;
+    }
+
+    #anchorButton(): HTMLElement | null {
+      const anchor = this.#anchorEl;
+      if (!anchor) return this.#trigger;
+      return anchor instanceof HTMLButtonElement ? anchor : (anchor.querySelector<HTMLButtonElement>('button') ?? (anchor as HTMLElement));
+    }
+
+    /** The anchor is gone with nothing to retract into: the menu leaves where it stands. */
+    #dismissNow(): void {
+      const step = stepMenu(this.#state, { type: 'dismiss', reason: 'outside' }, this.#model());
+      this.#state = step.state;
+      this.#trigger?.setAttribute('aria-expanded', 'false');
+      for (const item of this.#items()) item.removeAttribute('data-pressed');
+      stepGrowth(this.#growth, 0, false, true);
+      cancelAnimationFrame(this.#frame);
+      this.#frame = 0;
+      this.#settle();
     }
 
     #paint(): void {
@@ -638,7 +708,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       s.setProperty('--vk-body-alpha', body.alpha.toFixed(3));
       s.setProperty('--vk-body-white', body.white.toFixed(3));
       s.setProperty('--vk-body-lift', body.lift.toFixed(3));
-      this.#carrier?.setCarried?.(f.ink.outgoing);
+      this.#liveCarrier()?.setCarried?.(f.ink.outgoing);
       this.#pushGlass(f.box, f.morph, f.activity);
     }
 

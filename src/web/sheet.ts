@@ -75,6 +75,12 @@ export interface VireSurfaceElement extends HTMLElement {
   /** The bottom sheet's current detent; setting it moves the sheet there. */
   detent: string;
   readonly open: boolean;
+  /** The box the surface grows from and returns into instead of its trigger; cleared once it has closed. */
+  anchor: Element | null;
+  /** Runs the growth back into `el` and closes; `null` closes at once, for an anchor that is gone. */
+  retractInto(el: Element | null): void;
+  /** Puts the surface back on its anchor; a host that moves the trigger calls it. */
+  follow(): void;
 }
 export type VirePopoverElement = VireSurfaceElement;
 export type VireSheetElement = VireSurfaceElement;
@@ -200,6 +206,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #kb: { restore: number; moved: boolean; lift: number } | null = null;
     #source: HTMLButtonElement | null = null;
     #sourceLocal: RoundedRect | null = null;
+    #anchorEl: Element | null = null;
     #touch = '';
     #frame = 0;
     #followFrame = 0;
@@ -229,6 +236,34 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
 
     get open(): boolean {
       return this.#open;
+    }
+
+    get anchor(): Element | null {
+      return this.#anchorEl;
+    }
+
+    set anchor(next: Element | null) {
+      if (next === this.#anchorEl) return;
+      if (this.#out) this.#setCarried(null);
+      this.#anchorEl = next;
+      if (!this.#out) return;
+      this.#place();
+      this.#run();
+    }
+
+    retractInto(el: Element | null): void {
+      if (!this.#out || !this.#surface) return;
+      if (el === null) {
+        this.#open = false;
+        this.#settle();
+        return;
+      }
+      this.anchor = el;
+      this.#close();
+    }
+
+    follow(): void {
+      this.#follow();
     }
 
     get detent(): string {
@@ -286,7 +321,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#pg = createGrowthState();
       this.#sg = createSheetGrowth();
       this.#morph = this.#shown = this.#form = this.#layout = this.#anchor = null;
-      this.#sourceLocal = this.#source = null;
+      this.#sourceLocal = this.#source = this.#anchorEl = null;
       this.#contentKey = '';
       this.#maxContent = null;
       this.#detents = [];
@@ -457,6 +492,12 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         }
         if (!changed) return;
         this.#scanTriggers();
+        // A trigger taken out of the document has nothing to grow back into.
+        if (this.#out && !this.#anchorEl && this.#source && !this.#source.isConnected) {
+          this.#open = false;
+          this.#settle();
+          return;
+        }
         this.#observeContent();
         this.#remeasure();
       });
@@ -762,7 +803,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       if (!this.#open) return;
       this.#open = false;
       const active = deepActive(this.ownerDocument);
-      const trigger = this.#source;
+      const trigger = this.#focusTarget();
       if (!this.#dialog && trigger && this.#surface && (this.#surface.contains(active) || active === this.ownerDocument.body)) {
         trigger.focus({ preventScroll: true });
       }
@@ -794,6 +835,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
 
     #settle(): void {
       const surface = this.#surface!;
+      const back = this.#focusTarget();
       this.#hiding = true;
       try {
         if (this.#dialog) {
@@ -806,8 +848,8 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       }
       this.#reset();
       const active = deepActive(this.ownerDocument);
-      if (this.#dialog && this.#source?.isConnected && (!active || active === this.ownerDocument.body)) {
-        this.#source.focus({ preventScroll: true });
+      if (this.#dialog && back?.isConnected && (!active || active === this.ownerDocument.body)) {
+        back.focus({ preventScroll: true });
       }
     }
 
@@ -849,6 +891,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       for (const name of Array.from(this.style)) if (name.startsWith('--vk-')) this.style.removeProperty(name);
       this.#glass?.setSample(this.#sample);
       this.#setCarried(null);
+      this.#anchorEl = null;
       this.#syncTriggers();
     }
 
@@ -862,9 +905,24 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       return parent && /^vire-(icon-)?button$/.test(parent.localName) ? (parent as Carrier) : null;
     }
 
+    /** What carries the surface's body while it is out: the anchor if it can, else the source's control. */
+    #liveCarrier(): Carrier | null {
+      const anchor = this.#anchorEl as Carrier | null;
+      if (anchor) {
+        if (typeof anchor.setCarried === 'function') return anchor;
+        return this.#carrierOf(anchor as HTMLElement);
+      }
+      return this.#source ? this.#carrierOf(this.#source) : null;
+    }
+
     #setCarried(ink: number | null): void {
-      const source = this.#source;
-      if (source) this.#carrierOf(source)?.setCarried?.(ink);
+      this.#liveCarrier()?.setCarried?.(ink);
+    }
+
+    #focusTarget(): HTMLElement | null {
+      const anchor = this.#anchorEl;
+      if (!anchor) return this.#source;
+      return anchor instanceof HTMLButtonElement ? anchor : (anchor.querySelector<HTMLButtonElement>('button') ?? (anchor as HTMLElement));
     }
 
     #measure(width: number | null, grabber = false): Size {
@@ -894,10 +952,11 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
 
     #sourceClient(): RoundedRect | null {
       const trigger = this.#source;
-      if (!trigger?.isConnected) return null;
-      const r = (this.#carrierOf(trigger) ?? trigger).getBoundingClientRect();
+      const anchor = this.#anchorEl;
+      if (!anchor && !trigger?.isConnected) return null;
+      const r = (anchor ?? this.#carrierOf(trigger!) ?? trigger!).getBoundingClientRect();
       if (r.width === 0 && r.height === 0) return null;
-      const radius = parseFloat(getComputedStyle(trigger).borderTopLeftRadius) || 0;
+      const radius = parseFloat(getComputedStyle(this.#focusTarget() ?? trigger!).borderTopLeftRadius) || 0;
       return { x: r.x, y: r.y, width: r.width, height: r.height, radius: Math.min(radius, r.width / 2, r.height / 2) };
     }
 
@@ -1223,7 +1282,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#syncGrabber();
       s.setProperty('--vk-pad-t', px(this.#grabber && !this.#grabber.hidden ? SHEET_SIZES.content.handle : SHEET_SIZES.content.pad));
       this.#syncTouch();
-      this.#setCarried(this.#source ? c.carry : null);
+      this.#setCarried(this.#source || this.#anchorEl ? c.carry : null);
       this.#pushGlass(box, c.morph, c.activity);
     }
 
