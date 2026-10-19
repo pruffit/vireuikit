@@ -223,7 +223,8 @@ test.describe('one body', () => {
   });
 
   test('turned back mid-way, the body runs back from where it is and never reaches the other form', async ({ page }) => {
-    await openStage(page, 'w=1100&h=900', { width: 1300, height: 900 });
+    // Glass off as in the other morph gates: software glass on CI lengthens frames past the spring's step cap.
+    await openStage(page, 'w=1100&h=900&glass=0', { width: 1300, height: 900 });
     await page.evaluate(() => window.__adaptive.record());
     await set(page, { w: 1300 });
     // Turn back at the first frame the body has narrowed, not after a count of frames that depends on the renderer.

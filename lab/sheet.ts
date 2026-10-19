@@ -116,6 +116,8 @@ const CSS = `
 .sh-page section { height: 96px; border-radius: 18px; padding: 14px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-end; color: #1b1c20; }
 .sh-page small { opacity: 0.7; }
 .sh-page[data-cards='dark'] section { background: hsl(var(--h) 28% 15%) !important; color: #f1f1f4; }
+.sh-page[data-cards='light'] { background: #f4f2ee; }
+.sh-page[data-cards='dark'] { background: #15161a; }
 .sh-page > :is(vire-popover, vire-sheet) > vire-button { position: absolute; left: 24px; }
 .sh-page[data-at='top'] > :is(vire-popover, vire-sheet) > vire-button { top: 64px; }
 .sh-page[data-at='bottom'] > :is(vire-popover, vire-sheet) > vire-button { bottom: 56px; }
