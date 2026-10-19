@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { SHEET_SIZES, sheetInset, sheetOpacity, sheetRadius } from '../../src';
+import { SHEET_SIZES, SURFACE_INK, sheetInset, sheetOpacity, sheetRadius } from '../../src';
 import { nextFrame, openCase } from './helpers';
 
 // Every frame is sampled from the page: the box of the surface, what the trigger draws, the ink, on each animation
@@ -138,11 +138,15 @@ test.describe('roles', () => {
     await page.locator('#modal-trigger').click();
     await opened(page, 'modal');
     await expect(page.getByRole('dialog', { name: 'Add to playlist' })).toBeVisible();
-    const slider = page.getByRole('slider', { name: 'Sheet height' });
-    await expect(slider).toHaveCount(1);
-    expect(await page.evaluate(() => [...document.querySelectorAll('[role]')].filter((el) => el.closest('#frame') && !el.closest('[hidden]')).map((el) => el.getAttribute('role')))).toEqual(['slider']);
+    await expect(page.getByRole('slider')).toHaveCount(0);
     await page.keyboard.press('Escape');
     await closed(page, 'modal');
+    await page.locator('#sup-trigger').click();
+    await opened(page, 'sup');
+    await expect(page.getByRole('slider', { name: 'Sheet height' })).toHaveCount(1);
+    expect(await page.evaluate(() => [...document.querySelectorAll('[role]')].filter((el) => el.closest('#frame') && !el.closest('[hidden]')).map((el) => el.getAttribute('role')))).toEqual(['slider']);
+    await page.locator('#sup > vire-button').click();
+    await closed(page, 'sup');
     await page.locator('#pop-trigger').click();
     await opened(page, 'pop');
     await expect(page.locator('#pop-trigger')).toHaveAttribute('aria-expanded', 'true');
@@ -186,7 +190,14 @@ test.describe('roles', () => {
     await page.locator('#sup-trigger').click();
     await opened(page, 'sup');
     await page.locator('#modal-trigger').evaluate((el) => (el as HTMLElement).focus());
-    expect(await page.evaluate(() => document.querySelector<HTMLElement>('.sh-bar')!.style.getPropertyValue('--vire-sheet-inset-end'))).toBe('376px');
+    expect(await page.evaluate(() => document.getElementById('frame')!.style.getPropertyValue('--vire-sheet-inset-end'))).toBe('376px');
+    const frameStyle = await page.evaluate(() => {
+      const frame = document.getElementById('frame')!;
+      frame.style.removeProperty('--vire-sheet-inset-end');
+      const without = frame.getAttribute('style');
+      frame.style.setProperty('--vire-sheet-inset-end', '376px');
+      return without;
+    });
     await page.evaluate(() => {
       const w = window as unknown as { __removed: HTMLElement[]; __bar: HTMLElement };
       w.__bar = document.querySelector('.sh-bar')!;
@@ -194,6 +205,7 @@ test.describe('roles', () => {
       for (const el of w.__removed) el.remove();
     });
     expect(await page.evaluate(() => (window as unknown as { __bar: HTMLElement }).__bar.getAttribute('style'))).toBeNull();
+    expect(await page.locator('#frame').getAttribute('style')).toBe(frameStyle);
     const after = await page.evaluate((src) => {
       const fp = eval(src) as (n: Node) => string;
       const w = window as unknown as { __removed: HTMLElement[] };
@@ -444,7 +456,7 @@ test.describe('the bottom sheet sits by its height', () => {
     await sandbox(page, 'rm=1&detents=medium');
     await page.locator('#sup-trigger').click();
     await resting(page, 'sup');
-    await expect(page.locator('#sup [data-vk-grabber]')).toHaveAttribute('aria-valuemax', '0');
+    await expect(page.locator('#sup [data-vk-grabber]')).toHaveAttribute('aria-hidden', 'true');
     expect(near(await sheetHeight(page, 'sup'), 360, 0.5)).toBe(true);
     await page.locator('#sup > vire-button').click();
     await closed(page, 'sup');
@@ -1205,10 +1217,45 @@ test.describe('the side sheet and the third pane', () => {
     expect(parseFloat(await css(page, 'sup', 'border-top-left-radius'))).toBe(24);
     expect(await opaque(page, 'sup')).toBe(0);
     expect(await page.locator('#sup').getAttribute('data-glass')).toBe('on');
-    expect(await page.locator('.sh-bar').evaluate((el) => el.style.getPropertyValue('--vire-sheet-inset-end'))).toBe(`${360 + 16}px`);
+    const shellInset = () => page.locator('#frame').evaluate((el) => el.style.getPropertyValue('--vire-sheet-inset-end'));
+    expect(await shellInset()).toBe(`${360 + 16}px`);
+    expect(await page.locator('.sh-bar').getAttribute('style')).toBeNull();
     await page.locator('#sup > vire-button').click();
     await closed(page, 'sup');
+    expect(await shellInset()).toBe('');
+  });
+
+  test('two side sheets in one shell: the inset stays while either is open, bubbles from the shell, and gives the shell its own value back', async ({ page }) => {
+    await sandbox(page, 'rm=1', { w: 1200, h: 720 });
+    await page.evaluate(() => {
+      document.getElementById('frame')!.style.setProperty('--vire-sheet-inset-end', '5px');
+      document.querySelector('.sh-bar')!.insertAdjacentHTML(
+        'beforeend',
+        '<vire-sheet id="sup2"><button type="button" id="sup2-trigger" popovertarget="sup2-surface">Second</button><div id="sup2-surface" popover="manual"><h2 id="sup2-title">Second</h2><p>Body</p><button type="button" id="sup2-close" popovertarget="sup2-surface" popovertargetaction="hide">Close</button></div></vire-sheet>',
+      );
+      const w = window as unknown as { __seen: { target: string; inset: number }[] };
+      w.__seen = [];
+      document.addEventListener('vire-sheet-inset', (e) => w.__seen.push({ target: (e.target as Element).id, inset: (e as CustomEvent<{ inset: number }>).detail.inset }));
+    });
+    await expect(page.locator('#sup2[data-vk]')).toHaveCount(1);
+    const inset = () => page.locator('#frame').evaluate((el) => el.style.getPropertyValue('--vire-sheet-inset-end'));
+    await page.locator('#sup-trigger').click();
+    await opened(page, 'sup');
+    expect(await inset()).toBe('376px');
+    await page.locator('#sup2-trigger').evaluate((el) => (el as HTMLElement).click());
+    await opened(page, 'sup2');
+    expect(await inset()).toBe('376px');
+    await page.locator('#sup-close').evaluate((el) => (el as HTMLElement).click());
+    await closed(page, 'sup');
+    expect(await inset()).toBe('376px');
     expect(await page.locator('.sh-bar').getAttribute('style')).toBeNull();
+    await page.locator('#sup2-close').evaluate((el) => (el as HTMLElement).click());
+    await closed(page, 'sup2');
+    expect(await inset()).toBe('5px');
+    expect(await page.evaluate(() => (window as unknown as { __seen: unknown }).__seen)).toEqual([
+      { target: 'frame', inset: 376 },
+      { target: 'frame', inset: 5 },
+    ]);
   });
 
   test('it holds to a third of the window and never below 280', async ({ page }) => {
@@ -1228,7 +1275,7 @@ test.describe('the side sheet and the third pane', () => {
     expect(await boxOf(page, 'sup')).toEqual({ x: frame.x + 1700 - 8 - 360, y: frame.y + 8, width: 360, height: 800 - 16 });
     expect(await opaque(page, 'sup')).toBe(1);
     expect(await css(page, 'sup', 'backdrop-filter')).toBe('none');
-    expect(await page.locator('.sh-bar').evaluate((el) => el.style.getPropertyValue('--vire-sheet-inset-end'))).toBe('376px');
+    expect(await page.locator('#frame').evaluate((el) => el.style.getPropertyValue('--vire-sheet-inset-end'))).toBe('376px');
   });
 });
 
@@ -1482,6 +1529,8 @@ test.describe('accessibility modes', () => {
     expect(opened.open).toBe(true);
     expect([opened.x, opened.y, opened.w, opened.h]).toEqual([settled.x, settled.y, settled.w, settled.h]);
     expect(opened.ink).toBe(1);
+    expect(await focused(page)).toBe('INPUT');
+    expect(await surfaceOf(page, 'pop').evaluate((el) => el.contains(document.activeElement))).toBe(true);
     const before = await mark(page);
     await page.keyboard.press('Escape');
     const closedAt = (await frames(page)).slice(before).find((f) => f.source === 'key')!;
@@ -1829,6 +1878,12 @@ test.describe('text on every surface', () => {
           await settled(page, surface.lens && value === '1');
           const runs = await legibility(page);
           for (const run of runs) expect(run.contrast, `"${run.text}"`).toBeGreaterThanOrEqual(4.5);
+          if (value === '1') {
+            const ink = (await page.locator('vire-popover,vire-sheet').getAttribute('data-ink')) as 'dark' | 'light';
+            expect(['dark', 'light']).toContain(ink);
+            const color = await page.locator('vire-popover > [popover], vire-sheet > dialog, vire-sheet > [popover]').evaluate((el) => getComputedStyle(el).color);
+            expect(color).toBe(INK_RGB(SURFACE_INK[ink]));
+          }
         });
       }
     }
@@ -1889,4 +1944,389 @@ test.describe('the bottom safe area', () => {
     await expect.poll(gap).toBeCloseTo(34, 0);
     expect(await page.locator('vire-sheet [data-vk-probe]').count()).toBe(0);
   });
+});
+
+test.describe('removing an open surface', () => {
+  const ids = ['pop', 'sup', 'modal', 'dlg', 'alert', 'hosted'];
+  const fingerprint = `(node) => {
+    const fp = (n) => {
+      if (n.nodeType === 3) return n.textContent;
+      if (n.nodeType !== 1) return '';
+      const attrs = [...n.attributes].map((a) => a.name + '=' + a.value).sort().join(' ');
+      return '<' + n.localName + ' ' + attrs + '>' + [...n.childNodes].map(fp).join('') + '</' + n.localName + '>';
+    };
+    return fp(node);
+  }`;
+  const marks = (page: Page) =>
+    page.evaluate(
+      ([src, ids]) => {
+        const fp = eval(src as string) as (n: Node) => string;
+        const out: Record<string, string> = {};
+        for (const id of ids as string[]) {
+          const host = document.getElementById(id) ?? (window as unknown as { __gone: Record<string, HTMLElement> }).__gone?.[id];
+          if (!host) continue;
+          out[id] = fp(host.cloneNode(false));
+        }
+        return out;
+      },
+      [fingerprint, ids] as const,
+    );
+
+  test('a bottom sheet open at 390 dp leaves no detent on its host, nor does a popover that became a sheet', async ({ page }) => {
+    await sandbox(page, 'upgrade=0', { w: 390, h: 720 });
+    const before = await marks(page);
+    await page.evaluate(() => window.__lab.define());
+    await expect(page.locator('vire-sheet[data-vk]')).toHaveCount(6);
+    await page.locator('#sup-trigger').click();
+    await opened(page, 'sup');
+    await expect(page.locator('#sup')).toHaveAttribute('detent', 'medium');
+    await page.locator('#pop-trigger').evaluate((el) => (el as HTMLElement).click());
+    await opened(page, 'pop');
+    await expect(page.locator('#pop')).toHaveAttribute('detent', 'peek');
+    await page.locator('#modal-trigger').evaluate((el) => (el as HTMLElement).click());
+    await opened(page, 'modal');
+    await expect(page.locator('#modal')).toHaveAttribute('detent', 'large');
+    await opened(page, 'pop');
+    const attrs = await page.evaluate((ids) => {
+      const w = window as unknown as { __gone: Record<string, HTMLElement> };
+      w.__gone = {};
+      for (const id of ids) {
+        const el = document.getElementById(id)!;
+        w.__gone[id] = el;
+        el.remove();
+      }
+      return ids.map((id) => [id, w.__gone[id]!.hasAttribute('detent'), w.__gone[id]!.getAttribute('data-ink')]);
+    }, ids);
+    for (const [id, detent, ink] of attrs) expect([id, detent, ink], String(id)).toEqual([id, false, null]);
+    const after = await marks(page);
+    for (const id of ids) expect(after[id], id).toBe(before[id]);
+  });
+});
+
+test.describe('a popover takes focus in', () => {
+  const focusAfterOpen = async (page: Page, query: string) => {
+    await sandbox(page, query, { w: 700, h: 720 });
+    await page.locator('#pop-trigger').click();
+    await resting(page, 'pop');
+    return page.evaluate(() => {
+      const active = document.activeElement;
+      const surface = document.getElementById('pop-surface')!;
+      return { tag: active?.tagName, type: (active as HTMLInputElement | null)?.type, inside: surface.contains(active), first: active === surface.querySelector('input') };
+    });
+  };
+
+  test('with and without motion it lands on the first control of its content', async ({ page }) => {
+    const animated = await focusAfterOpen(page, '');
+    const instant = await focusAfterOpen(page, 'rm=1');
+    expect(animated).toEqual({ tag: 'INPUT', type: 'checkbox', inside: true, first: true });
+    expect(instant).toEqual(animated);
+  });
+});
+
+test.describe('a surface that grows after it is measured', () => {
+  const open = async (page: Page) => {
+    await sandbox(page, 'rm=1', { w: 700, h: 720 });
+    await page.evaluate(() => {
+      const surface = document.getElementById('pop-surface')!;
+      surface.insertAdjacentHTML(
+        'beforeend',
+        '<details id="more"><summary>More</summary><div style="height:120px">Hidden rows</div></details><p id="late" hidden style="height:90px;margin:0">Late</p>',
+      );
+    });
+    await page.locator('#pop-trigger').click();
+    await resting(page, 'pop');
+  };
+  const height = async (page: Page) => (await boxOf(page, 'pop')).height;
+
+  test('a details element opened and an element shown after the surface is out grow it by what they add', async ({ page }) => {
+    await open(page);
+    const closedHeight = await height(page);
+    await page.locator('#more').evaluate((el) => ((el as HTMLDetailsElement).open = true));
+    await expect.poll(async () => (await height(page)) - closedHeight).toBeGreaterThanOrEqual(110);
+    const opened = await height(page);
+    await page.locator('#late').evaluate((el) => ((el as HTMLElement).hidden = false));
+    await expect.poll(async () => (await height(page)) - opened).toBeGreaterThanOrEqual(85);
+    await page.locator('#more').evaluate((el) => ((el as HTMLDetailsElement).open = false));
+    await expect.poll(async () => (await height(page)) - opened).toBeLessThan(100);
+    expect(await surfaceOf(page, 'pop').evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+  });
+});
+
+test.describe('the surface takes over closing only when it runs the surface', () => {
+  test('a submitter with formmethod dialog on a form of another method closes by retracting', async ({ page }) => {
+    const run = await closeRun(
+      page,
+      'modal',
+      { w: 390, h: 720 },
+      async (p) => {
+        await p.evaluate(() => {
+          document.getElementById('modal-surface')!.insertAdjacentHTML('beforeend', '<form id="f" method="get"><button id="fm" type="submit" formmethod="dialog" value="go">Go</button></form>');
+        });
+        await p.locator('#fm').click();
+      },
+      '',
+    );
+    expect(retraces(run)).toBe(true);
+    expect(await surfaceOf(page, 'modal').evaluate((el) => (el as HTMLDialogElement).returnValue)).toBe('go');
+  });
+
+  test('a form that is not a dialog form is left to the platform', async ({ page }) => {
+    await sandbox(page, 'rm=1', { w: 390, h: 720 });
+    await page.locator('#modal-trigger').click();
+    await resting(page, 'modal');
+    await page.evaluate(() => {
+      document.getElementById('modal-surface')!.insertAdjacentHTML('beforeend', '<form id="g" method="dialog"><button id="gm" type="submit" formmethod="get" value="x">Get</button></form>');
+      document.getElementById('g')!.addEventListener('submit', (e) => e.preventDefault());
+      (window as unknown as { __submits: number }).__submits = 0;
+      document.getElementById('g')!.addEventListener('submit', () => (window as unknown as { __submits: number }).__submits++);
+    });
+    await page.locator('#gm').click();
+    await page.waitForTimeout(150);
+    expect(await shown(page, 'modal')).toBe(true);
+    expect(await page.evaluate(() => (window as unknown as { __submits: number }).__submits)).toBe(1);
+  });
+
+  test('a close command on a dialog the element has not picked up yet closes it natively', async ({ page }) => {
+    await sandbox(page, 'rm=1', { w: 390, h: 720 });
+    const stillOpen = await page.evaluate(() => {
+      const dialog = document.getElementById('modal-surface') as HTMLDialogElement;
+      dialog.showModal();
+      document.getElementById('modal-close')!.click();
+      return dialog.open;
+    });
+    expect(stillOpen).toBe(false);
+    await page.waitForTimeout(100);
+    expect(await shown(page, 'modal')).toBe(false);
+  });
+
+  test('data-kind follows the kind attribute, and an open surface takes the new form', async ({ page }) => {
+    await sandbox(page, 'rm=1', { w: 390, h: 720 });
+    const host = page.locator('#modal');
+    await expect(host).toHaveAttribute('data-kind', 'modal-sheet');
+    await page.locator('#modal-trigger').click();
+    await resting(page, 'modal');
+    await expect(host).toHaveAttribute('data-form', 'bottom-sheet');
+    await host.evaluate((el) => el.setAttribute('kind', 'alert'));
+    await expect(host).toHaveAttribute('data-kind', 'alert');
+    await expect(host).toHaveAttribute('data-form', 'alert');
+    await host.evaluate((el) => el.removeAttribute('kind'));
+    await expect(host).toHaveAttribute('data-kind', 'modal-sheet');
+    await expect(host).toHaveAttribute('data-form', 'bottom-sheet');
+  });
+
+  test('Escape closes a modal dialog opened from inside a popover and leaves the popover', async ({ page }) => {
+    await sandbox(page, 'rm=1', { w: 700, h: 720 });
+    await page.evaluate(() => {
+      document.getElementById('pop-surface')!.insertAdjacentHTML('beforeend', '<dialog id="inner"><p>Inner</p><button id="inner-ok" type="button">Ok</button></dialog>');
+    });
+    await page.locator('#pop-trigger').click();
+    await resting(page, 'pop');
+    await page.evaluate(() => (document.getElementById('inner') as HTMLDialogElement).showModal());
+    await page.keyboard.press('Escape');
+    await expect.poll(() => page.evaluate(() => (document.getElementById('inner') as HTMLDialogElement).open)).toBe(false);
+    expect(await shown(page, 'pop')).toBe(true);
+    await page.keyboard.press('Escape');
+    await closed(page, 'pop');
+  });
+});
+
+test.describe('the click after a press on a popover\'s scrim', () => {
+  test('is the only one stopped: the surface closes and the page does not see it', async ({ page }) => {
+    await sandbox(page, 'rm=1');
+    await page.locator('#pop-trigger').click();
+    await opened(page, 'pop');
+    const before = (await page.locator('#before').boundingBox())!;
+    await page.mouse.click(before.x + before.width / 2, before.y + before.height / 2);
+    await closed(page, 'pop');
+    expect(await log(page)).not.toContain('click:before');
+  });
+
+  test('a press that no click follows does not hold the next press', async ({ page }) => {
+    await sandbox(page, 'rm=1');
+    await page.locator('#pop-trigger').click();
+    await opened(page, 'pop');
+    const target = await page.locator('#before').evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const x = r.x + r.width / 2;
+      const y = r.y + r.height / 2;
+      el.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 9, pointerType: 'touch', isPrimary: true, button: 0, buttons: 1, clientX: x, clientY: y, bubbles: true, composed: true, cancelable: true }));
+      return { x, y };
+    });
+    await closed(page, 'pop');
+    await page.mouse.click(target.x, target.y);
+    expect(await log(page)).toContain('click:before');
+  });
+});
+
+test.describe('dragging details', () => {
+  const press = async (page: Page, id: string) => {
+    await sandbox(page, 'rm=1');
+    await page.locator(`#${id}-trigger`).click();
+    await resting(page, id);
+  };
+
+  test('a cancelled drag settles on the nearest detent and never closes the sheet', async ({ page }) => {
+    await press(page, 'sup');
+    await page.evaluate(() => {
+      const surface = document.getElementById('sup-surface')!;
+      surface.addEventListener('pointermove', (e) => ((window as unknown as { __pid: number }).__pid = e.pointerId), { once: true });
+    });
+    const g = await grabberAt(page, 'sup');
+    await page.mouse.move(g.x, g.y);
+    await page.mouse.down();
+    await page.mouse.move(g.x, g.y + 70);
+    await page.mouse.move(g.x, g.y + 140);
+    expect(await sheetHeight(page, 'sup')).toBeLessThan(360 - 56);
+    await page.evaluate(() => {
+      const pid = (window as unknown as { __pid: number }).__pid;
+      document.getElementById('sup-surface')!.dispatchEvent(new PointerEvent('pointercancel', { pointerId: pid, pointerType: 'mouse', isPrimary: true, bubbles: true }));
+    });
+    await expect.poll(() => sheetHeight(page, 'sup').then(Math.round)).toBe(360);
+    expect(await shown(page, 'sup')).toBe(true);
+    await page.mouse.up();
+    expect(await shown(page, 'sup')).toBe(true);
+  });
+
+  test('losing the pointer capture ends the drag', async ({ page }) => {
+    await press(page, 'sup');
+    const g = await grabberAt(page, 'sup');
+    await page.mouse.move(g.x, g.y);
+    await page.mouse.down();
+    await page.mouse.move(g.x, g.y - 20);
+    await page.mouse.move(g.x, g.y - 40);
+    await expect(page.locator('#sup')).toHaveAttribute('data-height', 'dragging');
+    await page.evaluate(() => {
+      const surface = document.getElementById('sup-surface')!;
+      surface.releasePointerCapture(1);
+    });
+    await page.mouse.move(g.x, g.y - 150);
+    await expect(page.locator('#sup')).not.toHaveAttribute('data-height', 'dragging');
+    await expect.poll(() => sheetHeight(page, 'sup').then(Math.round)).toBe(360);
+    await page.mouse.up();
+  });
+
+  test('a touch is decided by the scroller under the finger, not only by the surface', async ({ page }) => {
+    await press(page, 'sup');
+    const offset = await page.evaluate(() => {
+      const surface = document.getElementById('sup-surface')!;
+      surface.insertAdjacentHTML('afterbegin', '<div id="inner" style="height:80px;overflow-y:auto;margin-top:4px"><div style="height:400px">Inner rows</div></div>');
+      surface.insertBefore(surface.querySelector('[data-vk-grabber]')!, surface.firstChild);
+      const inner = document.getElementById('inner')!;
+      return inner.getBoundingClientRect().top - surface.getBoundingClientRect().top + 30;
+    });
+    const action = () => surfaceOf(page, 'sup').evaluate((el) => el.getAttribute('data-vk-touch'));
+    expect(await action()).toBe('none');
+    await page.locator('#inner').evaluate((el) => (el.scrollTop = 60));
+    await touch.down(page, 'sup', offset);
+    expect(await action()).toBe('pan-y');
+    await touch.up(page, 0);
+    await expect.poll(action).toBe('none');
+    await page.locator('#inner').evaluate((el) => (el.scrollTop = 0));
+    await touch.down(page, 'sup', offset);
+    expect(await action()).toBe('none');
+    await touch.up(page, 0);
+  });
+
+  test('a press on a control in the top strip does not start a drag', async ({ page }) => {
+    await press(page, 'sup');
+    await page.evaluate(() => {
+      document.getElementById('sup-surface')!.insertAdjacentHTML(
+        'beforeend',
+        '<button id="strip" type="button" style="position:absolute;top:2px;left:8px;width:60px;height:22px;padding:0">Pin</button><div id="strip-role" role="button" tabindex="0" style="position:absolute;top:2px;left:80px;width:50px;height:22px">Tag</div>',
+      );
+    });
+    const box = await boxOf(page, 'sup');
+    for (const x of [30, 100]) {
+      await page.mouse.move(box.x + x, box.y + 12);
+      await page.mouse.down();
+      await page.mouse.move(box.x + x, box.y - 40);
+      await page.mouse.move(box.x + x, box.y - 80);
+      expect(near(await sheetHeight(page, 'sup'), 360, 0.5), `x ${x}`).toBe(true);
+      await page.mouse.up();
+    }
+    await page.mouse.move(box.x + 250, box.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 250, box.y - 58);
+    expect(near(await sheetHeight(page, 'sup'), 430, 1.5)).toBe(true);
+    await page.waitForTimeout(250);
+    await page.mouse.up();
+  });
+});
+
+test.describe('the grabber with one detent or a spoken one', () => {
+  test('is a picture of the swipe: hidden from assistive technology, not focusable, and the sheet still closes by a swipe, Escape or its button', async ({ page }) => {
+    await sandbox(page, 'rm=1&detents=medium');
+    await page.locator('#sup-trigger').click();
+    await resting(page, 'sup');
+    const grabber = page.locator('#sup [data-vk-grabber]');
+    await expect(grabber).toHaveAttribute('aria-hidden', 'true');
+    for (const name of ['role', 'tabindex', 'aria-valuenow', 'aria-valuetext', 'aria-label']) expect(await grabber.getAttribute(name), name).toBeNull();
+    await expect(page.getByRole('slider')).toHaveCount(0);
+    expect(await grabber.evaluate((el) => {
+      (el as HTMLElement).focus();
+      return document.activeElement === el;
+    })).toBe(false);
+    const g = await grabberAt(page, 'sup');
+    await page.mouse.move(g.x, g.y);
+    await page.mouse.down();
+    await page.mouse.move(g.x, g.y + 140);
+    await page.waitForTimeout(250);
+    await page.mouse.up();
+    await closed(page, 'sup');
+    await page.locator('#sup-trigger').click();
+    await resting(page, 'sup');
+    await page.locator('#sup-close').focus();
+    await page.keyboard.press('Enter');
+    await closed(page, 'sup');
+    await sandbox(page, 'rm=1');
+    await page.locator('#modal-trigger').click();
+    await resting(page, 'modal');
+    await expect(page.locator('#modal [data-vk-grabber]')).toHaveAttribute('aria-hidden', 'true');
+    await page.keyboard.press('Escape');
+    await closed(page, 'modal');
+  });
+
+  test('speaks the words of detent-labels, and the English names where it has none', async ({ page }) => {
+    await sandbox(page, 'rm=1');
+    await page.locator('#sup').evaluate((el) => el.setAttribute('detent-labels', 'peek=Compact; medium = Half height; large=Full'));
+    await page.locator('#sup-trigger').click();
+    await resting(page, 'sup');
+    const grabber = page.locator('#sup [data-vk-grabber]');
+    await expect(grabber).toHaveAttribute('aria-valuetext', 'Half height');
+    await grabber.focus();
+    await page.keyboard.press('ArrowUp');
+    await expect(grabber).toHaveAttribute('aria-valuetext', 'Full');
+    await page.locator('#sup').evaluate((el) => el.setAttribute('detent-labels', 'medium=Half height'));
+    await expect(grabber).toHaveAttribute('aria-valuetext', 'large');
+    await page.locator('#sup').evaluate((el) => el.removeAttribute('detent-labels'));
+    await page.keyboard.press('ArrowDown');
+    await expect(grabber).toHaveAttribute('aria-valuetext', 'medium');
+  });
+});
+
+const INK_RGB = (hex: string) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+};
+
+test.describe('the ink follows what is under a thin surface', () => {
+  test.use({ viewport: { width: 1900, height: 1000 } });
+
+  const CASES: [string, string, 'dark' | 'light'][] = [
+    ['the anchored popover over light cards on the dark backdrop', 'form=popover&backdrop=dark', 'dark'],
+    ['the anchored popover over dark cards on the dark backdrop', 'form=popover&backdrop=dark&cards=dark', 'light'],
+    ['a peek bottom sheet over light cards on the dark backdrop', 'form=bottom-sheet&detent=peek&content=filters&backdrop=dark', 'dark'],
+    ['a peek bottom sheet over dark cards on the dark backdrop', 'form=bottom-sheet&detent=peek&content=filters&backdrop=dark&cards=dark', 'light'],
+  ];
+  for (const [what, query, ink] of CASES) {
+    test(`${what} takes ${ink} ink in the colour the kit names, and reads at 4.5:1`, async ({ page }) => {
+      await openCase(page, `atom=sheet&${query}&glass=1`);
+      await settled(page, true);
+      const host = page.locator('vire-popover,vire-sheet');
+      await expect(host).toHaveAttribute('data-ink', ink);
+      const color = await page.locator('vire-popover > [popover], vire-sheet > dialog, vire-sheet > [popover]').evaluate((el) => getComputedStyle(el).color);
+      expect(color).toBe(INK_RGB(SURFACE_INK[ink]));
+      for (const run of await legibility(page)) expect(run.contrast, `"${run.text}"`).toBeGreaterThanOrEqual(4.5);
+    });
+  }
 });

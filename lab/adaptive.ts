@@ -531,11 +531,9 @@ export async function adaptiveStage(
     writeReadout(c, d);
   }
 
-  /** What the open surface clears at the trailing edge, as the side sheet publishes it on its parent. */
+  /** What the open side sheets clear at the trailing edge, as they publish it on the shell. */
   function readInset(): number {
-    let inset = 0;
-    for (const host of hosts) inset = Math.max(inset, parseFloat(host.parentElement?.style.getPropertyValue('--vire-sheet-inset-end') ?? '') || 0);
-    return inset;
+    return parseFloat(win.style.getPropertyValue('--vire-sheet-inset-end')) || 0;
   }
 
   const openHost = () => hosts.find((h) => h.open || h.hasAttribute('data-phase')) ?? null;
@@ -565,7 +563,7 @@ export async function adaptiveStage(
       for (const child of Array.from(surface.children)) if (!child.hasAttribute('data-vk-grabber')) child.remove();
       surface.insertAdjacentHTML('beforeend', bodyOf({ id: 'modal', tag: 'vire-sheet', surface: 'dialog', body: app.surface === 'alert' ? 'alert' : app.surface === 'dialog' ? 'rename' : 'list', trigger: null, glass: sheetGlass, sample: null }));
     }
-    if (!want.open) press(want, 'trigger');
+    if (!want.open && !want.hasAttribute('data-phase')) press(want, 'trigger');
   }
 
   /** A surface closed or opened from its own side (a scrim, Escape, the trigger) is the stage's state too. */
@@ -723,11 +721,9 @@ export async function adaptiveStage(
     }).observe(host, { attributes: true, attributeFilter: ['data-form', 'data-phase', 'detent'] });
   }
   let lastInset = 0;
-  for (const parent of new Set(hosts.map((h) => h.parentElement!))) {
-    new MutationObserver(() => {
-      if (readInset() !== lastInset) render();
-    }).observe(parent, { attributes: true, attributeFilter: ['style'] });
-  }
+  win.addEventListener('vire-sheet-inset', () => {
+    if (readInset() !== lastInset) render();
+  });
 
   handle.addEventListener('pointerdown', (e) => {
     e.preventDefault();

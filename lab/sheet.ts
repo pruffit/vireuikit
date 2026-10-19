@@ -115,6 +115,7 @@ const CSS = `
 .sh-page h2 { grid-column: 1 / -1; margin: 0; font: 600 22px system-ui; }
 .sh-page section { height: 96px; border-radius: 18px; padding: 14px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-end; color: #1b1c20; }
 .sh-page small { opacity: 0.7; }
+.sh-page[data-cards='dark'] section { background: hsl(var(--h) 28% 15%) !important; color: #f1f1f4; }
 .sh-page > :is(vire-popover, vire-sheet) > vire-button { position: absolute; left: 24px; }
 .sh-page[data-at='top'] > :is(vire-popover, vire-sheet) > vire-button { top: 64px; }
 .sh-page[data-at='bottom'] > :is(vire-popover, vire-sheet) > vire-button { bottom: 56px; }
@@ -140,11 +141,12 @@ export function ensureCss(): void {
   document.head.appendChild(style);
 }
 
-function page(trigger: HTMLElement, at: 'top' | 'bottom'): HTMLElement {
+function page(trigger: HTMLElement, at: 'top' | 'bottom', cards: string | null): HTMLElement {
   const el = document.createElement('div');
   el.className = 'sh-page';
+  if (cards) el.dataset.cards = cards;
   const hues = [12, 48, 150, 210, 275, 330, 30, 190, 90, 250, 340, 170];
-  el.innerHTML = `<h2>Library</h2>${hues.map((h, i) => `<section style="background:hsl(${h} 62% ${i % 2 ? 58 : 72}%)"><b>Mix ${i + 1}</b><small>${12 + i * 3} tracks</small></section>`).join('')}`;
+  el.innerHTML = `<h2>Library</h2>${hues.map((h, i) => `<section style="--h:${h};background:hsl(${h} 62% ${i % 2 ? 58 : 72}%)"><b>Mix ${i + 1}</b><small>${12 + i * 3} tracks</small></section>`).join('')}`;
   el.dataset.at = at;
   el.append(trigger);
   return el;
@@ -159,6 +161,8 @@ export type SheetGalleryOptions = {
   kind?: string | null;
   /** `filters` is a short body, `list` a tall one that scrolls. */
   content?: string | null;
+  /** `dark` draws the page's cards dark, so what lies under the surface is dark whatever the backdrop. */
+  cards?: string | null;
   attrs?: Record<string, string>;
 };
 
@@ -188,7 +192,7 @@ export function sheetGallery(stage: HTMLElement, rows: HTMLElement, form: SheetL
     attrs: { ...(options.detent ? { detent: options.detent, detents: 'peek medium large' } : {}), ...(options.attrs ?? {}) },
     force: options.force ?? `open${options.detent ? `:${options.detent}` : ''}`,
   });
-  frame.append(page(host, frameSpec.trigger));
+  frame.append(page(host, frameSpec.trigger, options.cards ?? null));
   rows.append(frame);
 }
 

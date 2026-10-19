@@ -105,6 +105,20 @@ export function viewportRoot(): Element | null {
   return viewportOverride?.root ?? null;
 }
 
+/** What the open side sheets of a shell take at its trailing edge, published on the shell and announced when it changes. */
+export const SHEET_INSET_PROPERTY = '--vire-sheet-inset-end';
+export const SHEET_INSET_EVENT = 'vire-sheet-inset';
+
+/** The app's window an element lives in: its nearest `data-vire-shell`, else the override root that holds it, else the document. */
+export function shellOf(el: Element): Element {
+  const override = viewportRoot();
+  for (let node: Element | null = el; node; ) {
+    if (node.hasAttribute('data-vire-shell')) return node;
+    node = node.parentElement ?? ((node.getRootNode() as ShadowRoot).host ?? null);
+  }
+  return override?.isConnected && override.contains(el) ? override : el.ownerDocument.documentElement;
+}
+
 type SegmentsApi = { viewport?: { segments?: readonly DOMRectReadOnly[] | null } };
 
 /** The window and its segments in client coordinates. */

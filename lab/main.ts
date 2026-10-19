@@ -96,6 +96,7 @@ function gallery(): void {
       force: params.get('state') ?? undefined,
       kind: params.get('kind'),
       content: params.get('content'),
+      cards: params.get('cards'),
     });
     return;
   }
