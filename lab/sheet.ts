@@ -145,7 +145,9 @@ function page(trigger: HTMLElement, at: 'top' | 'bottom', cards: string | null):
   const el = document.createElement('div');
   el.className = 'sh-page';
   if (cards) el.dataset.cards = cards;
-  const hues = [12, 48, 150, 210, 275, 330, 30, 190, 90, 250, 340, 170];
+  const base = [12, 48, 150, 210, 275, 330, 30, 190, 90, 250, 340, 170];
+  // With `cards` the cards run past the frame's bottom, so what lies under a surface does not depend on font metrics.
+  const hues = cards ? [...base, ...base] : base;
   el.innerHTML = `<h2>Library</h2>${hues.map((h, i) => `<section style="--h:${h};background:hsl(${h} 62% ${i % 2 ? 58 : 72}%)"><b>Mix ${i + 1}</b><small>${12 + i * 3} tracks</small></section>`).join('')}`;
   el.dataset.at = at;
   el.append(trigger);

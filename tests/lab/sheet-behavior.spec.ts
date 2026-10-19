@@ -1747,7 +1747,8 @@ test.describe('a touch on a touch screen', () => {
     const g = await grabberAt(page, 'sup');
     await finger.down(g.x, g.y);
     for (const dy of [-10, -30, -60, -90]) await finger.move(g.x, g.y + dy);
-    expect(near(await sheetHeight(page, 'sup'), 450, 2)).toBe(true);
+    // A move is aligned to a frame, so the last one can land a frame after CDP acknowledges it.
+    await expect.poll(async () => near(await sheetHeight(page, 'sup'), 450, 2)).toBe(true);
     await page.waitForTimeout(250);
     await finger.up();
     await expect.poll(() => sheetHeight(page, 'sup').then(Math.round)).toBe(360);
@@ -1757,8 +1758,7 @@ test.describe('a touch on a touch screen', () => {
     const y = box.y + 150;
     await finger.down(x, y);
     for (const dy of [10, 30, 60]) await finger.move(x, y + dy);
-    const pulled = await sheetHeight(page, 'sup');
-    expect(pulled).toBeLessThan(360 - 20);
+    await expect.poll(() => sheetHeight(page, 'sup')).toBeLessThan(360 - 20);
     expect(await surfaceOf(page, 'sup').evaluate((el) => el.scrollTop)).toBe(0);
     await page.waitForTimeout(250);
     await finger.up();
@@ -2313,9 +2313,9 @@ test.describe('the ink follows what is under a thin surface', () => {
   test.use({ viewport: { width: 1900, height: 1000 } });
 
   const CASES: [string, string, 'dark' | 'light'][] = [
-    ['the anchored popover over light cards on the dark backdrop', 'form=popover&backdrop=dark', 'dark'],
+    ['the anchored popover over light cards on the dark backdrop', 'form=popover&backdrop=dark&cards=light', 'dark'],
     ['the anchored popover over dark cards on the dark backdrop', 'form=popover&backdrop=dark&cards=dark', 'light'],
-    ['a peek bottom sheet over light cards on the dark backdrop', 'form=bottom-sheet&detent=peek&content=filters&backdrop=dark', 'dark'],
+    ['a peek bottom sheet over light cards on the dark backdrop', 'form=bottom-sheet&detent=peek&content=filters&backdrop=dark&cards=light', 'dark'],
     ['a peek bottom sheet over dark cards on the dark backdrop', 'form=bottom-sheet&detent=peek&content=filters&backdrop=dark&cards=dark', 'light'],
   ];
   for (const [what, query, ink] of CASES) {
