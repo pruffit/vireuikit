@@ -49,7 +49,7 @@ export type SheetSpec = {
 
 const ROWS = ['Road Trip', 'Late Night', 'Focus', 'Morning Run', 'Sunday', 'Deep Cuts', 'Roots', 'Instrumentals', 'Throwbacks', 'Study', 'Evening', 'Weekend'];
 
-function bodyOf(spec: SheetSpec): string {
+export function bodyOf(spec: SheetSpec): string {
   const { id, surface } = spec;
   const hide = (label: string, extra = '') =>
     surface === 'dialog'

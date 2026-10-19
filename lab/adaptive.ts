@@ -1,5 +1,5 @@
 // The adaptive stage: a resizable window in which the real atoms and the real navigation take their adaptive forms and
-// the patterns not built yet (panes, sheets, the toolbar) are outlines placed by the model. Every view is addressable by URL.
+// the real popover and sheet, and the patterns not built yet (panes, the toolbar) are outlines placed by the model. Every view is addressable by URL.
 import {
   INPUT_MIXED,
   INPUT_POINTER,
@@ -9,32 +9,28 @@ import {
   SUPPORTING_PANE_MAX_WIDTH,
   SURFACE_KINDS,
   classifyWindow,
-  createFormMorph,
-  formMorphFrame,
   halfOpen,
   hitTarget,
   paneLayout,
   presentationForm,
-  rebaseFormMorph,
   sizeTier,
-  stepFormMorph,
   supportingPane,
   toolbarLayout,
   toolbarPlacement,
   windowSegments,
   type AdaptiveContext,
   type InputLayers,
-  type MorphBox,
   type PresentationForm,
   type SurfaceKind,
   type ToolbarItem,
 } from '../src/kit/adaptive';
 import type { Rect } from '../src/kit/geometry';
 import { BUTTON_SIZES } from '../src/kit/sizes';
-import { setInputOverride, setViewportOverride, watchAdaptiveContext, type VireNavElement } from 'vireuikit/web';
+import { setInputOverride, setViewportOverride, watchAdaptiveContext, type VireNavElement, type VireSurfaceElement } from 'vireuikit/web';
 import { paintBackdrop, type Backdrop } from './backdrops';
 import { GLYPHS, makeMenu, type MenuItemSpec } from './menu';
 import { ensureCss as ensureNavCss, makeNav } from './nav';
+import { bodyOf, ensureCss as ensureSheetCss, makeSheet } from './sheet';
 
 export type InputName = 'touch' | 'pointer' | 'mixed' | 'tablet-keyboard';
 export type PostureName = 'flat' | 'book' | 'tabletop';
@@ -89,6 +85,9 @@ type App = {
 const SECTIONS = ['Home', 'Library', 'Friends', 'Messages'];
 const ROWS = 30;
 const PAD = 8;
+/** The stage's own row of triggers at the window's top: the surfaces open from here, outside every pane that can hide. */
+const LAUNCH_H = 40;
+const TOP = PAD + LAUNCH_H;
 const HEADER_H = 60;
 
 const TOOLBAR_ITEMS: ToolbarItem[] = [
@@ -136,9 +135,8 @@ const CSS = `
 #toolbar .it{position:relative;display:grid;place-items:center;flex:none}
 #toolbar .it[data-badge]::after{content:'';position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:#e5484d}
 #toolbar[data-orientation=vertical]>.cap{flex-direction:column}
-#supporting,#surface{z-index:5;background:color-mix(in srgb,Canvas 80%,transparent);display:flex;align-items:center;justify-content:center;font:12px system-ui}
-#surface{z-index:6;flex-direction:column;gap:8px}
-#surface button{font:inherit}
+#supporting{z-index:5;background:color-mix(in srgb,Canvas 80%,transparent);display:flex;align-items:center;justify-content:center;font:12px system-ui}
+#launchers{position:absolute;z-index:8;display:flex;align-items:center;gap:8px;box-sizing:border-box;padding:0 4px}
 #scrim{position:absolute;inset:0;z-index:4;background:color-mix(in srgb,#000 28%,transparent);display:none}
 #fold{position:absolute;z-index:7;pointer-events:none;display:none;background:repeating-linear-gradient(45deg,#d33a 0 6px,#d332 6px 12px);outline:1px solid #d33}
 #fold[data-occluding=false]{background:#d33}
@@ -164,6 +162,9 @@ type NavReadout = {
   insets: { bottom: number; start: number };
 };
 
+/** What the surface element says about itself. */
+type SurfaceReadout = { host: string; form: string | null; phase: string | null; detent: string | null; insetEnd: number };
+
 type NavLayoutDetail = { form: string; minimized: boolean; accessoryPlacement: string | null; insets: { bottom: number; start: number } };
 
 declare global {
@@ -179,6 +180,7 @@ declare global {
       frames(): Frame[];
       settled(): boolean;
       nav(): NavReadout;
+      surface(): SurfaceReadout | null;
     };
   }
 }
@@ -197,62 +199,13 @@ type StepLog = {
   preserved: boolean;
   lost: string[];
   sameNav: boolean;
-  /** The open surface's form as drawn, or null when none shows. */
+  /** The open surface's form as the element reports it, or null when none shows. */
   surface: string | null;
+  /** The open surface's detent as the element reports it. */
+  detent: string | null;
 };
 
 type ScenarioName = 'sweep' | 'fold' | 'rotate' | 'keyboard';
-
-/** One body changing form: it reshapes from where it is, turns back mid-way, and starts afresh from its current box for a third form. */
-class BodyMorph {
-  from: { form: string; box: MorphBox; fixed: boolean } | null = null;
-  to: { form: string; box: MorphBox } | null = null;
-  state = createFormMorph();
-  toward: 0 | 1 = 1;
-
-  aim(form: string, boxOf: (form: string) => MorphBox): void {
-    if (!this.from || !this.to) {
-      const box = boxOf(form);
-      this.from = { form, box, fixed: false };
-      this.to = { form, box };
-      this.state.t = { x: 1, v: 0, target: 1 };
-      this.toward = 1;
-      return;
-    }
-    if (form === this.to.form) this.toward = 1;
-    else if (form === this.from.form && !this.from.fixed) this.toward = 0;
-    else {
-      const now = this.frame().box;
-      this.from = { form: this.shown(), box: now, fixed: true };
-      this.to = { form, box: boxOf(form) };
-      rebaseFormMorph(this.state);
-      this.toward = 1;
-    }
-    this.to.box = boxOf(this.to.form);
-    if (!this.from.fixed) this.from.box = boxOf(this.from.form);
-  }
-
-  step(dt: number, instant: boolean): boolean {
-    return stepFormMorph(this.state, dt, this.toward, instant);
-  }
-
-  frame() {
-    return formMorphFrame(this.from!.box, this.to!.box, this.state);
-  }
-
-  shown(): string {
-    return this.frame().showing === 'to' ? this.to!.form : this.from!.form;
-  }
-
-  target(): string {
-    return this.toward === 1 ? this.to!.form : this.from!.form;
-  }
-
-  moving(): boolean {
-    if (!this.to) return false;
-    return this.state.t.x !== this.toward || this.state.t.v !== 0;
-  }
-}
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, string> = {}, html = ''): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag);
@@ -353,11 +306,28 @@ export async function adaptiveStage(
     return m;
   };
 
+  ensureSheetCss();
+  const sheetGlass = options.glass;
+  const hostOf = (id: string, tag: 'vire-popover' | 'vire-sheet', surfaceKind: 'popover' | 'manual' | 'dialog', trigger: string): VireSurfaceElement => {
+    const host = makeSheet({ id, tag, surface: surfaceKind, body: surfaceKind === 'popover' ? 'filters' : 'list', trigger, glass: sheetGlass, sample: null });
+    host.querySelector('vire-button')?.removeAttribute('size');
+    return host as unknown as VireSurfaceElement;
+  };
+  const popoverHost = hostOf('popover', 'vire-popover', 'popover', 'Filters');
+  const sheetHost = hostOf('sheet', 'vire-sheet', 'manual', 'Sheet');
+  const modalHost = hostOf('modal', 'vire-sheet', 'dialog', 'Modal');
+  const hosts = [popoverHost, sheetHost, modalHost];
+  const launchers = el('div', { id: 'launchers' });
+  launchers.append(popoverHost, sheetHost, modalHost);
+  const KIND_HOST = new Map<SurfaceKind, VireSurfaceElement>([['popover', popoverHost], ['sheet', sheetHost]]);
+  const hostFor = (kind: SurfaceKind | null): VireSurfaceElement | null => (kind === null || kind === 'menu' ? null : (KIND_HOST.get(kind) ?? modalHost));
+  const kindOf = (host: VireSurfaceElement): SurfaceKind | null => (host === popoverHost ? 'popover' : host === sheetHost ? 'sheet' : (modalHost.getAttribute('kind') as SurfaceKind | null));
+
   // Panes: built once; class changes move them and never rebuild them, so their state lives on.
   const list = el('section', { class: 'pane', 'data-pane': 'list' });
   const listHeader = el('header');
   const listTitle = el('h2');
-  listHeader.append(listTitle, control('vire-button', 'filters', 'Filters'), menu('list-more', 'More'));
+  listHeader.append(listTitle, menu('list-more', 'More'));
   const listScroll = el('div', { class: 'list-scroll' });
   for (let i = 0; i < ROWS; i += 1) listScroll.append(el('button', { class: 'row', type: 'button', 'data-index': String(i) }, `Item ${i + 1}`));
   list.append(listHeader, listScroll);
@@ -382,14 +352,10 @@ export async function adaptiveStage(
   accessory.querySelector('.acc')!.append(makeMenu({ id: 'accessory-more', size: '', glass: '0', sample: null, trigger: { kind: 'icon', label: 'Options', glyph: 'more' }, items: MENU_ITEMS }));
   const supporting = el('aside', { id: 'supporting', class: 'ol' }, '<span class="tag"></span><span>supporting pane</span>');
   const toolbar = el('div', { id: 'toolbar', class: 'ol' }, '<span class="tag"></span>');
-  const surface = el('div', { id: 'surface', class: 'ol' }, '<span class="tag"></span><span class="what"></span>');
-  const closeSurface = el('button', { type: 'button', id: 'close-surface' }, 'Close');
-  surface.append(closeSurface);
   const scrim = el('div', { id: 'scrim' });
   const fold = el('div', { id: 'fold' });
   const handle = el('div', { id: 'handle', title: 'Drag to resize' });
 
-  const surfaceMorph = new BodyMorph();
   let ctx: AdaptiveContext | null = null;
   let decisions: ReturnType<typeof decide> | null = null;
   let frame = 0;
@@ -420,7 +386,7 @@ export async function adaptiveStage(
   }
 
   function sourceRect(): Rect | undefined {
-    const source = document.getElementById('filters');
+    const source = document.getElementById('popover-trigger');
     if (!source || list.hidden) return undefined;
     const r = source.getBoundingClientRect();
     const w = win.getBoundingClientRect();
@@ -451,15 +417,15 @@ export async function adaptiveStage(
 
     const lead = navLayout?.insets.start ?? 0;
     const bottom = (navLayout?.insets.bottom ?? 0) + PAD;
-    const sheet = app.surface ? d.surfaces[app.surface] : null;
-    const sideSheet = sheet && (sheet.form === 'side-sheet' || sheet.form === 'side-pane');
-    const sheetW = sideSheet ? Math.min(sheet!.maxWidth ?? 400, Math.round((W - lead) * 0.34)) : 0;
+    const insetEnd = readInset();
+    lastInset = insetEnd;
     const supW = Math.min(SUPPORTING_PANE_MAX_WIDTH, Math.round((W - lead) * 0.3));
     const strip = d.placement.orientation === 'vertical' ? tierH + 2 * PAD : 0;
     let right = W - PAD - strip;
-    if (sideSheet) right -= sheetW + PAD;
+    if (insetEnd > 0) right = Math.min(right, W - insetEnd - strip);
     if (d.supporting.form === 'beside') right -= supW + PAD;
-    const area: Rect = { x: Math.max(lead, PAD), y: PAD, width: right - Math.max(lead, PAD), height: H - PAD - bottom };
+    const area: Rect = { x: Math.max(lead, PAD), y: TOP, width: right - Math.max(lead, PAD), height: H - TOP - bottom };
+    place(launchers, { x: area.x, y: PAD, width: W - PAD - strip - area.x, height: LAUNCH_H });
 
     let listBox: Rect = area;
     let detailBox: Rect = area;
@@ -498,7 +464,7 @@ export async function adaptiveStage(
     supTag.textContent = `supporting pane · ${d.supporting.form}${d.supporting.remembered ? ' · remembered' : ''}`;
     supporting.dataset.form = d.supporting.form;
     supporting.hidden = d.supporting.form === 'hidden';
-    if (d.supporting.form === 'beside') place(supporting, { x: right + PAD + (sideSheet ? sheetW + PAD : 0), y: PAD, width: supW, height: area.height });
+    if (d.supporting.form === 'beside') place(supporting, { x: right + PAD, y: TOP, width: supW, height: area.height });
     else if (d.supporting.form === 'over') place(supporting, { x: W - PAD - Math.min(SUPPORTING_PANE_MAX_WIDTH, W - lead - 56), y: PAD, width: Math.min(SUPPORTING_PANE_MAX_WIDTH, W - lead - 56), height: H - 2 * PAD });
 
     // Toolbar: placed by the window, laid out by its own container.
@@ -511,7 +477,7 @@ export async function adaptiveStage(
       const layout = toolbarLayout(TOOLBAR_ITEMS, { available, tier: d.tier, orientation: d.placement.orientation, maxGroups: d.placement.maxGroups });
       toolbarNow = layout;
       const origin = vertical
-        ? { x: W - PAD - strip + PAD, y: PAD + PAD }
+        ? { x: W - PAD - strip + PAD, y: TOP + PAD }
         : d.placement.edge === 'bottom'
           ? { x: host.x + PAD, y: host.y + host.height - PAD - tierH }
           : { x: host.x + PAD, y: host.y + HEADER_H + 4 };
@@ -546,20 +512,9 @@ export async function adaptiveStage(
       }
     }
 
-    // An open surface takes the model's form for the window, and keeps it open across classes.
-    surface.hidden = !sheet;
-    scrim.style.display = (sheet?.scrim || d.supporting.form === 'over') ? 'block' : 'none';
-    if (sheet && app.surface) {
-      const side = { x: right + PAD, y: PAD, width: sheetW, height: area.height, radius: 20 };
-      const boxOf = (form: string): MorphBox => surfaceBox(form, sheet, side);
-      surfaceMorph.aim(sheet.form, boxOf);
-      surface.dataset.form = sheet.form;
-      surface.dataset.kind = app.surface;
-      surface.querySelector<HTMLElement>('.tag')!.textContent = `${app.surface} · ${sheet.form}${sheet.fromSource ? ' · from source' : ''}${sheet.scrim ? ' · scrim' : ''}`;
-      surface.querySelector<HTMLElement>('.what')!.textContent = `${app.surface} (model)`;
-    } else {
-      surfaceMorph.from = surfaceMorph.to = null;
-    }
+    // The real surface takes the form the element's model gives it; the stage only opens and closes it.
+    scrim.style.display = d.supporting.form === 'over' ? 'block' : 'none';
+    syncSurface();
 
     // The fold. In the canary only the atoms are told of no fold; the stage still lays out for it.
     const posture = c.posture;
@@ -574,69 +529,55 @@ export async function adaptiveStage(
     }
 
     writeReadout(c, d);
-    paintMorphs();
-    kick();
   }
 
-  function surfaceBox(form: string, f: PresentationForm, side: MorphBox): MorphBox {
-    const region = f.region;
-    const cx = region.x + region.width / 2;
-    const cy = region.y + region.height / 2;
-    switch (form) {
-      case 'popover': {
-        const s = sourceRect() ?? { x: region.x + 16, y: region.y + 16, width: 80, height: 44 };
-        const w = Math.min(320, region.width - 16);
-        const h = Math.min(240, region.height - 16);
-        const x = Math.min(Math.max(s.x, region.x + PAD), region.x + region.width - PAD - w);
-        const below = s.y + s.height + PAD;
-        const y = below + h <= region.y + region.height - PAD ? below : Math.max(region.y + PAD, s.y - PAD - h);
-        return { x, y, width: w, height: h, radius: 24 };
-      }
-      case 'bottom-sheet': {
-        const w = Math.min(f.maxWidth ?? region.width, region.width);
-        const h = Math.round(region.height * 0.5);
-        return { x: cx - w / 2, y: region.y + region.height - h, width: w, height: h, radius: 28 };
-      }
-      case 'centered-sheet':
-      case 'basic-dialog': {
-        const w = Math.min(f.maxWidth ?? 560, region.width - 48);
-        const h = form === 'basic-dialog' ? Math.min(280, region.height - 48) : Math.min(520, region.height - 96);
-        return { x: cx - w / 2, y: cy - h / 2, width: w, height: h, radius: 28 };
-      }
-      case 'alert': {
-        const w = Math.min(300, region.width - 48);
-        return { x: cx - w / 2, y: cy - 90, width: w, height: 180, radius: 28 };
-      }
-      case 'side-sheet':
-      case 'side-pane':
-        return side;
-      default:
-        return { ...region, radius: 0 };
+  /** What the open surface clears at the trailing edge, as the side sheet publishes it on its parent. */
+  function readInset(): number {
+    let inset = 0;
+    for (const host of hosts) inset = Math.max(inset, parseFloat(host.parentElement?.style.getPropertyValue('--vire-sheet-inset-end') ?? '') || 0);
+    return inset;
+  }
+
+  const openHost = () => hosts.find((h) => h.open || h.hasAttribute('data-phase')) ?? null;
+
+  function surfaceReadout(): SurfaceReadout | null {
+    const host = openHost();
+    if (!host) return null;
+    return { host: host.id, form: host.getAttribute('data-form'), phase: host.getAttribute('data-phase'), detent: host.getAttribute('detent'), insetEnd: readInset() };
+  }
+
+  function surfaceSummary(): string {
+    const r = surfaceReadout();
+    if (!r) return 'none open';
+    return `${r.form ?? '-'} · ${r.phase ?? '-'}${r.detent ? ` · ${r.detent}` : ''}${r.insetEnd ? ` · clears ${r.insetEnd} end` : ''}`;
+  }
+
+  const press = (host: VireSurfaceElement, part: 'trigger' | 'close') => host.querySelector<HTMLElement>(`[id$="-${part}"]`)?.click();
+
+  /** The stage's own triggers open the element the model's kind belongs to and its close button closes it; nothing else is the stage's to draw. */
+  function syncSurface(): void {
+    const want = hostFor(app.surface);
+    for (const host of hosts) if (host !== want && host.open) press(host, 'close');
+    if (!want || !app.surface) return;
+    if (want === modalHost && want.getAttribute('kind') !== app.surface) {
+      want.setAttribute('kind', app.surface);
+      const surface = want.querySelector<HTMLElement>(':scope > dialog')!;
+      for (const child of Array.from(surface.children)) if (!child.hasAttribute('data-vk-grabber')) child.remove();
+      surface.insertAdjacentHTML('beforeend', bodyOf({ id: 'modal', tag: 'vire-sheet', surface: 'dialog', body: app.surface === 'alert' ? 'alert' : app.surface === 'dialog' ? 'rename' : 'list', trigger: null, glass: sheetGlass, sample: null }));
     }
+    if (!want.open) press(want, 'trigger');
   }
 
-  function paintMorphs(): void {
-    if (surfaceMorph.to && !surface.hidden) {
-      const f = surfaceMorph.frame();
-      place(surface, f.box, f.box.radius);
-      surface.dataset.shown = surfaceMorph.shown();
-    }
-  }
-
-  function kick(): void {
-    if (frame) return;
-    lastTime = 0;
-    frame = requestAnimationFrame(tick);
-  }
-
-  function tick(now: number): void {
-    frame = 0;
-    const dt = lastTime ? Math.min((now - lastTime) / 1000, 0.05) : 1 / 60;
-    lastTime = now;
-    const instant = ctx?.reduceMotion ?? false;
-    const b = surfaceMorph.to ? surfaceMorph.step(dt, instant) : false;
-    paintMorphs();
-    if (b) frame = requestAnimationFrame(tick);
+  /** A surface closed or opened from its own side (a scrim, Escape, the trigger) is the stage's state too. */
+  function followSurface(host: VireSurfaceElement, opened: boolean): void {
+    const kind = kindOf(host) ?? 'modal-sheet';
+    if (opened) {
+      if (hostFor(app.surface) !== host) app.surface = kind;
+    } else if (hostFor(app.surface) === host && !host.open) {
+      app.surface = null;
+    } else return;
+    syncControls();
+    render();
   }
 
   function navReadout(): NavReadout {
@@ -694,6 +635,7 @@ export async function adaptiveStage(
       ['accessory', navLayout?.accessoryPlacement ?? '-'],
       ['toolbar', `${d.placement.edge} · ${d.placement.orientation}${Number.isFinite(d.placement.maxGroups) ? ` · ≤ ${d.placement.maxGroups} groups` : ''}`],
       ['toolbar layout', toolbarNow ? `${toolbarNow.stage} : ${toolbarNow.capsules.map((c) => c.items.join('+')).join(' | ')}${toolbarNow.overflow.length ? ` : overflow ${toolbarNow.overflow.join(', ')}` : ''}${toolbarNow.aside.length ? ` : text row ${toolbarNow.aside.join(', ')}` : ''}` : 'no detail shown'],
+      ['open surface', surfaceSummary()],
       ['surfaces', SURFACE_KINDS.map((k) => `${k} → ${d.surfaces[k].form}`).join('\n')],
     ];
     readout.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd data-key="${k}">${v.replace(/</g, '&lt;')}</dd>`).join('');
@@ -770,14 +712,22 @@ export async function adaptiveStage(
     syncControls();
     render();
   });
-  listHeader.querySelector('#filters')!.addEventListener('click', () => {
-    app.surface = app.surface === 'popover' ? null : 'popover';
-    render();
-  });
-  closeSurface.addEventListener('click', () => {
-    app.surface = null;
-    render();
-  });
+  for (const host of hosts) {
+    const surface = host.querySelector<HTMLElement>(':scope > dialog, :scope > [popover]')!;
+    surface.addEventListener('toggle', (e) => followSurface(host, (e as ToggleEvent).newState === 'open'));
+    surface.addEventListener('close', () => followSurface(host, false));
+    new MutationObserver(() => {
+      const row = readout.querySelector('[data-key="open surface"]');
+      if (row) row.textContent = surfaceSummary();
+      if (readInset() !== lastInset) render();
+    }).observe(host, { attributes: true, attributeFilter: ['data-form', 'data-phase', 'detent'] });
+  }
+  let lastInset = 0;
+  for (const parent of new Set(hosts.map((h) => h.parentElement!))) {
+    new MutationObserver(() => {
+      if (readInset() !== lastInset) render();
+    }).observe(parent, { attributes: true, attributeFilter: ['style'] });
+  }
 
   handle.addEventListener('pointerdown', (e) => {
     e.preventDefault();
@@ -802,6 +752,8 @@ export async function adaptiveStage(
     notes: notes.value,
     scroll: listScroll.scrollTop,
     surface: app.surface,
+    sheetField: sheetHost.querySelector<HTMLInputElement>('input')?.value ?? '',
+    sheetScroll: Math.round(sheetHost.querySelector<HTMLElement>(':scope > [popover]')?.scrollTop ?? 0),
     pinned: app.pinned,
     collapsed: app.sidebarCollapsed,
     current: nav.querySelector('[aria-current=page]')?.getAttribute('href') ?? '',
@@ -867,7 +819,8 @@ export async function adaptiveStage(
         preserved: lost.length === 0,
         lost,
         sameNav: win.querySelector('vire-nav') === firstNav && win.querySelectorAll('vire-nav').length === 1 && nav.querySelector(':scope > nav') === firstBody,
-        surface: surface.hidden ? null : (surface.dataset.form ?? null),
+        surface: openHost()?.getAttribute('data-form') ?? null,
+        detent: openHost()?.detent || null,
       });
     }
     writeUrl();
@@ -940,6 +893,12 @@ export async function adaptiveStage(
     });
   }
 
+  /** Every surface is at rest: the wanted one open, the others gone. */
+  function surfaceSettled(): boolean {
+    const want = hostFor(app.surface);
+    return hosts.every((h) => (h === want ? h.getAttribute('data-phase') === 'open' : !h.hasAttribute('data-phase') && !h.open));
+  }
+
   window.__adaptive = {
     ctx: () => ctx,
     decisions: () => (decisions ? JSON.parse(JSON.stringify({ ...decisions, toolbar: toolbarNow })) : {}),
@@ -960,12 +919,14 @@ export async function adaptiveStage(
       if (first) requestAnimationFrame(sampleBody);
     },
     frames: () => recording ?? [],
-    settled: () => nav.hasAttribute('data-vk') && !navReadout().moving && !surfaceMorph.moving(),
+    settled: () => nav.hasAttribute('data-vk') && !navReadout().moving && surfaceSettled(),
     nav: navReadout,
+    surface: surfaceReadout,
   };
 
   apply(sim);
-  win.append(list, detail, toolbar, supporting, nav, scrim, surface, fold, handle);
+  win.setAttribute('data-vire-shell', '');
+  win.append(list, detail, toolbar, supporting, nav, scrim, launchers, fold, handle);
   watchAdaptiveContext(win, (next) => {
     ctx = foldAware ? next : { ...next, posture: postureOf(current) };
     render();

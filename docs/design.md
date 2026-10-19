@@ -52,9 +52,13 @@ attribute, a development aid of the elements that the lab and the snapshots use.
   in dp with a resize handle, presets from a folded phone to an ultrawide desktop, a fold (posture, `fold` position,
   `band`, `occluding`) and the input layers (`touch`, `pointer`, `mixed`, `tablet-keyboard`, `keyboard`). The real atoms
   and the real `<vire-nav>` inside take their adaptive forms (the navigation covers the window frame, takes its form from
-  its own box and the stage's overrides, and the panes are laid out by the insets it publishes); the other patterns not
-  built yet (panes, sheets, the toolbar) are labelled outlines placed by the model. A readout
-  lists every decision, and scenarios sweep the width, fold and unfold, rotate and attach a keyboard, checking the
+  its own box and the stage's overrides, and the panes are laid out by the insets it publishes), and the real
+  `<vire-popover>` and `<vire-sheet>`: the window is marked `data-vire-shell`, a row of the stage's own triggers at its
+  top (`Filters`, `Sheet`, `Modal`, outside every pane that can hide) opens them, and `app.surface` (the `surface=` URL
+  parameter and the select) only asks the stage to press the right trigger or close button. The stage draws nothing of
+  a surface: it reads the element's `data-form`, `data-phase` and `detent`, and a side sheet's `--vire-sheet-inset-end`
+  on the row, which the panes clear. The patterns not built yet (the toolbar, the supporting pane) are labelled outlines
+  placed by the model. A readout lists every decision (an open surface's form, phase, detent and what it clears among them), and scenarios sweep the width, fold and unfold, rotate and attach a keyboard, checking the
   person's state on each step. `foldaware=0` hides the fold from the atoms only, for the canary.
 
 - **Sheet gallery and sandbox** (`?atom=sheet&form=<form>&detent=&content=&backdrop=&glass=`, `?view=sheet&w=&h=`). The gallery draws
