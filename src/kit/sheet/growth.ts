@@ -1,4 +1,3 @@
-// How a surface comes and goes: out of its trigger, or, without one, from the window's edge or from a smaller scale.
 import type { MorphBox } from '../adaptive/form-morph';
 import type { Size } from '../geometry';
 import { menuSurfaceFrame, type MenuSurfaceFrame, type RoundedRect } from '../menu';
@@ -30,10 +29,7 @@ const INK_IN_END = 1;
 
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 
-/**
- * Straight from the trigger's body to the sheet's box, with no drop. `t` is 0 at the trigger and 1 at the sheet and may
- * pass 1 by the spring's overshoot.
- */
+/** Straight from the trigger's body to the sheet's box, with no drop; `t` is 0 at the trigger, 1 at the sheet, and may overshoot. */
 export function sheetGrowthFrame(from: MorphBox, to: MorphBox, t: number): SheetGrowthFrame {
   const box = {
     x: mix(from.x, to.x, t),

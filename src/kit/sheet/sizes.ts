@@ -2,7 +2,8 @@
 import { DEFAULT_GROWTH_TIMING, smoothstep, type GrowthTiming } from '../morph';
 
 export const SHEET_SIZES = {
-  detent: { medium: 0.5, largeTopGap: 56, peekMin: 120 },
+  /** Detents closer than `merge` are one. */
+  detent: { medium: 0.5, largeTopGap: 56, peekMin: 120, merge: 24 },
   /** 12 dp up to 30 % of the window, 6 dp at 55 %, flush from 90 %; linear between. */
   inset: { rest: 12, mid: 6, restUntil: 0.3, midAt: 0.55, flushAt: 0.9 },
   radius: { inset: 32, flush: 28 },

@@ -1,7 +1,6 @@
-// Where a surface sits, in dp, for every form `presentationForm` can give it.
 import type { MorphBox } from '../adaptive/form-morph';
 import type { PresentationForm, SurfaceKind } from '../adaptive/presentation';
-import type { Size } from '../geometry';
+import type { Rect, Size } from '../geometry';
 import { menuPlacement, type MenuPlacement, type RoundedRect } from '../menu';
 import { SHEET_SIZES, sheetInset, sheetOpacity, sheetRadius } from './sizes';
 
@@ -17,6 +16,8 @@ export type SheetLayoutInput = {
   grabber?: boolean;
   /** The bottom safe area; a floating sheet stays clear of it. */
   bottomInset?: number;
+  /** What the keyboard takes from the region's bottom; the sheet stands on what is left. */
+  lift?: number;
 };
 
 export type SheetLayout = {
@@ -72,8 +73,9 @@ export function sheetLayout(input: SheetLayoutInput): SheetLayout {
       return result({ ...rect, radius: SHEET_SIZES.popover.radius });
     }
     case 'bottom-sheet': {
-      const height = clamp(input.height ?? content.height, 0, window.height);
-      const fraction = window.height > 0 ? height / window.height : 0;
+      const lift = Math.max(0, input.lift ?? 0);
+      const height = clamp(input.height ?? content.height, 0, region.height - lift);
+      const fraction = region.height > 0 ? height / region.height : 0;
       const inset = sheetInset(fraction);
       const radius = sheetRadius(fraction);
       const opacity = form.scrim ? Math.max(sheetOpacity(fraction), SHEET_SIZES.opacity.overScrim) : sheetOpacity(fraction);
@@ -81,7 +83,7 @@ export function sheetLayout(input: SheetLayoutInput): SheetLayout {
       const k = Math.min(inset / 2, 1);
       const gap = k * Math.max(inset, input.bottomInset ?? 0);
       const width = Math.min(form.maxWidth ?? Infinity, region.width - 2 * inset);
-      const bottom = region.y + region.height;
+      const bottom = region.y + region.height - lift;
       const box = {
         x: region.x + (region.width - width) / 2,
         y: bottom - height,
@@ -113,7 +115,7 @@ export function sheetLayout(input: SheetLayoutInput): SheetLayout {
       const { dialog, windowGap } = SHEET_SIZES;
       const limit = form.form === 'alert' ? dialog.alertWidth : (form.maxWidth ?? dialog.width);
       const width = Math.max(0, Math.min(limit, region.width - windowGap));
-      const height = Math.max(0, Math.min(content.height, window.height - windowGap));
+      const height = Math.max(0, Math.min(content.height, region.height - windowGap));
       return result({
         x: region.x + (region.width - width) / 2,
         y: region.y + (region.height - height) / 2,
@@ -128,12 +130,15 @@ export function sheetLayout(input: SheetLayoutInput): SheetLayout {
 }
 
 /** Whether a surface carries a lens at all: the pane and full screen never do, a bottom sheet only if its lowest detent is not opaque. */
-export function sheetUsesGlass(form: PresentationForm['form'], detents: readonly number[], window: Size): boolean {
+export function sheetUsesGlass(form: PresentationForm['form'], detents: readonly number[], extent: Size): boolean {
   if (form === 'side-pane' || form === 'full-screen') return false;
   if (form !== 'bottom-sheet') return true;
   const lowest = detents[0];
-  return lowest === undefined || window.height <= 0 || sheetOpacity(lowest / window.height) < 1;
+  return lowest === undefined || extent.height <= 0 || sheetOpacity(lowest / extent.height) < 1;
 }
+
+/** How far a box reaches below its region's bottom edge: what a floating sheet's overhang must be clipped by. */
+export const sheetClipBottom = (box: MorphBox, region: Rect): number => Math.max(0, box.y + box.height - (region.y + region.height));
 
 /** A press on the scrim closes a bottom sheet or a popover, never a centred sheet, a dialog or an alert, and never a persistent surface. */
 export function scrimCloses(kind: SurfaceKind, form: PresentationForm['form'], persistent: boolean): boolean {

@@ -1,4 +1,3 @@
-// The sheet follows the finger between its detents, meets resistance past the largest and springs to a detent on release.
 import { stepSpring, type Spring } from '../morph';
 import type { Size } from '../geometry';
 import { SHEET_SIZES } from './sizes';
@@ -94,6 +93,12 @@ export function releaseSheetDrag(state: SheetDragState, detents: readonly number
   return settle(detents.reduce((best, d) => (Math.abs(d - h) < Math.abs(best - h) ? d : best), lowest));
 }
 
+/** A drag the system took away: to the nearest detent, never a close, whatever the finger was doing. */
+export function cancelSheetDrag(state: SheetDragState, detents: readonly number[]): { target: number } {
+  state.velocity = 0;
+  return releaseSheetDrag(state, detents, false) as { target: number };
+}
+
 /** Steps the height toward its detent on the detent spring; true while moving. */
 export function stepSheetHeight(spring: Spring, dt: number, reduceMotion = false): boolean {
   return stepSpring(spring, dt, SHEET_SIZES.detentSpring.response, SHEET_SIZES.detentSpring.damping, reduceMotion);
@@ -101,11 +106,7 @@ export function stepSheetHeight(spring: Spring, dt: number, reduceMotion = false
 
 export type SheetTouchAction = 'none' | 'pan-up' | 'pan-y';
 
-/**
- * What the browser may do with a touch that starts in the content: scroll it while it has somewhere to go, and leave
- * the sheet the rest. At its top and below the largest detent both directions move the sheet; at the largest only a
- * downward drag does, upward is the content's.
- */
+/** What the browser may do with a touch that starts in a scroller: scroll it while it has somewhere to go, else the sheet's. */
 export function sheetTouchAction(scrollTop: number, height: number, detents: readonly number[]): SheetTouchAction {
   if (scrollTop > 0) return 'pan-y';
   const largest = detents[detents.length - 1] ?? height;

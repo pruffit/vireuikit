@@ -11,6 +11,10 @@ import {
   menuPlacement,
   menuSurfaceFrame,
   moveSheetDrag,
+  namedSheetDetents,
+  parseDetentLabels,
+  cancelSheetDrag,
+  sheetClipBottom,
   popoverGrowthFrame,
   popoverPlacement,
   pressSheetDrag,
@@ -117,6 +121,36 @@ describe('sheetDetents', () => {
 
   it('sorts and removes repeats', () => {
     expect(sheetDetents('sheet', phone, { detents: ['large', 'peek', 'medium', 'large'], content: 400 })).toEqual([400, 744]);
+  });
+
+  it('keeps the tallest detent named large on a window under 112 dp', () => {
+    const all = { detents: ['peek', 'medium', 'large'] as const, content: 80 };
+    const tiny = namedSheetDetents('sheet', { width: 390, height: 100 }, all);
+    expect(tiny).toEqual([{ name: 'large', height: 50, names: ['peek', 'medium', 'large'] }]);
+    const sliver = namedSheetDetents('sheet', { width: 390, height: 60 }, all);
+    expect(sliver).toEqual([{ name: 'large', height: 30, names: ['peek', 'medium', 'large'] }]);
+  });
+
+  it('merges detents closer than 24 dp under the larger name and keeps those 24 dp apart', () => {
+    expect(namedSheetDetents('sheet', { width: 390, height: 130 })).toEqual([{ name: 'large', height: 74, names: ['medium', 'large'] }]);
+    expect(sheetDetents('sheet', { width: 390, height: 160 })).toEqual([80, 104]);
+    expect(sheetDetents('sheet', phone)).toEqual([400, 744]);
+  });
+
+  it('names every detent that lands on a height, the largest first as its name', () => {
+    const steps = namedSheetDetents('sheet', phone, { detents: ['peek', 'medium', 'large'], content: 400 });
+    expect(steps).toEqual([
+      { name: 'medium', height: 400, names: ['peek', 'medium'] },
+      { name: 'large', height: 744, names: ['large'] },
+    ]);
+  });
+});
+
+describe('parseDetentLabels', () => {
+  it('reads name=text pairs and drops what it does not know', () => {
+    expect(parseDetentLabels('peek=Small; medium = Half ; large=Full screen; huge=No; medium2')).toEqual({ peek: 'Small', medium: 'Half', large: 'Full screen' });
+    expect(parseDetentLabels(null)).toEqual({});
+    expect(parseDetentLabels('peek=')).toEqual({});
   });
 });
 
@@ -232,6 +266,54 @@ describe('sheetGrabber', () => {
   });
 });
 
+describe('sheetLayout in a region of the window', () => {
+  const region = { x: 0, y: 0, width: 390, height: 400 };
+  const content = { width: 300, height: 2000 };
+
+  it('clamps a bottom sheet to the region, not the window, and sets its bottom on the region', () => {
+    const form = { ...formFor('sheet', phone), region };
+    const l = sheetLayout({ form, window: phone, source: null, content, height: 1000 });
+    expect(l.box.y).toBe(0);
+    expect(l.box.y + l.box.height).toBe(region.height + 28);
+    expect(sheetClipBottom(l.box, region)).toBe(28);
+    expect(l.opacity).toBe(1);
+  });
+
+  it('takes the density from the share of the region', () => {
+    const form = { ...formFor('sheet', phone), region };
+    const l = sheetLayout({ form, window: phone, source: null, content, height: 200 });
+    expect(l.opacity).toBeCloseTo(sheetOpacity(0.5), 9);
+    expect(l.box.radius).toBeCloseTo(sheetRadius(0.5), 9);
+  });
+
+  it('stands on what the keyboard leaves of the region and keeps its density by the whole region', () => {
+    const form = formFor('sheet', phone);
+    const free = sheetLayout({ form, window: phone, source: null, content, height: 400 });
+    const lifted = sheetLayout({ form, window: phone, source: null, content, height: 400, lift: 300 });
+    expect(lifted.box.y).toBe(free.box.y - 300);
+    expect(lifted.opacity).toBe(free.opacity);
+    expect(sheetLayout({ form, window: phone, source: null, content, height: 700, lift: 300 }).box.y).toBe(phone.height - 300 - 500);
+  });
+
+  it('limits a centred sheet to the region minus the window gap', () => {
+    const form = { ...formFor('modal-sheet', tablet), region: { x: 0, y: 0, width: 700, height: 400 } };
+    expect(form.form).toBe('centered-sheet');
+    const l = sheetLayout({ form, window: tablet, source: null, content });
+    expect(l.box.height).toBe(400 - SHEET_SIZES.windowGap);
+  });
+
+  it('counts a glass lens by the region too', () => {
+    expect(sheetUsesGlass('bottom-sheet', [200], { width: 390, height: 400 })).toBe(true);
+    expect(sheetUsesGlass('bottom-sheet', [200], phone)).toBe(true);
+    expect(sheetUsesGlass('bottom-sheet', [370], { width: 390, height: 400 })).toBe(false);
+    expect(sheetUsesGlass('bottom-sheet', [370], phone)).toBe(true);
+  });
+
+  it('clips nothing above the bottom edge of the region', () => {
+    expect(sheetClipBottom({ x: 0, y: 0, width: 1, height: 300, radius: 0 }, region)).toBe(0);
+  });
+});
+
 describe('sheetLayout, other forms', () => {
   const content = { width: 320, height: 400 };
 
@@ -322,7 +404,7 @@ describe('sheetLayout, other forms', () => {
 
 describe('the sizes', () => {
   it('holds the numbers of the spec', () => {
-    expect(SHEET_SIZES.detent).toEqual({ medium: 0.5, largeTopGap: 56, peekMin: 120 });
+    expect(SHEET_SIZES.detent).toEqual({ medium: 0.5, largeTopGap: 56, peekMin: 120, merge: 24 });
     expect(SHEET_SIZES.drag).toEqual({ distance: 56, velocity: 125, zone: 125, stale: 0.1 });
     expect(SHEET_SIZES.side).toMatchObject({ width: 360, min: 280, max: 400, inset: 8, radius: 24 });
     expect(SHEET_SIZES.dialog).toMatchObject({ width: 560, alertWidth: 320 });
@@ -526,6 +608,22 @@ describe('the drag', () => {
     expect(s.active).toBe(false);
     expect(s.height.target).toBe((r as { target: number }).target);
     expect(s.height.v).toBeGreaterThan(0);
+  });
+
+  it('settles a cancelled drag on the nearest detent with no velocity, however it was moving', () => {
+    const fling = drag(500);
+    swipe(fling, 600, 560, 0.06);
+    expect(fling.velocity).toBeGreaterThan(125);
+    expect(cancelSheetDrag(fling, detents)).toEqual({ target: 400 });
+    expect(fling.height.v).toBe(0);
+    expect(fling.active).toBe(false);
+    const below = drag(400);
+    swipe(below, 600, 700, 0.06);
+    expect(releaseSheetDrag({ ...below, height: { ...below.height } }, detents, true)).toEqual({ close: true });
+    expect(cancelSheetDrag(below, detents)).toEqual({ target: 400 });
+    const above = drag(744);
+    swipe(above, 600, 300, 1);
+    expect(cancelSheetDrag(above, detents)).toEqual({ target: 744 });
   });
 
   it('ignores moves before a press', () => {
