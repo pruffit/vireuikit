@@ -9,6 +9,7 @@ import { NAV_FORMS, navGallery, navSandbox, type NavLabForm, type NavSandboxHand
 import { referenceControl } from './reference-controls';
 import { SHEET_FORMS, sheetGallery, sheetSandbox, type SheetLabForm, type SheetSandboxHandle } from './sheet';
 import { REFERENCE_STAGE, paintReferenceStage } from './reference-stage';
+import { TOOLBAR_PLACES, TOOLBAR_STAGES, toolbarGallery, toolbarSandbox, type ToolbarLabPlace, type ToolbarLabStage, type ToolbarSandboxHandle } from './toolbar';
 
 const FORCEABLE_STATES = ['rest', 'hover', 'focus', 'pressed', 'disabled'] as const;
 
@@ -29,11 +30,13 @@ const flag = (name: string): boolean | undefined => {
   return v === '1' ? true : v === '0' ? false : undefined;
 };
 
-const VIEWS = ['gallery', 'sandbox', 'menu', 'nav', 'sheet', 'reference', 'menu-reference', 'adaptive'] as const;
+const VIEWS = ['gallery', 'sandbox', 'menu', 'nav', 'sheet', 'toolbar', 'reference', 'menu-reference', 'adaptive'] as const;
 const view = pick('view', VIEWS, 'gallery');
-const atomParam = pick('atom', ['all', ...ATOMS, 'menu', 'nav', 'sheet'] as const, 'all');
+const atomParam = pick('atom', ['all', ...ATOMS, 'menu', 'nav', 'sheet', 'toolbar'] as const, 'all');
 const navForm = pick('form', NAV_FORMS, 'bar') as NavLabForm;
 const sheetForm = pick('form', SHEET_FORMS, 'bottom-sheet') as SheetLabForm;
+const toolbarStage = pick('stage', TOOLBAR_STAGES, 'separate') as ToolbarLabStage;
+const toolbarPlace = pick('place', TOOLBAR_PLACES, 'bottom') as ToolbarLabPlace;
 const stateParam = pick('state', ['all', ...FORCEABLE_STATES, ...MENU_STATES] as const, 'all');
 const backdrop = pick('backdrop', BACKDROPS, 'light') as Backdrop;
 const glass = pick('glass', ['1', '0', 'touch'] as const, '1');
@@ -97,6 +100,17 @@ function gallery(): void {
       kind: params.get('kind'),
       content: params.get('content'),
       cards: params.get('cards'),
+    });
+    return;
+  }
+  if (atomParam === 'toolbar') {
+    toolbarGallery(stage, rows, {
+      stage: toolbarStage,
+      place: toolbarPlace,
+      glass,
+      sample: upgrade ? sample : null,
+      force: params.get('force'),
+      surfaces: params.get('surfaces') === '1',
     });
     return;
   }
@@ -171,11 +185,12 @@ async function reference(): Promise<void> {
   const height = BUTTON_SIZES[size].height;
   const src = `/__reference/file?path=${encodeURIComponent(control.file)}`;
   sample = await paintReferenceStage(stage, control, height, src);
-  const atom = atomParam === 'all' || atomParam === 'menu' || atomParam === 'nav' || atomParam === 'sheet' ? control.atom : atomParam;
+  const atom = atomParam === 'all' || atomParam === 'menu' || atomParam === 'nav' || atomParam === 'sheet' || atomParam === 'toolbar' ? control.atom : atomParam;
   rows.append(make(atom, stateParam === 'all' ? (control.state ?? 'rest') : stateParam));
 }
 
 let navHandle: NavSandboxHandle | undefined;
+let toolbarHandle: ToolbarSandboxHandle | undefined;
 let sheetHandle: SheetSandboxHandle | undefined;
 const dp = (name: string, fallback: number) => Number(params.get(name)) || fallback;
 const navAttrs = Object.fromEntries(
@@ -196,6 +211,22 @@ else if (view === 'nav') {
     search: params.get('search') !== '0',
     accessory: params.get('accessory') !== '0',
     extra: dp('extra', 0),
+  });
+}
+else if (view === 'toolbar') {
+  stage.style.width = 'max-content';
+  toolbarHandle = toolbarSandbox(document.getElementById('rows')!, note, {
+    glass,
+    sample: upgrade ? sample : null,
+    width: dp('w', 390),
+    height: dp('h', 720),
+    attrs: Object.fromEntries(
+      ['placement', 'more-label']
+        .map((name) => [name, params.get(`toolbar-${name}`)] as const)
+        .filter((pair): pair is readonly [string, string] => pair[1] !== null),
+    ),
+    bare: params.get('bare') === '1',
+    surfaces: params.get('surfaces') !== '0',
   });
 }
 else if (view === 'sheet') {
@@ -224,7 +255,7 @@ function buildChrome(): void {
     `<label><input type="checkbox" data-flag="${name}"${params.get(name) === '1' ? ' checked' : ''}>${label}</label>`;
   bar.innerHTML = [
     select('view', VIEWS, view),
-    select('atom', ['all', ...ATOMS, 'menu', 'nav', 'sheet'], atomParam),
+    select('atom', ['all', ...ATOMS, 'menu', 'nav', 'sheet', 'toolbar'], atomParam),
     select('state', ['all', ...(atomParam === 'menu' ? MENU_STATES : FORCEABLE_STATES)], stateParam),
     select('backdrop', BACKDROPS, backdrop),
     select('glass', ['1', '0', 'touch'], glass),
@@ -299,5 +330,6 @@ window.__lab = {
   upgraded: upgrade,
   ...(navHandle ? { nav: navHandle } : {}),
   ...(sheetHandle ? { sheet: sheetHandle } : {}),
+  ...(toolbarHandle ? { toolbar: toolbarHandle } : {}),
 };
 document.documentElement.dataset.ready = '1';

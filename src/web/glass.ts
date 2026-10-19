@@ -67,8 +67,17 @@ export async function attachControlGlass(
   stillWanted: () => boolean,
 ): Promise<GlassSession | null> {
   await ensureGlass();
-  const { attachGlass, probeBackdrop } = loaded!;
   if (!stillWanted()) return null;
+  return attachLoaded(el, params);
+}
+
+/** `attachControlGlass` for a host that has already waited for the module: the lens is there on this frame, or null. */
+export function attachControlGlassNow(el: HTMLElement, params: GlassParams): GlassSession | null {
+  return loaded ? attachLoaded(el, params) : null;
+}
+
+function attachLoaded(el: HTMLElement, params: GlassParams): GlassSession {
+  const { attachGlass, probeBackdrop } = loaded!;
 
   // `attachGlass` re-reads these on `update()`. The geometry is passed in because a pressed
   // element is scaled and a measured box would be the scaled one.

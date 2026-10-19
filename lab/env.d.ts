@@ -10,6 +10,7 @@ declare global {
       upgraded: boolean;
       nav?: { frame: HTMLElement; resize(width: number, height: number): void; scrollOnDocument(): void };
       sheet?: import('./sheet').SheetSandboxHandle;
+      toolbar?: import('./toolbar').ToolbarSandboxHandle;
     };
   }
 }
