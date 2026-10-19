@@ -39,6 +39,8 @@ export type ToolbarSpec = {
   surfaces?: boolean;
   /** Plain `<button>`s in place of the kit's controls. */
   bare?: boolean;
+  /** The flexible spacer after the leading group; without it the capsules pack from the leading edge. */
+  spacer?: boolean;
   attrs?: Record<string, string>;
 };
 
@@ -148,7 +150,7 @@ export function makeToolbar(spec: ToolbarSpec): HTMLElement {
 
   const spacer = document.createElement('div');
   spacer.setAttribute('data-spacer', '');
-  bar.append(group(back), spacer, group(share, like, add, ...extras), group(edit, trash), group(done));
+  bar.append(group(back), ...(spec.spacer === false ? [] : [spacer]), group(share, like, add, ...extras), group(edit, trash), group(done));
   if (spec.sample) (bar as VireToolbarElement).sample = spec.sample;
   return bar;
 }
@@ -231,6 +233,7 @@ export type ToolbarSandboxOptions = {
   attrs: Record<string, string>;
   bare: boolean;
   surfaces: boolean;
+  spacer: boolean;
 };
 
 type Box = { x: number; y: number; w: number; h: number };
@@ -243,7 +246,7 @@ export type ToolbarSnapshot = {
   height: number;
   items: { label: string; hidden: boolean; box: Box; glyph: Box | null; ink: number; blur: number; text: boolean }[];
   more: { hidden: boolean; box: Box; ink: number; blur: number; glyph: Box | null } | null;
-  capsules: { hidden: boolean; box: Box; kind: string; clipped: boolean }[];
+  capsules: { hidden: boolean; box: Box; kind: string; clipped: boolean; opacity: number }[];
 };
 
 const num = (el: HTMLElement, name: string) => parseFloat(el.style.getPropertyValue(name)) || 0;
@@ -290,6 +293,7 @@ export function snapshot(bar: HTMLElement): ToolbarSnapshot {
       box: { x: num(el, '--vk-x'), y: num(el, '--vk-y'), w: num(el, '--vk-w'), h: num(el, '--vk-h') },
       kind: el.getAttribute('data-kind') ?? '',
       clipped: el.style.clipPath !== '',
+      opacity: Number(getComputedStyle(el).opacity),
     })),
   };
 }
@@ -311,7 +315,7 @@ export function toolbarSandbox(rows: HTMLElement, note: (text: string) => void, 
   frame.id = 'frame';
   frame.dataset.vireShell = '';
   frame.style.cssText = `width:${options.width}px;height:${options.height}px`;
-  const bar = makeToolbar({ id: 'toolbar', glass: options.glass, sample: options.sample, surfaces: options.surfaces, bare: options.bare, attrs: options.attrs });
+  const bar = makeToolbar({ id: 'toolbar', glass: options.glass, sample: options.sample, surfaces: options.surfaces, bare: options.bare, spacer: options.spacer, attrs: options.attrs });
   frame.append(content(), bar);
   frame.addEventListener('click', (e) => {
     const target = (e.target as Element).closest<HTMLElement>('[data-log]');

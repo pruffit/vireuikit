@@ -227,6 +227,7 @@ else if (view === 'toolbar') {
     ),
     bare: params.get('bare') === '1',
     surfaces: params.get('surfaces') !== '0',
+    spacer: params.get('spacer') !== '0',
   });
 }
 else if (view === 'sheet') {

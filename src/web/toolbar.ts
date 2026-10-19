@@ -629,8 +629,15 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       return this.#placement?.orientation === 'vertical';
     }
 
+    /** The container's extent along the toolbar, to the fraction: a threshold is crossed by a fraction of a dp. */
     #measureExtent(): number {
-      return this.#vertical() ? this.clientHeight : this.clientWidth;
+      const style = getComputedStyle(this);
+      const vertical = this.#vertical();
+      const size = parseFloat(vertical ? style.height : style.width);
+      if (!Number.isFinite(size)) return vertical ? this.clientHeight : this.clientWidth;
+      if (style.boxSizing !== 'border-box') return size;
+      const edge = (sides: string[]) => sides.reduce((sum, side) => sum + (parseFloat(style.getPropertyValue(side)) || 0), 0);
+      return size - edge(vertical ? ['padding-top', 'padding-bottom', 'border-top-width', 'border-bottom-width'] : ['padding-left', 'padding-right', 'border-left-width', 'border-right-width']);
     }
 
     /** The extents at which the layout is each stage, for a lab that wants a stage rather than a width. */
@@ -1248,31 +1255,29 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
 
       const markup = new MutationObserver((records) => {
         const focused = this.#lastFocus;
-        const active = deepActive(this.ownerDocument);
-        const lost = focused !== null && (!active || active === this.ownerDocument.body);
         const order = this.#order();
-        const index = focused instanceof HTMLButtonElement ? order.indexOf(focused) : -1;
+        const owner = focused ? this.#items.find((i) => i.host.contains(focused)) : undefined;
+        const index = owner ? order.indexOf(owner.button) : -1;
         let changed = false;
-        let removedFocus = false;
         for (const record of records) {
           if (this.#isOwn(record.target)) continue;
-          if (record.type === 'childList') {
-            if ([...record.addedNodes, ...record.removedNodes].every((n) => this.#isOwn(n))) continue;
-            changed = true;
-            for (const node of record.removedNodes) if (focused && node.contains(focused)) removedFocus = true;
-          } else {
-            changed = true;
-          }
+          if (record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].every((n) => this.#isOwn(n))) continue;
+          changed = true;
         }
         if (!changed) return;
         this.#scan();
         this.#applySizes();
         this.#measure();
         this.#relayout();
-        if (removedFocus && lost) {
-          const next = this.#order();
-          const target = next[Math.min(Math.max(index, 0), next.length - 1)];
-          target?.focus({ preventScroll: true });
+        // An item that held the focus, or whose surface did, is gone: the neighbour that takes its place gets it,
+        // once the surface has let go of it.
+        if (owner && !this.#items.some((i) => i.host === owner.host && i.button === owner.button)) {
+          requestAnimationFrame(() => {
+            const active = deepActive(this.ownerDocument);
+            if (!this.isConnected || (active && active !== this.ownerDocument.body && this.contains(active))) return;
+            const next = this.#order();
+            next[Math.min(Math.max(index, 0), next.length - 1)]?.focus({ preventScroll: true });
+          });
         }
       });
       markup.observe(this, {
