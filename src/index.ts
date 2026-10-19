@@ -9,3 +9,4 @@ export * from './kit/nav';
 export * from './kit/response';
 export * from './kit/sheet';
 export * from './kit/sizes';
+export * from './kit/toolbar';
