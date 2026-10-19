@@ -386,9 +386,19 @@ the joined body contracts to the item that stays. Glyphs defocus and come back i
     with its text items in a horizontal row at the strip's foot (`aside`).
   - `toolbarLayout` runs on the element's own width (its height in the strip) with the tier from the input. Groups,
     merges and the overflow come from it; the element invents none.
-- **One glass surface for the whole toolbar.** The first capsule is the lens's body and every other capsule, "…"
-  included, is one of its `shapes` (`setMorph`). A toolbar of three groups therefore costs one surface, not four, and
-  neighbours join through the material's own smooth union.
+- **A lens for each capsule, one over a joining set.**
+  - The material draws a body's `shapes` only inside the body element's own box (checked on `vireglass` 3.0.0: a shape
+    offset past the box shows nothing), so one lens whose body is the first capsule cannot draw capsules that stand apart.
+  - Each capsule is a created `[data-vk-capsule]` element with a lens of its own, sized to the capsule; "…" and the strip's
+    text row are capsules too.
+  - Where the frame's neck joins neighbours (`toolbarClusters`: a gap under a quarter of the smoothing), the leading
+    capsule's lens takes their bounds and is clipped to the smooth union's outline (`toolbarSilhouette`, the material's
+    own `smin`), and the others hide until they come apart. A resting toolbar is therefore a lens per capsule, and a
+    merge is one lens over a pair with the neck between them.
+  - All the lenses take one backdrop reading (the element's `sample`, else one probe of the toolbar's box), so the capsules
+    agree on their ink, and the items take that ink.
+  - The kit's controls inside are `glass="off"` (put back on removal) and drawn without a body, so there is never glass on
+    glass.
 - **Stage changes move.**
   - Merging closes the gap between two capsules: the smoothing builds a neck, the union becomes one capsule, and the
     glyphs stay put.
@@ -405,13 +415,15 @@ the joined body contracts to the item that stays. Glyphs defocus and come back i
 - **"…" is a menu.**
   - A `<vire-menu>` the element creates, with a row (icon and label) for each overflowed item in toolbar order.
   - Choosing a row clicks the original button once.
-  - A row for an item that opens a menu, a popover or a sheet opens that surface from "…": the surface elements take an
-    `anchor` override for that.
+  - A row for an item that opens a menu, a popover or a sheet opens that surface from "…" once the menu has put itself
+    back: the surface elements take an `anchor` (an element, or null) that is the box they grow from and return into in
+    place of their trigger, cleared when they close.
   - "…" carries no badge: badged items never overflow.
 - **An anchor that leaves closes its surface** (AD21). An open menu, popover or sheet whose trigger goes into "…" runs
-  its growth back into "…" and closes, and focus moves to "…". A trigger that only merges keeps its surface, which
-  follows the trigger's new box. A trigger removed from the toolbar closes its surface, and focus goes to the
-  neighbouring item.
+  its growth back into "…" and closes (`retractInto`), and focus moves to "…". A trigger that only merges keeps its
+  surface, which follows the trigger's new box (the toolbar calls `follow()` on each frame of a change, because a surface
+  watches scrolls and resizes, not a trigger that moves). A trigger removed from the toolbar closes its surface at once,
+  and focus goes to the neighbouring item. A surface closes by itself when its trigger leaves the document, toolbar or not.
 - **Focus.** A focused item that goes into "…" hands focus to "…"; the roving tabindex is recomputed over what is in
   sight.
 - **Sizes and modes.**
@@ -447,7 +459,8 @@ An atom is done when:
 4. Navigation: bar, rail and sidebar as one body that morphs between them, the search's forms, the bottom accessory.
 5. Sheet and popover: a popover that becomes a sheet grown from its source, bottom and side sheets, the full-screen
    forms.
-6. Toolbar: merging neighbours and overflow by priority into "…", in its container's width.
+6. Toolbar: merging neighbours and overflow by priority into "…", in its container's width. The element is built; the
+   adaptive stage still draws its outline.
 7. Search field: a button that flows into a bottom field on compact, a page with the field in focus, a persistent
    field.
 8. Switch and slider: the knob lifts into the glass while held.

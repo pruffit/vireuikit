@@ -194,6 +194,10 @@ setA11yOverride({ reduceTransparency: true });
   by default the one facing the nearest corner of the trigger's segment of the window). On a folding screen the menu
   stays in its trigger's half, every frame of its growth included, and scrolls if it is taller. `sample` works as on the buttons; without one, the backdrop
   under the menu is read once as it opens and held while it is out.
+- `anchor` (an element, or `null`) is the box the menu grows from and returns into instead of its trigger, for a host
+  that has moved the trigger out of sight (`<vire-toolbar>` sets it to its "…"); the menu clears it once it has closed.
+  `retractInto(el)` runs the growth back into `el` and closes, `retractInto(null)` closes at once, and `follow()` puts
+  the menu back on its anchor after the host moved it. A trigger that leaves the document closes an open menu on the spot.
 
 ### Navigation
 
@@ -341,9 +345,83 @@ modal sheet is centred from 600 dp, a dialog with fields is full screen below 60
 - The scrim is 32 % black under a modal surface and under a popover's sheet form. A press on it closes a bottom sheet or
   a popover, never a centred sheet, a dialog, an alert or a `persistent` surface. The background is never scaled or moved.
 - Attributes: `glass` (as on the menu), `kind`, `detents`, `detent`, `persistent`, `grabber-label`, `detent-labels`. Properties: `a11y`,
-  `sample`, `detent`, `open`. Reduced transparency and increased contrast make every form opaque, with the same geometry
+  `sample`, `detent`, `open`, `anchor` (the box to grow from and return into instead of the trigger, cleared on close;
+  `retractInto(el)` and `follow()` as on the menu). Reduced transparency and increased contrast make every form opaque, with the same geometry
   and no lens; glass off is a plain opaque body with a shadow.
 - The lab forces states with `data-vire-force-state`: `open`, `open:<detent>` and `grow:<t>` (a growth frozen at `t`).
+
+### Toolbar
+
+`<vire-toolbar>` upgrades groups of buttons into one toolbar that fits its container: separate capsules, then neighbours
+merge through a neck, then the lowest priorities go into a "…" menu, and where it stands (the bottom, the top, a trailing
+strip) comes from the window. Every item stays reachable at every width.
+
+```html
+<vire-toolbar aria-label="Track actions" glass>
+  <div data-group>
+    <vire-icon-button><button aria-label="Back" data-priority="9">…</button></vire-icon-button>
+  </div>
+  <div data-spacer></div>
+  <div data-group>
+    <vire-icon-button><button aria-label="Share" data-priority="5">…</button></vire-icon-button>
+    <vire-icon-button><button aria-label="Like" data-priority="6">…<span data-badge>2</span></button></vire-icon-button>
+    <vire-menu>
+      <vire-icon-button><button aria-label="Add" popovertarget="add">…</button></vire-icon-button>
+      <div id="add" popover><button popovertarget="add" popovertargetaction="hide">New playlist</button></div>
+    </vire-menu>
+  </div>
+  <div data-group>
+    <vire-button data-primary><button>Done</button></vire-button>
+  </div>
+</vire-toolbar>
+```
+
+- The first HTML is buttons in groups, and works before the element is defined: write `vire-toolbar { display: flex;
+  flex-wrap: wrap; gap: 8px 16px }` and the same for `[data-group]` and the groups wrap, every button is a Tab stop, and
+  nothing is hidden or scrolled. There is no `role`: the role promises arrow keys and one Tab stop.
+- An item is a bare `<button>`, a `<vire-button>`, a `<vire-icon-button>`, or a `<vire-menu>`, `<vire-popover>` or
+  `<vire-sheet>` whose trigger button is the item. A button with no visible text is an icon (an `aria-label` names it, and
+  it is its row's label in "…"); one with text is a text item, measured at its natural width. Put `data-priority` (a
+  number, higher stays longer) and `data-primary` (the one main action: it stands last and never goes into "…") on the item
+  or on its button, and a `[data-badge]` inside it for a status, which never goes into "…" either. Neighbours merge only
+  inside their own `[data-group]`, and never a text item with an icon. A `[data-spacer]` after a group pushes the groups
+  after it to the trailing end; without one the capsules pack from the leading edge, and are centred on the bottom edge.
+- After the upgrade the element is the WAI-ARIA toolbar: `role="toolbar"` with your `aria-label`, `aria-orientation`, one
+  Tab stop (a roving `tabindex`; the last item focused is the one Tab comes back to), the arrows along the axis, Home and
+  End, with disabled items passed over. Removing the element gives the markup back.
+- Where it stands is `toolbarPlacement`'s, reflected in `data-edge` (`bottom`, `top` or `trailing`) and
+  `data-orientation`; the window is the nearest `data-vire-shell`, else the viewport, as for the sheet. The `placement`
+  attribute fixes the edge for a host that knows it. A change of place is not a morph: the old form dematerialises and the
+  new one materialises, laid out for its own container. The default style is:
+  - `bottom`: floats `8px` above `--vire-nav-inset-bottom`, inline-centred, in its containing block (`position: absolute`,
+    so give that block `position: relative`);
+  - `top`: in flow at the top of its pane;
+  - `trailing`: a vertical strip at the containing block's trailing side, icons only; text items stand in a horizontal row
+    at its foot.
+
+  A host that wants another place overrides `position`, `inset` and `margin`; the element's own extent along the toolbar is
+  what the layout is computed for, and it needs no padding.
+- Glass: `glass` as on the menu. Every capsule is a lens of the toolbar's own, and capsules that are joining or
+  separating are one lens over their outline, so a toolbar never has glass on glass: the kit's controls inside it are set
+  to `glass="off"` (and put back on removal) and draw no body of their own. All the capsules take one backdrop reading, so
+  they agree on their ink; set the element's `sample` when you know what lies under it. Reduced transparency frosts the
+  capsules, increased contrast makes them dense and outlined, glass off makes them plain, with the same geometry in every
+  case: the gap is the one sign of a group.
+- Stage changes move: merging closes the gap between two capsules through a neck, overflow collapses the leaving slot into
+  "…", which buds out of the trailing end, and a glyph that stays moves continuously while the others defocus. A stage
+  holds for 8 dp past its threshold, so a width on the edge does not flicker. Reduced motion lands a change in one frame.
+- "…" is a `<vire-menu>` the element creates (`more-label`, "More" by default, names it) with a row, icon and label, for
+  each overflowed item in toolbar order. Choosing a row clicks the original button once; for an item that opens a menu, a
+  popover or a sheet, that surface grows from "…" (its `anchor`) once the menu has closed. "…" has no badge.
+- An open menu, popover or sheet whose trigger goes into "…" runs back into "…" and closes, and focus goes to "…"; one whose
+  trigger only merges stays open and follows it. A trigger removed from the toolbar closes its surface, and focus goes to
+  the neighbouring item. A focused item that goes into "…" hands focus to it.
+- Every item keeps a hit area of 44 dp wherever any coarse input is present, whatever its size. Attributes: `placement`,
+  `more-label`, `glass`. Properties: `a11y`, `sample`. It dispatches `vire-glass-ready` and `vire-toolbar-layout`
+  (`{ edge, orientation, stage, overflow }`), and reflects `data-stage` (`separate`, `merged` or `overflow`).
+- The lab forces states with `data-vire-force-state`: `stage:<separate|merged|overflow>` (the available extent is the
+  stage's, and the group cap is lifted so every stage shows in every place), `morph:<t>` after it (that stage's change frozen
+  at `t`) and `place:<t>` (a change of place frozen at `t`), separated by commas.
 
 Sizes, behaviour state machines and accessibility modes are exported from `vireuikit` and shared by every
 target. How an atom is accepted:
