@@ -24,6 +24,7 @@ import type { Rect, Size } from '../kit/geometry';
 import { CONTROL_SIZES, menuSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { effectiveInput, viewportSegments, watchPointerInput, watchViewport } from './environment';
+import { deepActive, dropEmptyStyle, rootsOf, type Root } from './dom';
 import { attachControlGlass, type GlassFrame, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
@@ -43,7 +44,6 @@ const TRIGGER = ':scope > button, :scope > vire-button > button, :scope > vire-i
 const ACTIVATION_KEYS = new Set(['Enter', ' ']);
 
 type Carrier = HTMLElement & { setCarried?: (ink: number | null) => void };
-type Root = Document | ShadowRoot;
 
 export interface VireMenuElement extends HTMLElement {
   a11y: A11yOverride;
@@ -58,22 +58,6 @@ let ids = 0;
 // Both stay the author's: a native disabled item cannot take focus, an aria-disabled one can (WAI-ARIA APG).
 const nativelyDisabled = (item: Element) => item.hasAttribute('disabled');
 const isDisabled = (item: Element) => nativelyDisabled(item) || item.getAttribute('aria-disabled') === 'true';
-
-/** The element's own tree outwards: its root first, the document last. */
-function rootsOf(el: Element): Root[] {
-  const roots: Root[] = [];
-  let node: Node = el.getRootNode();
-  while (node instanceof ShadowRoot) {
-    roots.push(node);
-    node = node.host.getRootNode();
-  }
-  roots.push(el.ownerDocument);
-  return roots;
-}
-
-function dropEmptyStyle(el: Element, hadStyle: boolean): void {
-  if (!hadStyle && el.getAttribute('style') === '') el.removeAttribute('style');
-}
 
 export function createMenuElementClass(options: MenuElementOptions = {}) {
   return class VireMenu extends HTMLElement implements VireMenuElement {
@@ -293,7 +277,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #keepFocusOff(item: Element): void {
       const list = this.#list;
       if (!list || !this.#state.open || item.parentElement !== list || !nativelyDisabled(item)) return;
-      const active = (list.getRootNode() as Root).activeElement;
+      const active = deepActive(list.getRootNode() as Root);
       if (active !== item && list.contains(active)) return;
       this.#state = { ...this.#state, active: -1 };
       list.focus({ preventScroll: true });
@@ -475,7 +459,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       else if (focus.to === 'menu') list.focus({ preventScroll: true });
       else if (focus.to === 'trigger') this.#trigger!.focus({ preventScroll: true });
       else if (focus.to === 'none') {
-        const active = (list.getRootNode() as Root).activeElement;
+        const active = deepActive(list.getRootNode() as Root);
         if (active instanceof HTMLElement && list.contains(active)) active.blur();
       }
     }

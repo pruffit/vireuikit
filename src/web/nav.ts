@@ -37,6 +37,7 @@ import {
 } from '../kit/nav';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { effectiveInput, isEditable, watchAdaptiveContext } from './environment';
+import { deepActive, dropEmptyStyle } from './dom';
 import { attachControlGlass, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
@@ -124,10 +125,6 @@ function restoreAria(badge: Element, was: string | null): void {
 function stripPlacement(link: HTMLElement, hadStyle: boolean): void {
   for (const name of Array.from(link.style)) if (name.startsWith('--vk-')) link.style.removeProperty(name);
   dropEmptyStyle(link, hadStyle);
-}
-
-function dropEmptyStyle(el: Element, hadStyle: boolean): void {
-  if (!hadStyle && el.getAttribute('style') === '') el.removeAttribute('style');
 }
 
 function parseForced(value: string | null): Forced | null {
@@ -891,7 +888,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     #unhold: (() => void) | null = null;
 
     #activeElement(): Element | null {
-      return (this.getRootNode() as Document | ShadowRoot).activeElement;
+      return deepActive(this.getRootNode() as Document | ShadowRoot);
     }
 
     #focusQuietly(el: HTMLElement): void {
