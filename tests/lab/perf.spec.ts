@@ -21,7 +21,7 @@ test.beforeAll(async ({ browser }) => {
     return gl && info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : 'none';
   });
   await page.close();
-  expect(renderer, `the GPU is not in use (${renderer}); this gate does not accept software rendering`).not.toMatch(/swiftshader|software|llvmpipe|none/i);
+  expect(renderer, `the GPU is not in use (${renderer}); this gate does not accept software rendering`).not.toMatch(/swiftshader|software|llvmpipe|basic render|warp|microsoft basic|none/i);
   console.log(`renderer: ${renderer}`);
 });
 
