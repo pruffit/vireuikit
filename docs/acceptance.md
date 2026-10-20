@@ -448,7 +448,7 @@ menu at B 5:56 and 11:40 against `preset=phone-landscape`.
 ## Motion
 
 A glass element that changes shape over frames must cost no more per frame than the same element without glass. The core
-(vireglass 3.1.0) holds a lens's probe and baked maps while it is in interim; the kit puts every moving lens in interim when
+(vireglass 3.1.1) holds a lens's probe and baked maps while it is in interim and ends an interim that hears nothing for 2 s; the kit puts every moving lens in interim when
 its element starts to move and lands it once the page has been still, one surface at a time. Two gates measure it, over one
 list of transitions (`tests/lab/transitions.ts`: navigation morph both ways, drag, minimising, expanding and the accessory's
 reshape; menu, popover, sheet and popover-as-sheet growth and retraction; detent drag; a popover changing form; toolbar
@@ -463,6 +463,7 @@ merge, overflow and change of place). Adding an element's transition means addin
 | MO5 | While moving, what would rebuild a map on every frame is held back or coarsened (a navigation body's second shape, a toolbar capsule's presence as opacity, a navigation lens's presence as its element's opacity, a surface's morph on a coarse grid); the final frame is exact. | behaviour (toolbar presence, navigation second shape); "the landing frame is exact": once landed, the navigation's and the toolbar's lenses hold the size of their element and what a cold render of the end state gives them; the forced states in the snapshots stay exact |
 | MO6 | The visual set holds mid-motion frames: a navigation morph, a popover and a sheet growing, a toolbar merge at about 0.25, 0.5 and 0.75, and the drag lens held at three places on light and photo. | snapshots `motion-*` (`motion-visual.spec.ts`) |
 | MO7 | Before a release the motion is looked at at speed in Chrome or Yandex Browser on a machine with a GPU, beside the reference; what is seen goes into issues. | process (`docs/design.md`, "Acceptance of an atom") |
+| MO8 | A drag or press held still keeps its lens in interim: the navigation and the sheet send `setInterim(true)` once a second for the life of the gesture, so nothing is probed or baked while it is held, and a surface that never lands still falls back on the core's 2 s net. | behaviour "a gesture held still" (2.5 s, navigation lens and sheet, only the heartbeat reaching the core) and its canary with the heartbeat silenced (`window.__labHear`, lab only) |
 
 ## What is not covered
 
