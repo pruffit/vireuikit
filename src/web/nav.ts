@@ -1220,6 +1220,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
 
     /** What the lens covers is not drawn, and what it holds is a copy of: the real glyph is never under its bevel. */
     #markUnder(indexes: number[], shown: Plan | null, lift = 1): void {
+      if (this.#under.size === 0 && indexes.length === 0) return;
       const links = new Set<HTMLAnchorElement>();
       for (const i of indexes) {
         const link = shown?.order[i];
