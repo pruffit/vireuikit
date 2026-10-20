@@ -410,8 +410,8 @@ the joined body contracts to the item that stays. Glyphs defocus and come back i
   - While the window is dragged the layout follows, and a stage change runs once per crossing.
   - Under reduced motion every change lands in one frame.
 - **A change of place is not a morph.** Bottom, top and the strip are different places (B 0:28, 5:56): the old one
-  dematerialises (`setAppear`, never opacity) and the new one materialises, and its layout is computed for its own
-  container.
+  dematerialises (`setAppear` on every frame, never opacity) and the new one materialises, and its layout is computed
+  for its own container.
 - **"…" is a menu.**
   - A `<vire-menu>` the element creates, with a row (icon and label) for each overflowed item in toolbar order.
   - Choosing a row clicks the original button once.
