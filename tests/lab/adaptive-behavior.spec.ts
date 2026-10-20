@@ -564,16 +564,14 @@ test.describe('while the window is dragged', () => {
     await openStage(page, 'w=360&h=900&input=mixed&selected=2', { width: 1600, height: 900 });
     const before = await lensCounts(page);
     expect(before.atom.attached).toBeGreaterThan(3);
-    expect([before.body.attached, before.accessory.attached, before.lens.attached]).toEqual([1, 1, 0]);
+    expect([before.body.attached, before.accessory.attached, before.lens.attached]).toEqual([1, 1, 1]);
     await page.evaluate(() => window.__adaptive.run('sweep'));
     await settled(page);
     const after = await lensCounts(page);
     expect(after.atom, 'the atoms are neither rebuilt nor reshaped').toEqual(before.atom);
     expect([after.body.attached, after.body.alive], 'the body is not rebuilt').toEqual([1, 1]);
     expect([after.accessory.attached, after.accessory.alive], 'nor the accessory').toEqual([1, 1]);
-    expect(after.lens.alive, 'the lens of the selection is gone at rest').toBe(0);
-    expect(after.lens.attached, 'it attached for the form changes, and for nothing else').toBeGreaterThan(0);
-    expect(after.lens.attached).toBeLessThanOrEqual(4);
+    expect([after.lens.attached, after.lens.alive], 'the lens of the selection is attached ahead, once, and not rebuilt by a form change').toEqual([1, 1]);
     await page.locator('#open button').click();
     await expect.poll(async () => (await lensCounts(page)).atom.updates).toBeGreaterThan(before.atom.updates);
   });
