@@ -108,7 +108,6 @@ export function createScrollEdge(host: HTMLElement, mode: Mount, mount: (el: HTM
     live.handle.destroy();
     live.observer?.disconnect();
     el.remove();
-    el.removeAttribute('data-flip');
     write({});
     written = '';
     live = null;
@@ -146,10 +145,6 @@ export function createScrollEdge(host: HTMLElement, mode: Mount, mount: (el: HTM
     });
     if (!handle) return;
     mount(el);
-    // The core's ramp is strongest at the far end of the band, away from the bar; it is mirrored when it runs that way.
-    const mask = el.style.getPropertyValue('mask-image');
-    const towardTop = mask.includes('to top');
-    el.toggleAttribute('data-flip', mask !== '' && (spec.side === 'top' ? towardTop : !towardTop));
     let observer: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
       observer = new ResizeObserver(place);

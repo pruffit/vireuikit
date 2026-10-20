@@ -152,7 +152,6 @@ ${NAV}>[data-vk-lens][data-dragging]>div{color:var(--vire-nav-accent,oklch(.62 .
 ${NAV}[data-minimized]>[data-vk-lens]>div,${NAV}[data-form=bar][data-minimized]>[data-vk-lens]>div{font-size:0}
 ${NAV}>[data-vk-scrim]{position:absolute;inset:0;pointer-events:auto;background:color-mix(in srgb,CanvasText 28%,transparent)}
 ${EDGE}{position:absolute;pointer-events:none;box-sizing:border-box;margin:0}
-:is(${NAV},${TB},${SURF})>[data-vk-edge][data-flip]{transform:scaleY(-1)}
 
 ${NAV}[data-surface=glass]>nav,${NAV}[data-surface=glass]>[data-accessory],${NAV}[data-surface=glass]>[data-vk-lens],${NAV}[data-surface=glass]${CIRCLE}{color:var(--vireglass-ink-color,inherit);
  ${GLASS_BODY}}
