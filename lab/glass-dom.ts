@@ -67,7 +67,12 @@ export function attachGlass(el: HTMLElement, options?: AttachGlassOptions): Glas
     lens.appear = t;
     realAppear(t);
     if (window.__labBakeOnAppear && el.matches(window.__labBakeOnAppear)) {
+      const g = options?.geometry;
       realInterim?.(false);
+      if (options && g) {
+        options.geometry = { ...g, width: g.width + 1 };
+        handle.update();
+      }
       realInterim?.(true);
     }
   };
