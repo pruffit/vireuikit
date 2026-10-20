@@ -18,6 +18,10 @@ export type Transition = {
   /** Gets the page to where `run` starts, and waits for it to be still. */
   prepare?: (page: Page) => Promise<void>;
   run: (page: Page) => Promise<void>;
+  /** The most glass surfaces the transition has any reason to bring into being: its triggers, capsules or popovers, not one per frame. */
+  created: number;
+  /** False where the landing has nothing to bake: the shape it returns to is the one the lens still holds the maps of. */
+  rebakes?: boolean;
 };
 
 const VIEW = { width: 1500, height: 1000 };
@@ -57,6 +61,7 @@ export const TRANSITIONS: Transition[] = [
     query: 'view=nav&w=390&h=720',
     surfaces: NAV_SURFACES,
     active: NAV_ACTIVE,
+    created: 0,
     run: (page) => resizeNav(page, 900, 720),
   },
   {
@@ -64,6 +69,7 @@ export const TRANSITIONS: Transition[] = [
     query: 'view=nav&w=900&h=720',
     surfaces: NAV_SURFACES,
     active: NAV_ACTIVE,
+    created: 0,
     run: (page) => resizeNav(page, 390, 720),
   },
   {
@@ -71,6 +77,7 @@ export const TRANSITIONS: Transition[] = [
     query: 'view=nav&w=390&h=720',
     surfaces: 'vire-nav > [data-vk-lens]',
     active: "document.querySelector('vire-nav').hasAttribute('data-lens')",
+    created: 0,
     async prepare(page) {
       const box = (await page.locator('vire-nav > nav').boundingBox())!;
       await page.mouse.move(box.x + box.width * 0.4, box.y + box.height / 2);
@@ -92,13 +99,16 @@ export const TRANSITIONS: Transition[] = [
     query: 'view=nav&w=390&h=720&accessory=0',
     surfaces: NAV_SURFACES,
     active: NAV_ACTIVE,
+    created: 0,
     run: (page) => scrollList(page, 240).then(() => undefined),
   },
   {
     name: 'navigation expanding',
+    rebakes: false,
     query: 'view=nav&w=390&h=720&accessory=0',
     surfaces: NAV_SURFACES,
     active: NAV_ACTIVE,
+    created: 0,
     async prepare(page) {
       await scrollList(page, 240);
       await page.waitForFunction(() => document.querySelector('vire-nav')!.hasAttribute('data-minimized'));
@@ -111,6 +121,7 @@ export const TRANSITIONS: Transition[] = [
     query: 'view=nav&w=390&h=720',
     surfaces: NAV_SURFACES,
     active: NAV_ACTIVE,
+    created: 0,
     run: (page) => scrollList(page, 240).then(() => undefined),
   },
   {
@@ -118,6 +129,7 @@ export const TRANSITIONS: Transition[] = [
     query: 'view=menu',
     surfaces: '#more > [popover], #more vire-icon-button > button',
     active: "document.getElementById('more').getAttribute('data-phase') === 'moving'",
+    created: 0,
     run: (page) => page.locator('#more-trigger').click(),
   },
   {
@@ -125,6 +137,7 @@ export const TRANSITIONS: Transition[] = [
     query: 'view=menu',
     surfaces: '#more > [popover], #more vire-icon-button > button',
     active: "document.getElementById('more').getAttribute('data-phase') === 'moving'",
+    created: 1,
     async prepare(page) {
       await page.locator('#more-trigger').click();
       await page.waitForFunction(() => document.getElementById('more')!.getAttribute('data-phase') === 'open');
@@ -142,6 +155,7 @@ export const TRANSITIONS: Transition[] = [
         query: `view=sheet&w=${w}&h=720`,
         surfaces,
         active: SHEET_ACTIVE(id),
+        created: 0,
         run: (page) => page.locator(`#${id}-trigger`).click(),
       },
       {
@@ -149,6 +163,7 @@ export const TRANSITIONS: Transition[] = [
         query: `view=sheet&w=${w}&h=720`,
         surfaces,
         active: SHEET_ACTIVE(id),
+        created: 1,
         async prepare(page) {
           await page.locator(`#${id}-trigger`).click();
           await page.waitForFunction((i) => document.getElementById(i)!.getAttribute('data-phase') === 'open', id);
@@ -162,6 +177,7 @@ export const TRANSITIONS: Transition[] = [
     query: 'view=sheet&w=390&h=720',
     surfaces: '#pop > [popover], #pop > vire-button > button',
     active: SHEET_ACTIVE('pop'),
+    created: 0,
     run: (page) => page.locator('#pop-trigger').click(),
   },
   {
@@ -169,6 +185,7 @@ export const TRANSITIONS: Transition[] = [
     query: 'view=sheet&w=390&h=720&detents=medium',
     surfaces: '#sup > [popover], #sup > vire-button > button',
     active: SHEET_ACTIVE('sup'),
+    created: 0,
     async prepare(page) {
       await page.locator('#sup-trigger').click();
       await page.waitForFunction(() => document.getElementById('sup')!.getAttribute('data-phase') === 'open' && !document.getElementById('sup')!.hasAttribute('data-height'));
@@ -187,6 +204,7 @@ export const TRANSITIONS: Transition[] = [
     query: 'view=sheet&w=700&h=720',
     surfaces: '#pop > [popover], #pop > vire-button > button',
     active: SHEET_ACTIVE('pop'),
+    created: 0,
     async prepare(page) {
       await page.locator('#pop-trigger').click();
       await page.waitForFunction(() => document.getElementById('pop')!.getAttribute('data-phase') === 'open');
@@ -198,6 +216,7 @@ export const TRANSITIONS: Transition[] = [
     query: TOOLBAR,
     surfaces: 'vire-toolbar > [data-vk-capsule]',
     active: TOOLBAR_ACTIVE,
+    created: 0,
     run: (page) => page.evaluate(() => window.__lab.toolbar!.resize(370, 400)),
   },
   {
@@ -205,13 +224,16 @@ export const TRANSITIONS: Transition[] = [
     query: TOOLBAR.replace('w=420', 'w=370'),
     surfaces: 'vire-toolbar > [data-vk-capsule]',
     active: TOOLBAR_ACTIVE,
+    created: 0,
     run: (page) => page.evaluate(() => window.__lab.toolbar!.resize(300, 400)),
   },
   {
     name: 'toolbar change of place',
+    rebakes: false,
     query: TOOLBAR,
     surfaces: 'vire-toolbar > [data-vk-capsule]',
     active: TOOLBAR_ACTIVE,
+    created: 0,
     run: (page) => page.evaluate(() => document.querySelector('vire-toolbar')!.setAttribute('placement', 'bottom')),
   },
 ];
@@ -224,6 +246,8 @@ export type Recording = {
   surfaces: number;
   /** Glass surfaces the transition brought into being: their first bake is theirs, not a rebuild of an existing one. */
   created: number;
+  /** Lenses that entered interim during the recording, and lenses alive and still in interim when it ended. */
+  interim: { entered: number; open: number };
 };
 
 const attached = (page: Page) => page.evaluate(() => window.__labAttached ?? 0);
@@ -253,6 +277,7 @@ export async function recordTransition(
     const rec = { t: [] as number[], active: [] as boolean[], stats: [] as Stats[], stop: false };
     (window as unknown as { __rec: typeof rec }).__rec = rec;
     window.__lab.resetRenderStats();
+    window.__labGlassMark?.();
     const loop = (t: number) => {
       rec.t.push(t);
       rec.active.push(active());
@@ -273,23 +298,28 @@ export async function recordTransition(
   );
   const created = (await attached(page)) - before;
   const rec = await page.evaluate((selector) => {
-    const rec = (window as unknown as { __rec: Omit<Recording, 'created'> & { stop: boolean } }).__rec;
+    const rec = (window as unknown as { __rec: Omit<Recording, 'created' | 'interim'> & { stop: boolean } }).__rec;
     rec.stop = true;
     const surfaces = [...document.querySelectorAll<HTMLElement>(selector)].filter((el) => /url\(/.test(el.style.backdropFilter)).length;
-    return { t: rec.t, active: rec.active, stats: rec.stats, surfaces };
+    const lenses = window.__labGlass ?? [];
+    const interim = { entered: lenses.filter((l) => l.entered).length, open: lenses.filter((l) => l.alive && l.interim === true).length };
+    return { t: rec.t, active: rec.active, stats: rec.stats, surfaces, interim };
   }, transition.surfaces);
   return { ...rec, created };
 }
 
 export type FrameReport = { frames: number; p90: number; max: number; over: number };
 
-/** The intervals of the frames in which the transition ran, from the one that began it to the one that landed it. */
+/** How long after the last active frame the deferred landing is timed: it starts 120 ms later and its bakes are 50 ms apart. */
+export const LANDING_WINDOW_MS = 400;
+
+/** The intervals of the frames from the one that began the transition to LANDING_WINDOW_MS past the last active one, which is where the landing's bakes fall. */
 export function frameReport(rec: Recording): FrameReport {
   const first = rec.active.indexOf(true);
   const last = rec.active.lastIndexOf(true);
+  const until = rec.t[last]! + LANDING_WINDOW_MS;
   const gaps: number[] = [];
-  // To the frame after the last: landing is work too, and a stall there is a stall.
-  for (let i = Math.max(first, 1); i <= Math.min(last + 1, rec.t.length - 1); i += 1) gaps.push(rec.t[i]! - rec.t[i - 1]!);
+  for (let i = Math.max(first, 1); i < rec.t.length && rec.t[i - 1]! <= until; i += 1) gaps.push(rec.t[i]! - rec.t[i - 1]!);
   const sorted = [...gaps].sort((a, b) => a - b);
   const p90 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.9))] ?? 0;
   return { frames: gaps.length, p90, max: sorted.at(-1) ?? 0, over: gaps.filter((g) => g > 33).length };
@@ -299,4 +329,31 @@ export function frameReport(rec: Recording): FrameReport {
 export function workReport(rec: Recording): { during: Stats; landed: Stats } {
   const last = rec.active.lastIndexOf(true);
   return { during: rec.stats[last]!, landed: rec.stats.at(-1)! };
+}
+
+export type LensState = {
+  geometry: { width: number; height: number; cornerRadius: number } | null;
+  /** The element's own size, to hold the lens's geometry against. */
+  size: { width: number; height: number };
+  morph: unknown;
+  appear: number;
+  /** The element's own opacity: a fade used on the way must be gone once it has landed. */
+  opacity: string;
+};
+
+/** What the live, visible lenses of these elements were last handed, in document order. Waits for every lens to be out of interim. */
+export async function lensStates(page: Page, selector: string): Promise<LensState[]> {
+  await page.waitForFunction(() => (window.__labGlass ?? []).length > 0 && window.__labGlass!.every((l) => !l.alive || l.interim !== true));
+  await nextFrame(page);
+  return page.evaluate((sel) => {
+    const lenses = window.__labGlass ?? [];
+    return [...document.querySelectorAll<HTMLElement>(sel)].flatMap((el) => {
+      const lens = lenses.find((l) => l.alive && l.el === el);
+      const r = el.getBoundingClientRect();
+      // A lens parked out of sight (the navigation's, between drags) is 2 px and holds whatever it last had.
+      if (!lens || el.hidden || r.width < 4 || r.height < 4) return [];
+      const g = lens.options?.geometry as { width: number; height: number; cornerRadius: number } | undefined;
+      return [{ size: { width: Math.round(r.width), height: Math.round(r.height) }, geometry: g ? { width: g.width, height: g.height, cornerRadius: g.cornerRadius } : null, morph: lens.morph && lens.morph.smoothing > 0 ? lens.morph : null, appear: lens.appear ?? 1, opacity: el.style.opacity }];
+    });
+  }, selector);
 }

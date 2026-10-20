@@ -1,17 +1,21 @@
-import { expect, test } from '@playwright/test';
-import { TRANSITIONS, recordTransition, workReport, type Recording } from './transitions';
+import { expect, test, type Page } from '@playwright/test';
+import { openCase } from './helpers';
+import { TRANSITIONS, lensStates, recordTransition, workReport, type Recording, type Transition } from './transitions';
 
 // The motion gate (docs/acceptance.md, MO1 to MO3). A glass element that changes shape over frames must not make the
 // core probe the backdrop, bake a map or swap a filter on any frame of the change: it holds its lens in interim and
 // bakes once when it lands. The counters are the core's own (`renderStats`), so this holds on any machine, headless or
-// not; how the frames then run is `check:lab:perf`'s question.
+// not; how the frames then run is `check:lab:perf`'s question. The upper bounds alone would pass a lens that never
+// lands, so the gate also asks that every lens which entered interim has left it, and that a landing baked.
 
 /** What a recording says is wrong, as a list; empty is a pass. */
-function violations(rec: Recording, hosted: boolean): string[] {
+function violations(rec: Recording, transition: Transition, hosted: boolean): string[] {
   const { during, landed } = workReport(rec);
   const out: string[] = [];
   if (rec.active.filter(Boolean).length < 6) out.push(`the transition ran for ${rec.active.filter(Boolean).length} frames`);
   if (rec.surfaces === 0) out.push('no glass surface was attached');
+  // A lens is built for a trigger, a capsule or a popover, not for a frame: the allowances below scale with `created`.
+  if (rec.created > transition.created) out.push(`${rec.created} lenses were attached, and the transition needs at most ${transition.created}`);
   // A surface the transition creates has its first bake, and only that, on the way.
   if (during.fullBakes > 2 * rec.created) out.push(`${during.fullBakes} full bakes while it ran, ${rec.created} surfaces created`);
   if (during.filterSwaps > rec.created) out.push(`${during.filterSwaps} filter swaps while it ran, ${rec.created} surfaces created`);
@@ -20,35 +24,115 @@ function violations(rec: Recording, hosted: boolean): string[] {
   // Landing: one probe and two maps (displacement and spectral) per surface, on top of a created surface's first bake.
   if (landed.probes > rec.surfaces + rec.created) out.push(`${landed.probes} probes for ${rec.surfaces} surfaces`);
   if (landed.fullBakes > 2 * (rec.surfaces + rec.created)) out.push(`${landed.fullBakes} full bakes for ${rec.surfaces} surfaces`);
+  if (rec.interim.entered === 0) out.push('no lens entered interim');
+  if (rec.interim.open > 0) out.push(`${rec.interim.open} lenses entered interim and were still in it when the recording ended`);
+  if (transition.rebakes !== false && landed.fullBakes <= during.fullBakes) out.push(`the landing baked nothing (${landed.fullBakes} full bakes in all, ${during.fullBakes} while it ran)`);
   return out;
 }
 
 for (const transition of TRANSITIONS) {
   test(`${transition.name}: no probe, bake or filter swap on any frame, one landing`, async ({ page }) => {
     const rec = await recordTransition(page, transition, '1', { query: 'backdrop=photo' });
-    expect(violations(rec, true)).toEqual([]);
+    expect(violations(rec, transition, true)).toEqual([]);
   });
 
   test(`${transition.name}: the same when the host does not hand over the backdrop`, async ({ page }) => {
     const rec = await recordTransition(page, transition, '1', { query: 'backdrop=photo&sample=0' });
-    expect(violations(rec, false)).toEqual([]);
+    expect(violations(rec, transition, false)).toEqual([]);
   });
 }
 
-test.describe('the canary', () => {
-  test('a navigation body that ignores interim fails the gate', async ({ page }) => {
-    const morph = TRANSITIONS.find((t) => t.name === 'navigation morph, bar to rail')!;
-    const rec = await recordTransition(page, morph, '1', {
-      afterOpen: async (p) => void (await p.evaluate(() => (window.__labNoInterim = 'vire-nav > nav'))),
-    });
-    expect(violations(rec, true).join('\n')).toMatch(/full bakes while it ran/);
-  });
+const named = (name: string) => TRANSITIONS.find((t) => t.name === name)!;
+const switchOn = (key: '__labNoInterim' | '__labNoLand', selector: string) => async (page: Page) =>
+  void (await page.evaluate(([k, s]) => ((window as unknown as Record<string, string>)[k!] = s!), [key, selector]));
 
-  test('a menu that ignores interim fails the gate', async ({ page }) => {
-    const growth = TRANSITIONS.find((t) => t.name === 'menu growth')!;
-    const rec = await recordTransition(page, growth, '1', {
-      afterOpen: async (p) => void (await p.evaluate(() => (window.__labNoInterim = 'vire-menu > [popover]'))),
+test.describe('the canary: a surface that bypasses moveGlass fails the gate', () => {
+  const bypassed: [string, string, string][] = [
+    ['a navigation body', 'navigation morph, bar to rail', 'vire-nav > nav'],
+    ['a navigation lens', 'navigation drag of the lens', 'vire-nav > [data-vk-lens]'],
+    ['a navigation accessory', 'navigation accessory reshaped by minimising', 'vire-nav > [data-accessory]'],
+    ['a menu', 'menu growth', '#more > [popover]'],
+    ['a popover', 'popover growth', '#pop > [popover]'],
+    ['a sheet', 'sheet growth', '#sup > [popover]'],
+    ['a toolbar capsule', 'toolbar stage change, merging', 'vire-toolbar > [data-vk-capsule]'],
+  ];
+  for (const [what, name, selector] of bypassed) {
+    test(`${what} that ignores interim fails`, async ({ page }) => {
+      const transition = named(name);
+      const rec = await recordTransition(page, transition, '1', { afterOpen: switchOn('__labNoInterim', selector) });
+      expect(violations(rec, transition, true).join('\n')).toMatch(/while it ran|no lens entered interim/);
     });
-    expect(violations(rec, true).join('\n')).toMatch(/full bakes while it ran/);
+  }
+});
+
+test.describe('the canary: a surface that never lands fails the gate', () => {
+  const stuck: [string, string, string][] = [
+    ['a navigation body', 'navigation morph, bar to rail', 'vire-nav > nav'],
+    ['a navigation lens', 'navigation drag of the lens', 'vire-nav > [data-vk-lens]'],
+    ['a menu', 'menu growth', '#more > [popover]'],
+    ['a sheet', 'sheet growth', '#sup > [popover]'],
+    ['a toolbar capsule', 'toolbar stage change, merging', 'vire-toolbar > [data-vk-capsule]'],
+  ];
+  for (const [what, name, selector] of stuck) {
+    test(`${what} whose landing never fires fails`, async ({ page }) => {
+      const transition = named(name);
+      const rec = await recordTransition(page, transition, '1', { afterOpen: switchOn('__labNoLand', selector) });
+      expect(violations(rec, transition, true).join('\n')).toMatch(/still in it when the recording ended/);
+    });
+  }
+});
+
+test.describe('the canary: a lens rebuilt on every frame fails the gate', () => {
+  const churn: Transition = {
+    name: 'a lens destroyed and attached again on every frame',
+    query: 'view=nav&w=390&h=720',
+    surfaces: 'vire-nav > nav',
+    active: 'window.__labChurn === true',
+    created: 0,
+    run: (page) =>
+      page.evaluate(async () => {
+        const w = window as unknown as { __labChurn?: boolean; __labAttachGlass: (el: HTMLElement) => { destroy(): void } };
+        const el = document.body.appendChild(document.createElement('div'));
+        el.style.cssText = 'position:fixed;left:8px;top:8px;width:80px;height:40px';
+        let handle: { destroy(): void } | null = null;
+        w.__labChurn = true;
+        for (let i = 0; i < 20; i += 1) {
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          handle?.destroy();
+          handle = w.__labAttachGlass(el);
+        }
+        w.__labChurn = false;
+        handle?.destroy();
+      }),
+  };
+
+  test('re-attaching a lens each frame exceeds what the transition needs', async ({ page }) => {
+    const rec = await recordTransition(page, churn, '1');
+    expect(rec.created).toBeGreaterThanOrEqual(20);
+    expect(violations(rec, churn, true).join('\n')).toMatch(/lenses were attached, and the transition needs at most 0/);
   });
+});
+
+// MO5: the final frame is exact. What a lens was last handed once a transition has landed is what it would be handed
+// had the page been opened at the end state: no coarse morph, no presence left as a fade of the element.
+test.describe('the landing frame is exact', () => {
+  const landings: [string, string][] = [
+    ['navigation morph, bar to rail', 'view=nav&w=900&h=720'],
+    ['navigation morph, rail to bar', 'view=nav&w=390&h=720'],
+    ['toolbar stage change, merging', 'view=toolbar&w=370&h=400&toolbar-placement=top&spacer=0'],
+    ['toolbar stage change, overflowing', 'view=toolbar&w=300&h=400&toolbar-placement=top&spacer=0'],
+    ['toolbar change of place', 'view=toolbar&w=420&h=400&toolbar-placement=bottom&spacer=0'],
+  ];
+  for (const [name, cold] of landings) {
+    test(`${name}: the lenses hold what a cold render of the end state gives them`, async ({ page }) => {
+      const transition = named(name);
+      await recordTransition(page, transition, '1', { query: 'backdrop=photo' });
+      const landed = await lensStates(page, transition.surfaces);
+      await openCase(page, `${cold}&glass=1&backdrop=photo`);
+      const fresh = await lensStates(page, transition.surfaces);
+      expect(landed.length).toBeGreaterThan(0);
+      for (const lens of landed) expect(lens.geometry && { width: lens.geometry.width, height: lens.geometry.height }).toEqual(lens.size);
+      expect(landed).toEqual(fresh);
+    });
+  }
 });
