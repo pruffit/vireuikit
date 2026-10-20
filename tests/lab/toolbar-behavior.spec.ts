@@ -534,7 +534,7 @@ test.describe('the glass', () => {
     expect(samples.at(-1)!.capsules.filter((c) => !c.hidden && c.clipped)).toHaveLength(0);
   });
 
-  test('a change of place dematerialises the old form and materialises the new one through the lens, never through opacity', async ({ page }) => {
+  test('a change of place dematerialises the old form and materialises the new one, the lens landing exact', async ({ page }) => {
     await stubGlass(page);
     await openToolbar(page, 'glass=1', 720, 500);
     await page.waitForFunction(() => ((window as unknown as { __lenses?: unknown[] }).__lenses ?? []).length > 6);
@@ -544,17 +544,14 @@ test.describe('the glass', () => {
     expect(edges.at(-1)).toBe('trailing');
     const flips = edges.map((e, i) => (i > 0 && e !== edges[i - 1] ? i : -1)).filter((i) => i >= 0);
     expect(flips).toHaveLength(1);
-    const appears = (s: Sample) => s.lenses.filter((a): a is number => a !== undefined);
+    // On the way a lens's own presence would rebuild a map every frame, so the capsule fades by opacity and the lens lands exact.
+    const fades = (s: Sample) => live(s).map((c) => c.opacity);
     const at = samples[flips[0]!]!;
-    // Two lenses a frame take a new presence on the way (a map is rebuilt for each), so the rest lag the swap by a few frames.
-    expect(Math.min(...appears(at))).toBeLessThan(0.15);
-    const before = samples.slice(0, flips[0]).map((s) => Math.min(...appears(s)));
-    expect(before.some((v) => v < 0.5 && v > 0.02)).toBe(true);
-    const after = samples.slice(flips[0]).map((s) => Math.min(...appears(s)));
+    expect(Math.max(...fades(at))).toBeLessThan(0.15);
+    expect(samples.slice(0, flips[0]).some((s) => fades(s).some((v) => v < 0.5 && v > 0.02))).toBe(true);
+    const after = samples.slice(flips[0]).map((s) => Math.min(...fades(s)));
     expect(after.at(-1)).toBeCloseTo(1, 1);
     expect(after.some((v) => v > 0.02 && v < 0.98)).toBe(true);
-    // Presence is the lens's: no capsule is faded by opacity while it has one.
-    for (const s of samples) for (const c of live(s)) expect(c.opacity).toBe(1);
     // The new form is laid out for its own container: a column of glyphs.
     const last = samples.at(-1)!;
     const glyphs = last.items.filter((i) => !i.hidden && !i.text);

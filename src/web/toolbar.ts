@@ -1048,8 +1048,6 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       }
     }
 
-    #presenceBudget = 1;
-
     #paintCapsules(frame: ToolbarFrame, asideBox: MorphBox | null, appear: number, fit: (b: MorphBox) => MorphBox, live: boolean): void {
       const placement = this.#placement!;
       const axis = placement.orientation === 'vertical' ? 'y' : 'x';
@@ -1074,10 +1072,11 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
         const bounds = toolbarBounds(boxes);
         draw.push({ key: lead.key, box: bounds, clip: toolbarClipPath(toolbarSilhouette(boxes, frame.smoothing, axis)), kind: kinds[group[0]!]! });
       }
+      // A capsule is a lens by position, not by item, so a stage or place that regroups the items finds its lenses waiting.
+      draw.forEach((d, i) => (d.key = `d${i}`));
       if (asideBox) draw.push({ key: 'aside', box: asideBox, clip: '', kind: 'text' });
 
       const moving = this.#moving();
-      this.#presenceBudget = 2;
       for (const { key, box, clip, kind } of draw) {
         const capsule = this.#capsule(key);
         capsule.used = true;
@@ -1127,10 +1126,12 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
           capsule.last = key;
           session.setGeometry(geometry);
         }
-        // Presence is the lens's, in coarse steps and one lens a frame on the way: each is a map to rebuild.
-        const presence = moving ? Math.round(appear * 4) / 4 : Math.round(appear * 100) / 100;
-        if (presence !== capsule.appear && (!moving || this.#presenceBudget > 0)) {
-          this.#presenceBudget -= 1;
+        // On the way the presence is the capsule's opacity: a new presence of the lens is a map to rebuild for every capsule, and the
+        // first of them costs tens of milliseconds. The lens's own presence lands exactly when it has.
+        const fade = moving && appear < 0.999 ? appear.toFixed(3) : '';
+        if (capsule.el.style.opacity !== fade) capsule.el.style.opacity = fade;
+        const presence = moving ? 1 : Math.round(appear * 100) / 100;
+        if (presence !== capsule.appear) {
           capsule.appear = presence;
           session.setAppear(presence);
         }
