@@ -9,6 +9,7 @@ import {
   INPUT_POINTER,
   adaptiveContext,
   fixedNavigationForm,
+  itemsUnderLens,
   navigationForm,
   aimNavMorph,
   cancelNavDrag,
@@ -577,6 +578,16 @@ describe('the drag', () => {
       expect(frame.lens.x + frame.lens.width / 2).toBeCloseTo(x, 6);
       expect(frame.lens.y + frame.lens.height / 2).toBeCloseTo(barA.body.y + 28, 6);
     }
+  });
+
+  it('covers the items whose glyph is under the lens: one at rest on an item, two on a seam', () => {
+    const at = (x: number) => {
+      const drag = createNavDrag();
+      pressNavDrag(drag, barA, x);
+      return itemsUnderLens(barA, navDragFrame(drag, barA)!.lens);
+    };
+    expect(at(barA.items[1]!.x + cell.width / 2)).toEqual([1]);
+    expect(at(barA.items[1]!.x + cell.width)).toEqual([1, 2]);
   });
 
   it('lifts on press and reports the item under the lens', () => {

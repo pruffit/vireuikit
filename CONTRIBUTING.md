@@ -22,6 +22,7 @@ npm run check:package
 npm run check:readme
 npm run check:lab
 npm run check:lab:visual   # local, Windows baselines
+npm run check:lab:perf     # local, a headed Chromium with a GPU
 ```
 
 `check:package` packs the package, installs it into an empty project and loads every entry point
@@ -35,6 +36,12 @@ run it. The comparison is strict (`docs/design.md`); refresh the baselines with
 `npm run check:lab:visual:update` only when the look changes on purpose. `npm run lab`
 serves the lab; set `VIREUIKIT_REFERENCE_DIR` to a local folder of reference frames to see them in its side pane.
 Reference frames are third-party and are never committed.
+
+`npm run check:lab:perf` replays every transition of `tests/lab/transitions.ts` in a headed Chromium and times its
+frames with glass on and off; it prints a table and requires no frame over 33 ms and a p90 of at most 20 ms with glass
+on. It refuses software rendering (SwiftShader and the like), because headless and software timing hid the problem it
+exists for, so it runs on a machine with a GPU and a screen and not in CI. The same list of transitions is counted in
+`check:lab` (`motion-behavior.spec.ts`), which runs anywhere.
 
 ## Depending on VireGlass
 

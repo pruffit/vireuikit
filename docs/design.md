@@ -445,7 +445,22 @@ An atom is done when:
 3. Playwright covers its behaviour, keyboard and roles, degradation and accessibility toggles (`check:lab`);
 4. every reference criterion for it is written in `docs/acceptance.md` with how it is checked — by a gate where
    it is measurable, by a side-by-side with the reference frame where it is visual;
-5. its baselines are committed (`check:lab:visual`).
+5. its baselines are committed (`check:lab:visual`);
+6. **it moves at frame rate.** Every transition that changes a glass element's shape over frames is in
+   `tests/lab/transitions.ts`. `check:lab` counts the core's work over it (`renderStats`): no backdrop probe, no
+   full bake and no filter swap on any frame of the change, one landing after it. `check:lab:perf` replays it in a
+   headed Chromium with the GPU and requires no frame over 33 ms and a p90 of at most 20 ms with glass on. Gates that
+   read the model's boxes frame by frame say nothing about what the browser draws; these two say it (MO1–MO5);
+7. **its mid-motion frames are in the visual set.** The change is frozen at about a quarter, a half and three quarters
+   through (`check:lab:visual`), and a drag is held at a few places, not only the resting forms (MO6);
+8. **its text is legible on the glass.** Contrast of the ink to what lies behind it, over a page of text and over a
+   photo, for every glass atom (WCAG 2.2: 4.5:1 for text, 3:1 for glyphs). Not yet gated: the gate comes with #34, and
+   until it lands an atom is looked at on both backdrops by hand;
+9. **it has been looked at, moving, at speed, before a release:** in Chrome or Yandex Browser on a machine with a GPU,
+   beside the reference, not in headless and not frozen. What is seen goes into issues (MO7).
+
+The gates in 6 and 7 exist because every gate before them measured what the model and the script decide, and none
+measured what the browser draws in motion: atoms passed all of them and ran at 10 to 20 frames a second.
 
 ## Order
 
