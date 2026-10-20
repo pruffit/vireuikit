@@ -4,14 +4,18 @@ import { TRANSITIONS, frameReport, recordTransition, type FrameReport } from './
 // Local, headed, GPU: `npm run check:lab:perf`. Replays every transition of the motion gate with glass on and off and
 // times the animation frames from the first active one to 400 ms past the last, which takes in the deferred landing and
 // its full bakes. No frame over 33 ms in any replay and a p90 of at most 20 ms with glass on; the glass-off run is the
-// reference the table prints beside it. A transition is replayed once to warm it up (shaders, decoding, first layout)
-// and then three times to measure. The worst of the three is judged for the slowest frame and the frames over 33 ms,
-// the median for the p90: a stall that one replay in three shows is a stall.
+// reference the table prints beside it. A transition is replayed three times to warm it up and then three times to
+// measure. The worst of the three is judged for the slowest frame and the frames over 33 ms, the median for the p90: a
+// stall that one replay in three shows is a stall.
+// Three warm-ups because Playwright starts from an empty profile: the first two replays still compile shader programs in
+// the GPU process (40–50 ms each on D3D11), which Chromium keeps in a real profile. The cold first replay is printed in
+// the table, not judged, so that cost stays in sight.
 const MAX_FRAME = 33;
 const MAX_P90 = 20;
+const WARMUPS = 3;
 const REPLAYS = 3;
 
-const rows: { name: string; on: FrameReport; off: FrameReport }[] = [];
+const rows: { name: string; cold: FrameReport; on: FrameReport; off: FrameReport }[] = [];
 
 test.beforeAll(async ({ browser }) => {
   const page = await browser.newPage();
@@ -30,15 +34,16 @@ test.afterAll(() => {
   const cell = (r: FrameReport) => `${String(r.frames).padStart(4)} ${r.p90.toFixed(1).padStart(6)} ${r.max.toFixed(1).padStart(6)} ${String(r.over).padStart(5)}`;
   const width = Math.max(...rows.map((r) => r.name.length), 10);
   const lines = [
-    `${'transition'.padEnd(width)} | glass on: frames   p90    max  >33 | glass off: frames   p90    max  >33`,
-    ...rows.map((r) => `${r.name.padEnd(width)} |           ${cell(r.on)} |            ${cell(r.off)}`),
+    `${'transition'.padEnd(width)} | glass on: frames   p90    max  >33 | glass off: frames   p90    max  >33 | cold, not judged: max  >33`,
+    ...rows.map((r) => `${r.name.padEnd(width)} |           ${cell(r.on)} |            ${cell(r.off)} |                  ${r.cold.max.toFixed(1).padStart(6)} ${String(r.cold.over).padStart(4)}`),
   ];
   console.log(`\n${lines.join('\n')}\n`);
 });
 
 for (const transition of TRANSITIONS) {
   test(transition.name, async ({ page }) => {
-    await recordTransition(page, transition, '1');
+    const cold = frameReport(await recordTransition(page, transition, '1'));
+    for (let i = 1; i < WARMUPS; i += 1) await recordTransition(page, transition, '1');
     const replays: FrameReport[] = [];
     for (let i = 0; i < REPLAYS; i += 1) replays.push(frameReport(await recordTransition(page, transition, '1')));
     const byP90 = [...replays].sort((a, b) => a.p90 - b.p90);
@@ -50,8 +55,8 @@ for (const transition of TRANSITIONS) {
     };
     await recordTransition(page, transition, '0');
     const off = frameReport(await recordTransition(page, transition, '0'));
-    rows.push({ name: transition.name, on, off });
-    console.log(`ROW ${transition.name} | on ${JSON.stringify(on)} | off ${JSON.stringify(off)}`);
+    rows.push({ name: transition.name, cold, on, off });
+    console.log(`ROW ${transition.name} | on ${JSON.stringify(on)} | off ${JSON.stringify(off)} | cold ${JSON.stringify(cold)}`);
     expect.soft(on.over, `frames over ${MAX_FRAME} ms with glass on`).toBe(0);
     expect.soft(on.max, 'slowest frame with glass on').toBeLessThanOrEqual(MAX_FRAME);
     expect.soft(on.p90, 'p90 with glass on').toBeLessThanOrEqual(MAX_P90);
