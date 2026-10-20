@@ -139,16 +139,13 @@ export function createScrollEdge(host: HTMLElement, mode: Mount, mount: (el: HTM
       return;
     }
     stop();
-    mount(el);
     const handle = attachEdgeNow(isPage(spec.scroller) ? pageSource(doc) : (spec.scroller as HTMLElement), el, {
       side: spec.side,
       pinned: spec.hard,
       ink: () => spec?.ink() ?? 1,
     });
-    if (!handle) {
-      el.remove();
-      return;
-    }
+    if (!handle) return;
+    mount(el);
     // The core's ramp is strongest at the far end of the band, away from the bar; it is mirrored when it runs that way.
     const mask = el.style.getPropertyValue('mask-image');
     const towardTop = mask.includes('to top');

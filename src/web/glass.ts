@@ -206,7 +206,7 @@ function attachLoaded(el: HTMLElement, params: GlassParams): GlassSession {
   return session;
 }
 
-/** The core's scroll edge on an element the host placed, or null until the glass module has loaded. */
+/** The core's scroll edge on an element the host placed, or null until the glass module has loaded (or when a stand-in for it has none). */
 export function attachEdgeNow(scroller: HTMLElement, el: HTMLElement, options: ScrollEdgeOptions): ScrollEdgeHandle | null {
-  return loaded ? loaded.attachScrollEdge(scroller, el, options) : null;
+  return typeof loaded?.attachScrollEdge === 'function' ? loaded.attachScrollEdge(scroller, el, options) : null;
 }
