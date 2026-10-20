@@ -1023,6 +1023,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       capsule.session = session;
       capsule.last = '';
       capsule.appear = -1;
+      capsule.el.style.removeProperty('opacity');
       this.#publishInk();
       this.dispatchEvent(new CustomEvent('vire-glass-ready'));
     }
@@ -1112,7 +1113,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       }
     }
 
-    /** Hands a lens only what changed: a moved box needs nothing, a new size or presence rebuilds its filter. While the toolbar moves the lens is in interim. */
+    /** Hands a lens only what changed: a moved box needs nothing, a new size rebuilds its filter and a new presence only writes it. While the toolbar moves the lens is in interim. */
     #pushLens(capsule: Capsule, box: MorphBox, appear: number, moving: boolean): void {
       const session = capsule.session;
       if (!session) {
@@ -1126,11 +1127,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
           capsule.last = key;
           session.setGeometry(geometry);
         }
-        // On the way the presence is the capsule's opacity: a new presence of the lens is a map to rebuild for every capsule, and the
-        // first of them costs tens of milliseconds. The lens's own presence lands exactly when it has.
-        const fade = moving && appear < 0.999 ? appear.toFixed(3) : '';
-        if (capsule.el.style.opacity !== fade) capsule.el.style.opacity = fade;
-        const presence = moving ? 1 : Math.round(appear * 100) / 100;
+        const presence = Math.round(appear * 100) / 100;
         if (presence !== capsule.appear) {
           capsule.appear = presence;
           session.setAppear(presence);

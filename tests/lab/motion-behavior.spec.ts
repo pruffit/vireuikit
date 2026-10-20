@@ -43,7 +43,7 @@ for (const transition of TRANSITIONS) {
 }
 
 const named = (name: string) => TRANSITIONS.find((t) => t.name === name)!;
-const switchOn = (key: '__labNoInterim' | '__labNoLand', selector: string) => async (page: Page) =>
+const switchOn = (key: '__labNoInterim' | '__labNoLand' | '__labBakeOnAppear', selector: string) => async (page: Page) =>
   void (await page.evaluate(([k, s]) => ((window as unknown as Record<string, string>)[k!] = s!), [key, selector]));
 
 test.describe('the canary: a surface that bypasses moveGlass fails the gate', () => {
@@ -78,6 +78,17 @@ test.describe('the canary: a surface that never lands fails the gate', () => {
       const transition = named(name);
       const rec = await recordTransition(page, transition, '1', { afterOpen: switchOn('__labNoLand', selector) });
       expect(violations(rec, transition, true).join('\n')).toMatch(/still in it when the recording ended/);
+    });
+  }
+});
+
+// Presence is written on every frame of a move, so it must cost no bake. The shim stands in for a core that bakes for it.
+test.describe('the canary: a core that bakes for presence fails the gate', () => {
+  for (const name of ['toolbar change of place']) {
+    test(name, async ({ page }) => {
+      const transition = named(name);
+      const rec = await recordTransition(page, transition, '1', { afterOpen: switchOn('__labBakeOnAppear', transition.surfaces) });
+      expect(violations(rec, transition, true).join('\n')).toMatch(/full bakes while it ran/);
     });
   }
 });

@@ -22,6 +22,8 @@ declare global {
     __labNoInterim?: string;
     /** A selector; a lens whose element matches it ignores `setInterim(false)`: interim is entered and never landed. */
     __labNoLand?: string;
+    /** A selector; a lens whose element matches it ends and re-enters interim after every `setAppear`, which is a core that bakes for presence. */
+    __labBakeOnAppear?: string;
     /** How many lenses have been attached, so a gate can tell a surface that was created from one that was rebuilt. */
     __labAttached?: number;
     /** From now on only the kit's heartbeat ('beat') or nothing ('none') reaches the core's `setInterim`: a held gesture that sends no geometry. */
@@ -64,6 +66,10 @@ export function attachGlass(el: HTMLElement, options?: AttachGlassOptions): Glas
   handle.setAppear = (t) => {
     lens.appear = t;
     realAppear(t);
+    if (window.__labBakeOnAppear && el.matches(window.__labBakeOnAppear)) {
+      realInterim?.(false);
+      realInterim?.(true);
+    }
   };
   const realDestroy = handle.destroy.bind(handle);
   handle.destroy = () => {

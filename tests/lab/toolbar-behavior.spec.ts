@@ -544,14 +544,16 @@ test.describe('the glass', () => {
     expect(edges.at(-1)).toBe('trailing');
     const flips = edges.map((e, i) => (i > 0 && e !== edges[i - 1] ? i : -1)).filter((i) => i >= 0);
     expect(flips).toHaveLength(1);
-    // On the way a lens's own presence would rebuild a map every frame, so the capsule fades by opacity and the lens lands exact.
-    const fades = (s: Sample) => live(s).map((c) => c.opacity);
+    // The presence is the lens's own: the capsule never fades by opacity, and each frame hands the lens the presence it has.
+    expect(samples.every((s) => live(s).every((c) => c.opacity === 1))).toBe(true);
+    const appears = (s: Sample) => s.lenses.map((v) => v ?? 1);
     const at = samples[flips[0]!]!;
-    expect(Math.max(...fades(at))).toBeLessThan(0.15);
-    expect(samples.slice(0, flips[0]).some((s) => fades(s).some((v) => v < 0.5 && v > 0.02))).toBe(true);
-    const after = samples.slice(flips[0]).map((s) => Math.min(...fades(s)));
-    expect(after.at(-1)).toBeCloseTo(1, 1);
+    expect(Math.max(...appears(at))).toBeLessThan(0.15);
+    expect(samples.slice(0, flips[0]).some((s) => appears(s).some((v) => v < 0.5 && v > 0.02))).toBe(true);
+    const after = samples.slice(flips[0]).map((s) => Math.min(...appears(s)));
+    expect(after.at(-1)).toBe(1);
     expect(after.some((v) => v > 0.02 && v < 0.98)).toBe(true);
+    expect(new Set(samples.map((s) => appears(s).join())).size).toBeGreaterThan(6);
     // The new form is laid out for its own container: a column of glyphs.
     const last = samples.at(-1)!;
     const glyphs = last.items.filter((i) => !i.hidden && !i.text);
