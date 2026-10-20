@@ -436,7 +436,7 @@ export function attachGlass(el, opts) {
     update() { note(undefined); },
     setMorph(m) { note(m); },
     setAppear(t) { rec.appears.push(t); },
-    setSample() {}, setAccent() {}, setNeighbourGlow() {},
+    setSample() {}, setInterim() {}, setAccent() {}, setNeighbourGlow() {},
     destroy() { rec.alive = false; },
   };
 }`;
@@ -593,7 +593,7 @@ test.describe('a rail taller than its window', () => {
 });
 
 test.describe('the lens', () => {
-  test("on the bar the search circle is the lens's second shape, and buds off the trailing end as the bar grows and merges back as it contracts", async ({ page }) => {
+  test("on the bar the search circle is the lens's second shape only at a standstill: a morph in motion hands the lens no new one", async ({ page }) => {
     await stubGlass(page);
     await openNav(page, 'accessory=0', 700, 720);
     await page.waitForFunction(() => (window as unknown as { __lenses?: Rec[] }).__lenses?.some((l) => l.kind === 'body' && l.calls.length > 0));
@@ -604,37 +604,27 @@ test.describe('the lens', () => {
     await reform(page, 430, 720, 'bar');
     const grown = (await body()).calls.slice(railCalls).filter((c) => c.morph !== undefined);
     const shapes = grown.filter((c) => c.morph).map((c) => c.morph!);
-    expect(shapes.length).toBeGreaterThan(3);
-    const smoothing = shapes.map((m) => m.smoothing);
-    expect(Math.max(...smoothing)).toBeGreaterThan(0);
-    expect(smoothing.at(-1)).toBe(0);
-    for (let i = 1; i < smoothing.length; i += 1) expect(smoothing[i]!).toBeLessThanOrEqual(smoothing[i - 1]!);
-    const widths = shapes.map((m) => m.shape.width);
-    for (let i = 1; i < widths.length; i += 1) expect(widths[i]!).toBeGreaterThanOrEqual(widths[i - 1]!);
-    expect(widths.at(-1)).toBe(56);
-    expect(shapes.at(-1)!.shape.offsetX).toBeGreaterThan(100);
+    // While it moves a new second shape would be a map rebuilt every frame, so the lens keeps its own and is handed none.
+    expect(shapes.filter((m) => m.smoothing > 0)).toEqual([]);
 
     const barCalls = (await body()).calls.length;
     await reform(page, 700, 720, 'rail');
-    const merged = (await body()).calls.slice(barCalls).filter((c) => c.morph);
-    const out = merged.map((c) => c.morph!.smoothing);
-    for (let i = 1; i < out.length; i += 1) expect(out[i]!).toBeGreaterThanOrEqual(out[i - 1]!);
-    expect(Math.max(...out)).toBeGreaterThan(10);
-    const shrinking = merged.map((c) => c.morph!.shape.width);
-    for (let i = 1; i < shrinking.length; i += 1) expect(shrinking[i]!).toBeLessThanOrEqual(shrinking[i - 1]!);
+    expect((await body()).calls.slice(barCalls).filter((c) => c.morph && c.morph.smoothing > 0)).toEqual([]);
     expect((await body()).calls.at(-1)!.morph ?? null).toBeNull();
   });
 
-  test("at rest there is one glass surface for the body and its search, plus the accessory's; the lens is glass only while it moves", async ({ page }) => {
+  test("at rest there is one glass surface for the body and its search, plus the accessory's, and a lens parked ahead; the lens is drawn only while it moves", async ({ page }) => {
     await stubGlass(page);
     await openNav(page, '', 430, 720);
-    await page.waitForFunction(() => (window as unknown as { __lenses?: Rec[] }).__lenses?.filter((l) => l.alive).length === 2);
+    await page.waitForFunction(() => (window as unknown as { __lenses?: Rec[] }).__lenses?.filter((l) => l.alive).length === 3);
     const alive = async () =>
       (await lenses(page))
         .filter((l) => l.alive)
         .map((l) => l.kind)
         .sort();
-    expect(await alive()).toEqual(['accessory', 'body']);
+    expect(await alive()).toEqual(['accessory', 'body', 'lens']);
+    const parked = () => page.locator('vire-nav > [data-vk-lens]').evaluate((el) => getComputedStyle(el).clipPath !== 'none' && !el.parentElement!.hasAttribute('data-lens'));
+    expect(await parked()).toBe(true);
 
     await page.evaluate(() => {
       (window as unknown as { __peak: number }).__peak = 0;
@@ -649,7 +639,8 @@ test.describe('the lens', () => {
     await reform(page, 700, 720, 'rail');
     expect(await page.evaluate(() => (window as unknown as { __peak: number }).__peak)).toBe(1);
     expect((await lenses(page)).filter((l) => l.kind === 'lens')).toHaveLength(1);
-    expect(await alive()).toEqual(['accessory', 'body']);
+    expect(await alive()).toEqual(['accessory', 'body', 'lens']);
+    expect(await parked()).toBe(true);
   });
 });
 
@@ -882,19 +873,164 @@ test.describe('dragging on the bar', () => {
     await page.mouse.up();
   });
 
-  test('lenses are counted while the selection is dragged: one lens, gone at rest', async ({ page }) => {
+  test('lenses are counted while the selection is dragged: one lens, parked at rest', async ({ page }) => {
     await stubGlass(page);
     await openNav(page, '', 430, 720);
-    await page.waitForFunction(() => (window as unknown as { __lenses?: Rec[] }).__lenses?.filter((l) => l.alive).length === 2);
+    await page.waitForFunction(() => (window as unknown as { __lenses?: Rec[] }).__lenses?.filter((l) => l.alive).length === 3);
     const home = await linkBox(page, 'Home');
     await page.mouse.move(home.cx, home.cy);
     await page.mouse.down();
     await page.mouse.move(home.cx + 60, home.cy, { steps: 5 });
-    await expect.poll(async () => (await lenses(page)).filter((l) => l.alive && l.kind === 'lens').length).toBe(1);
+    await expect(page.locator('vire-nav')).toHaveAttribute('data-lens', '');
+    expect((await lenses(page)).filter((l) => l.kind === 'lens')).toHaveLength(1);
     await page.mouse.up();
     await settle(page);
-    await expect.poll(async () => (await lenses(page)).filter((l) => l.alive && l.kind === 'lens').length).toBe(0);
-    expect((await lenses(page)).filter((l) => l.alive).map((l) => l.kind).sort()).toEqual(['accessory', 'body']);
+    await expect(page.locator('vire-nav')).not.toHaveAttribute('data-lens', '');
+    expect((await lenses(page)).filter((l) => l.kind === 'lens')).toHaveLength(1);
+  });
+});
+
+// ---- the lens held ---------------------------------------------------------------------------------------------------
+
+type Held = { cx: number; cy: number; left: number; right: number; top: number; bottom: number; text: string; color: string };
+type Glyph = { label: string; left: number; right: number; top: number; bottom: number; opacity: number };
+
+/** The lens as drawn and the copy it holds: where the copy's glyph and label sit, and its colour. */
+const heldCopy = (page: Page): Promise<{ lens: Held; copy: Held }> =>
+  page.evaluate(() => {
+    const host = document.querySelector('vire-nav') as HTMLElement;
+    const lens = host.querySelector(':scope > [data-vk-lens]') as HTMLElement;
+    const inner = lens.querySelector(':scope > div') as HTMLElement;
+    const range = document.createRange();
+    const parts: DOMRect[] = [];
+    const svg = inner.querySelector(':scope > svg');
+    if (svg) parts.push(svg.getBoundingClientRect());
+    for (const node of Array.from(inner.childNodes)) {
+      if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) continue;
+      range.selectNodeContents(node);
+      parts.push(range.getBoundingClientRect());
+    }
+    const box = (rects: DOMRect[], text: string, el: Element): Held => {
+      const left = Math.min(...rects.map((r) => r.left));
+      const right = Math.max(...rects.map((r) => r.right));
+      const top = Math.min(...rects.map((r) => r.top));
+      const bottom = Math.max(...rects.map((r) => r.bottom));
+      return { cx: (left + right) / 2, cy: (top + bottom) / 2, left, right, top, bottom, text, color: getComputedStyle(el).color };
+    };
+    return { lens: box([lens.getBoundingClientRect()], '', lens), copy: box(parts, (inner.textContent ?? '').trim(), inner) };
+  });
+
+/** Every real link's glyph (icon and label) as drawn, with how much of it is drawn at all. */
+const realGlyphs = (page: Page): Promise<Glyph[]> =>
+  page.evaluate(() => {
+    const host = document.querySelector('vire-nav') as HTMLElement;
+    const range = document.createRange();
+    return Array.from(host.querySelectorAll<HTMLAnchorElement>(':scope > nav ul a'))
+      .filter((a) => !a.closest('[hidden]'))
+      .map((a) => {
+        const parts: DOMRect[] = [];
+        const svg = a.querySelector(':scope > svg');
+        if (svg) parts.push(svg.getBoundingClientRect());
+        for (const node of Array.from(a.childNodes)) {
+          if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) continue;
+          range.selectNodeContents(node);
+          parts.push(range.getBoundingClientRect());
+        }
+        let opacity = 1;
+        for (let el: Element | null = a; el && el !== host; el = el.parentElement) opacity *= Number(getComputedStyle(el).opacity);
+        return {
+          label: (a.textContent ?? '').trim(),
+          left: Math.min(...parts.map((r) => r.left)),
+          right: Math.max(...parts.map((r) => r.right)),
+          top: Math.min(...parts.map((r) => r.top)),
+          bottom: Math.max(...parts.map((r) => r.bottom)),
+          opacity,
+        };
+      });
+  });
+
+/** Real glyphs still drawn where the lens is: with the lens over them its bevel would refract, and tear, each one. */
+async function glyphsUnderLens(page: Page): Promise<string[]> {
+  const { lens } = await heldCopy(page);
+  return (await realGlyphs(page))
+    .filter((g) => g.opacity > 0.02 && g.right > lens.left + 1 && g.left < lens.right - 1 && g.bottom > lens.top + 1 && g.top < lens.bottom - 1)
+    .map((g) => g.label);
+}
+
+const lifted = (page: Page) =>
+  page.waitForFunction(() => parseFloat((document.querySelector('vire-nav > [data-vk-lens]') as HTMLElement).style.getPropertyValue('--vk-lift')) >= 0.99);
+
+type Link = Awaited<ReturnType<typeof linkBox>>;
+
+/** Presses on Home and drags the lens to a few places: on an item, on the seam between two, near a glyph's edge. */
+async function holdAt(page: Page, where: (links: { library: Link; friends: Link }) => number[]) {
+  const home = await linkBox(page, 'Home');
+  const library = await linkBox(page, 'Library');
+  const friends = await linkBox(page, 'Friends');
+  await page.mouse.move(home.cx + 4, home.cy);
+  await page.mouse.down();
+  const seen: { x: number; under: string[]; held: Awaited<ReturnType<typeof heldCopy>> }[] = [];
+  for (const x of where({ library, friends })) {
+    await page.mouse.move(x, home.cy, { steps: 5 });
+    await lifted(page);
+    await nextFrame(page);
+    seen.push({ x, under: await glyphsUnderLens(page), held: await heldCopy(page) });
+  }
+  return seen;
+}
+
+test.describe('the lens held under the finger', () => {
+  test('no real glyph is drawn under the lens, and the lens holds a copy of the item under it, centred and tinted', async ({ page }) => {
+    for (const glass of ['0', '1']) {
+      await openNav(page, `glass=${glass}&accessory=0&backdrop=photo`, 430, 720);
+      const seen = await holdAt(page, ({ library, friends }) => [library.cx, library.x + library.width, library.x + library.width + 12, friends.cx - 16, friends.cx]);
+      for (const { x, under, held } of seen) {
+        expect(under, `glyphs drawn under the lens at ${x}`).toEqual([]);
+        expect(Math.abs(held.copy.cx - held.lens.cx), `the copy's centre at ${x}`).toBeLessThanOrEqual(1.5);
+        expect(Math.abs(held.copy.cy - held.lens.cy), `the copy's middle at ${x}`).toBeLessThanOrEqual(1.5);
+      }
+      expect(seen[0]!.held.copy.text).toBe('Library');
+      expect(seen.at(-1)!.held.copy.text).toBe('Friends');
+      const bar = await page.locator('vire-nav > nav').evaluate((el) => getComputedStyle(el).color);
+      expect(seen[0]!.held.copy.color).not.toBe(bar);
+      expect(await page.locator('[data-lens-over]').count()).toBe(0);
+      await page.mouse.up();
+      await settle(page);
+    }
+  });
+
+  test('a link that stays drawn under the lens fails it', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    await page.addStyleTag({ content: 'vire-nav [data-lens-under]{opacity:1!important}' });
+    const seen = await holdAt(page, ({ library }) => [library.cx]);
+    expect(seen[0]!.under).toContain('Library');
+  });
+
+  test('the selected pill is lifted into the lens: gone from the bar while held, back where the lens lands', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    const pill = page.locator('vire-nav nav [data-vk-pill]');
+    const alpha = () => pill.evaluate((el) => Number(getComputedStyle(el).opacity));
+    expect(await alpha()).toBeCloseTo(1, 2);
+    await holdAt(page, ({ friends }) => [friends.cx]);
+    expect(await alpha()).toBeLessThanOrEqual(0.02);
+    await page.mouse.up();
+    await settle(page);
+    expect(await alpha()).toBeCloseTo(1, 2);
+    const friends = await linkBox(page, 'Friends');
+    const box = (await pill.boundingBox())!;
+    expect(Math.abs(box.x + box.width / 2 - friends.cx)).toBeLessThanOrEqual(2);
+  });
+
+  test('hover is a faint response and the selected pill a clearly different one', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    const alphaOf = (colour: string) => Number(/\/\s*([\d.]+)\s*\)/.exec(colour)?.[1] ?? /rgba\([^)]*,\s*([\d.]+)\)/.exec(colour)?.[1] ?? 1);
+    const pill = alphaOf(await page.locator('vire-nav nav [data-vk-pill]').evaluate((el) => getComputedStyle(el).backgroundColor));
+    const friends = await linkBox(page, 'Friends');
+    await page.mouse.move(friends.cx, friends.cy);
+    await nextFrame(page);
+    const hover = alphaOf(await page.locator('vire-nav nav a', { hasText: 'Friends' }).evaluate((el) => getComputedStyle(el).backgroundColor));
+    expect(hover).toBeGreaterThan(0);
+    expect(pill).toBeGreaterThanOrEqual(hover * 2);
   });
 });
 
@@ -1659,7 +1795,7 @@ test.describe('attributes changed at runtime', () => {
     await stubGlass(page);
     await openNav(page, 'accessory=0', 430, 720);
     const alive = async () => (await lenses(page)).filter((l) => l.alive).map((l) => l.kind);
-    expect(await alive()).toEqual(['body']);
+    expect((await alive()).sort()).toEqual(['body', 'lens']);
     const before = await rect(page, 'vire-nav > nav');
     await page.evaluate(() => document.querySelector('vire-nav')!.removeAttribute('glass'));
     await expect.poll(alive).toEqual([]);
@@ -1667,7 +1803,7 @@ test.describe('attributes changed at runtime', () => {
     expect(await rect(page, 'vire-nav > nav')).toEqual(before);
     expect(await attr(page, 'data-form')).toBe('bar');
     await page.evaluate(() => document.querySelector('vire-nav')!.setAttribute('glass', ''));
-    await expect.poll(alive).toEqual(['body']);
+    await expect.poll(async () => (await alive()).sort()).toEqual(['body', 'lens']);
     await expect(page.locator('vire-nav')).toHaveAttribute('data-glass', 'on');
     expect(await rect(page, 'vire-nav > nav')).toEqual(before);
   });

@@ -64,6 +64,20 @@ function referenceFrames(): Plugin {
   };
 }
 
+// Sends every import of the glass module through lab/glass-dom.ts, which adds the switch the motion gate's canary uses.
+function glassShim(): Plugin {
+  const same = (a: string, b: string) => normalize(a) === normalize(b);
+  const shim = resolve(HERE, 'glass-dom.ts');
+  return {
+    name: 'vireuikit-glass-shim',
+    enforce: 'pre',
+    resolveId(source, importer) {
+      if (source !== 'vireglass/dom' || !importer || same(importer.split('?')[0]!, shim)) return null;
+      return shim;
+    },
+  };
+}
+
 // A classic script bundle of the web entry, so a page can define the elements synchronously
 // before its markup is parsed, the way a consumer's early script would.
 function earlyBundle(): Plugin {
@@ -90,7 +104,7 @@ function earlyBundle(): Plugin {
 
 export default defineConfig({
   root: HERE,
-  plugins: [referenceFrames(), earlyBundle()],
+  plugins: [glassShim(), referenceFrames(), earlyBundle()],
   resolve: {
     alias: { 'vireuikit/web': resolve(HERE, '../src/web/index.ts') },
   },

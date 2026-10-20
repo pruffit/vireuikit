@@ -28,10 +28,69 @@ export type GlassSession = {
   setAppear(t: number): void;
   setMorph(morph: GlassMorph | null): void;
   setSample(sample: BackdropSample | null): void;
+  /** While on, the lens keeps its probe and baked maps through changes of shape; turning it off bakes once. */
+  setInterim(on: boolean): void;
   /** What the probe reads behind the element where it is now. */
   probe(): BackdropSample;
   destroy(): void;
 };
+
+// On the way a new second shape is a map to rebuild, and a coarse grid keeps that to a few frames of the motion.
+const MOVING_GRID = 8;
+
+/** The core's morph for a surface that is joined to a second shape, in whole pixels, and coarser while it moves. */
+export function glassMorph(
+  morph: { smoothing: number; offsetX: number; offsetY: number; width: number; height: number; cornerRadius: number } | undefined,
+  moving: boolean,
+): GlassMorph | null {
+  if (!morph) return null;
+  const snap = (v: number, grid = moving ? MOVING_GRID : 1) => Math.round(v / grid) * grid;
+  return {
+    smoothing: morph.smoothing > 0 ? Math.max(snap(morph.smoothing, moving ? MOVING_GRID / 2 : 1), 1) : 0,
+    shape: {
+      offsetX: snap(morph.offsetX),
+      offsetY: snap(morph.offsetY),
+      width: snap(morph.width),
+      height: snap(morph.height),
+      cornerRadius: snap(morph.cornerRadius),
+    },
+  };
+}
+
+const LAND_AFTER_MS = 120;
+const LAND_APART_MS = 50;
+const waiting = new Set<GlassSession>();
+let landTimer = 0;
+
+function land(): void {
+  landTimer = 0;
+  const next = waiting.values().next();
+  if (next.done) return;
+  waiting.delete(next.value);
+  next.value.setInterim(false);
+  if (waiting.size > 0) landTimer = window.setTimeout(land, LAND_APART_MS);
+}
+
+/** Ends a lens's interim once the page has been still for a moment, one lens at a time: a full bake is several milliseconds, and none of them belongs in the last frame of a motion. */
+export function landGlass(session: GlassSession): void {
+  waiting.add(session);
+  if (landTimer === 0) landTimer = window.setTimeout(land, LAND_AFTER_MS);
+}
+
+/**
+ * Runs the changes to a lens inside interim while its element moves. What lands the element is applied before interim
+ * ends, so landing is one bake and not a bake for the last frame and another for interim ending.
+ */
+export function moveGlass(session: GlassSession, moving: boolean, apply: () => void): void {
+  if (moving) {
+    waiting.delete(session);
+    session.setInterim(true);
+    apply();
+  } else {
+    apply();
+    landGlass(session);
+  }
+}
 
 let loaded: typeof import('vireglass/dom') | null = null;
 
@@ -94,7 +153,7 @@ function attachLoaded(el: HTMLElement, params: GlassParams): GlassSession {
   if (params.sample) opts.sample = params.sample;
   const handle: GlassHandle = attachGlass(el, opts);
 
-  return {
+  const session: GlassSession = {
     setMaterial(material) {
       opts.material = material;
       handle.update();
@@ -112,7 +171,12 @@ function attachLoaded(el: HTMLElement, params: GlassParams): GlassSession {
     setAppear: (t) => handle.setAppear(t),
     setMorph: (morph) => handle.setMorph(morph),
     setSample: (sample) => handle.setSample(sample),
+    setInterim: (on) => handle.setInterim(on),
     probe: () => probeBackdrop(el),
-    destroy: () => handle.destroy(),
+    destroy: () => {
+      waiting.delete(session);
+      handle.destroy();
+    },
   };
+  return session;
 }

@@ -43,6 +43,8 @@ const glass = pick('glass', ['1', '0', 'touch'] as const, '1');
 const size = pick('size', CONTROL_SIZES, 'touch') as ControlSize;
 const chrome = params.get('chrome') !== '0';
 const upgrade = params.get('upgrade') !== '0';
+// `sample=0` leaves the backdrop to each lens's own probe, the way a host that does not read it first runs.
+const hosted = upgrade && params.get('sample') !== '0';
 
 const app = document.getElementById('app')!;
 app.dataset.chrome = chrome ? '1' : '0';
@@ -80,7 +82,7 @@ function make(atom: Atom, state: string | null): HTMLElement {
     button.textContent = 'Play';
   }
   host.append(button);
-  if (sample && upgrade) (host as VireControlElement).sample = sample;
+  if (sample && hosted) (host as VireControlElement).sample = sample;
   return host;
 }
 
@@ -88,13 +90,13 @@ function gallery(): void {
   const rows = document.getElementById('rows')!;
   if (atomParam === 'menu') {
     const wanted = (MENU_STATES as readonly string[]).includes(stateParam) ? [stateParam as MenuLabState] : MENU_STATES;
-    menuGallery(rows, wanted, { size, glass, sample: upgrade ? sample : null });
+    menuGallery(rows, wanted, { size, glass, sample: hosted ? sample : null });
     return;
   }
   if (atomParam === 'sheet') {
     sheetGallery(stage, rows, sheetForm, {
       glass,
-      sample: upgrade ? sample : null,
+      sample: hosted ? sample : null,
       detent: params.get('detent'),
       force: params.get('state') ?? undefined,
       kind: params.get('kind'),
@@ -108,14 +110,14 @@ function gallery(): void {
       stage: toolbarStage,
       place: toolbarPlace,
       glass,
-      sample: upgrade ? sample : null,
+      sample: hosted ? sample : null,
       force: params.get('force'),
       surfaces: params.get('surfaces') === '1',
     });
     return;
   }
   if (atomParam === 'nav') {
-    navGallery(stage, rows, navForm, { glass, sample: upgrade ? sample : null, force: params.get('state') });
+    navGallery(stage, rows, navForm, { glass, sample: hosted ? sample : null, force: params.get('state') });
     return;
   }
   const atoms = atomParam === 'all' ? ATOMS : [atomParam];
@@ -204,7 +206,7 @@ else if (view === 'nav') {
   stage.style.width = 'max-content';
   navHandle = navSandbox(document.getElementById('rows')!, note, {
     glass,
-    sample: upgrade ? sample : null,
+    sample: hosted ? sample : null,
     width: dp('w', 390),
     height: dp('h', 720),
     attrs: navAttrs,
@@ -217,7 +219,7 @@ else if (view === 'toolbar') {
   stage.style.width = 'max-content';
   toolbarHandle = toolbarSandbox(document.getElementById('rows')!, note, {
     glass,
-    sample: upgrade ? sample : null,
+    sample: hosted ? sample : null,
     width: dp('w', 390),
     height: dp('h', 720),
     attrs: Object.fromEntries(
@@ -234,13 +236,13 @@ else if (view === 'sheet') {
   stage.style.width = 'max-content';
   sheetHandle = sheetSandbox(document.getElementById('rows')!, note, {
     glass,
-    sample: upgrade ? sample : null,
+    sample: hosted ? sample : null,
     width: dp('w', 390),
     height: dp('h', 720),
     detents: params.get('detents'),
   });
 }
-else if (view === 'menu') menuSandbox(document.getElementById('rows')!, note, { size, glass, sample: upgrade ? sample : null });
+else if (view === 'menu') menuSandbox(document.getElementById('rows')!, note, { size, glass, sample: hosted ? sample : null });
 else if (view === 'reference') await reference();
 else if (view === 'menu-reference') await menuReference(stage, document.getElementById('rows')!);
 else if (view === 'adaptive') await adaptiveStage(stage, document.getElementById('rows')!, params, { glass, backdrop, chrome });
@@ -323,12 +325,21 @@ if (chrome) {
   void buildReference();
 }
 
+// Loaded beside the kit's own use of the module; a test that stands in for the module has no counters, which reads as zeros.
+let counters: typeof import('vireglass/dom') | null = null;
+void import('vireglass/dom').then(
+  (module) => (counters = typeof module.renderStats === 'function' ? module : null),
+  () => null,
+);
+
 window.__lab = {
   setA11yOverride,
   setInputOverride,
   input: effectiveInput,
   define: () => defineVireElements(),
   upgraded: upgrade,
+  renderStats: () => counters?.renderStats() ?? { probes: 0, fullBakes: 0, reducedBakes: 0, filterSwaps: 0 },
+  resetRenderStats: () => counters?.resetRenderStats(),
   ...(navHandle ? { nav: navHandle } : {}),
   ...(sheetHandle ? { sheet: sheetHandle } : {}),
   ...(toolbarHandle ? { toolbar: toolbarHandle } : {}),

@@ -35,7 +35,7 @@ import {
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { dropEmptyStyle, deepActive } from './dom';
 import { effectiveInput, shellOf, watchAdaptiveContext, watchPointerInput } from './environment';
-import { attachControlGlassNow, ensureGlass, glassLoaded, probeRect, type GlassSession } from './glass';
+import { attachControlGlassNow, ensureGlass, glassLoaded, moveGlass, probeRect, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
@@ -901,7 +901,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
         else if (target && this.#forcedFrame === null) this.#placeMore(more, fit(target), 0);
         else this.#placeMore(more, null, 0);
       }
-      this.#paintCapsules(frame, aside ? fit(aside.box, true) : null, appear, fit);
+      this.#paintCapsules(frame, aside ? fit(aside.box, true) : null, appear, fit, moving);
       if (follow) for (const item of this.#items) item.surface?.follow?.();
       if (this.#focusMore && more && more.shown && more.ink > 0.05) {
         this.#focusMore = false;
@@ -1048,7 +1048,9 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       }
     }
 
-    #paintCapsules(frame: ToolbarFrame, asideBox: MorphBox | null, appear: number, fit: (b: MorphBox) => MorphBox): void {
+    #presenceBudget = 1;
+
+    #paintCapsules(frame: ToolbarFrame, asideBox: MorphBox | null, appear: number, fit: (b: MorphBox) => MorphBox, live: boolean): void {
       const placement = this.#placement!;
       const axis = placement.orientation === 'vertical' ? 'y' : 'x';
       const shapes: { key: string; box: MorphBox }[] = frame.capsules.map((c, i) => ({ key: c.items[0] ?? `c${i}`, box: fit(c.box) }));
@@ -1075,6 +1077,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       if (asideBox) draw.push({ key: 'aside', box: asideBox, clip: '', kind: 'text' });
 
       const moving = this.#moving();
+      this.#presenceBudget = 2;
       for (const { key, box, clip, kind } of draw) {
         const capsule = this.#capsule(key);
         capsule.used = true;
@@ -1096,7 +1099,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
           else capsule.el.style.removeProperty('clip-path');
         }
         this.#attach(capsule, box);
-        this.#pushLens(capsule, box, appear);
+        this.#pushLens(capsule, box, appear, live);
       }
       for (const [key, capsule] of this.#capsules) {
         if (capsule.used) continue;
@@ -1110,24 +1113,28 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       }
     }
 
-    /** Hands a lens only what changed: a moved box needs nothing, a new size or presence rebuilds its filter. */
-    #pushLens(capsule: Capsule, box: MorphBox, appear: number): void {
+    /** Hands a lens only what changed: a moved box needs nothing, a new size or presence rebuilds its filter. While the toolbar moves the lens is in interim. */
+    #pushLens(capsule: Capsule, box: MorphBox, appear: number, moving: boolean): void {
       const session = capsule.session;
       if (!session) {
         capsule.el.style.opacity = appear < 0.999 ? appear.toFixed(3) : '';
         return;
       }
-      const geometry = { width: round(box.width), height: round(box.height), cornerRadius: round(box.radius) };
-      const key = `${geometry.width}x${geometry.height}r${geometry.cornerRadius}`;
-      if (key !== capsule.last) {
-        capsule.last = key;
-        session.setGeometry(geometry);
-      }
-      const rounded = Math.round(appear * 100) / 100;
-      if (rounded !== capsule.appear) {
-        capsule.appear = rounded;
-        session.setAppear(rounded);
-      }
+      moveGlass(session, moving, () => {
+        const geometry = { width: round(box.width), height: round(box.height), cornerRadius: round(box.radius) };
+        const key = `${geometry.width}x${geometry.height}r${geometry.cornerRadius}`;
+        if (key !== capsule.last) {
+          capsule.last = key;
+          session.setGeometry(geometry);
+        }
+        // Presence is the lens's, in coarse steps and one lens a frame on the way: each is a map to rebuild.
+        const presence = moving ? Math.round(appear * 4) / 4 : Math.round(appear * 100) / 100;
+        if (presence !== capsule.appear && (!moving || this.#presenceBudget > 0)) {
+          this.#presenceBudget -= 1;
+          capsule.appear = presence;
+          session.setAppear(presence);
+        }
+      });
     }
 
     // ---- modes ----------------------------------------------------------------------------------------------------

@@ -24,6 +24,7 @@ import {
   currentNavFrame,
   expandMinimize,
   fixedNavigationForm,
+  itemsUnderLens,
   moveNavDrag,
   navDragFrame,
   navLayout,
@@ -38,7 +39,7 @@ import {
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, effectiveInput, isEditable, shellOf, watchAdaptiveContext } from './environment';
 import { deepActive, dropEmptyStyle } from './dom';
-import { attachControlGlass, type GlassSession } from './glass';
+import { attachControlGlass, landGlass, moveGlass, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
@@ -78,7 +79,6 @@ type Slot = {
   token: number;
   key: string;
   last: { material: string; morph: MorphKey; geometry: string };
-  appear: number;
 };
 
 type MorphKey = GlassMorph | 'none' | '-' | '';
@@ -111,7 +111,7 @@ const sameMorph = (a: MorphKey, b: MorphKey): boolean => {
     p?.cornerRadius === q?.cornerRadius
   );
 };
-const newSlot = (el: HTMLElement): Slot => ({ el, session: null, token: 0, key: '', last: emptyLast(), appear: -1 });
+const newSlot = (el: HTMLElement): Slot => ({ el, session: null, token: 0, key: '', last: emptyLast() });
 const isCurrent = (link: Element) => {
   const value = link.getAttribute('aria-current');
   return value !== null && value !== 'false';
@@ -266,8 +266,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#unbindScroller = null;
       for (const slot of [this.#body, this.#lensSlot, this.#accSlot]) if (slot) this.#detach(slot);
       this.#releaseShortcut();
-      this.#hovered?.removeAttribute('data-lens-over');
-      this.#hovered = null;
+      this.#markUnder([], null);
       this.#accessory?.removeAttribute('data-placement');
       this.#accessory?.removeAttribute('data-moving');
       for (const el of [this.#accessory, this.#lens]) {
@@ -553,9 +552,10 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         stripPlacement(link, had);
         this.#linkStyle.delete(link);
       }
-      if (this.#hovered && gone(this.#hovered)) {
-        this.#hovered.removeAttribute('data-lens-over');
-        this.#hovered = null;
+      for (const link of this.#under) {
+        if (!gone(link)) continue;
+        link.removeAttribute('data-lens-under');
+        this.#under.delete(link);
       }
     }
 
@@ -1096,6 +1096,9 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       const shown = this.#plans.get(shownLayout) ?? plan;
       if (shown !== this.#shown) this.#applyShown(shown);
       const rest = frame.phase === 'rest';
+      const still = this.#forced() !== null;
+      // The accessory lands with the body: its own reshape is shorter, and a surface that lands mid-morph is a bake mid-morph.
+      const live = !still && (!rest || this.#accMoving());
       const dragFrame = rest ? navDragFrame(this.#drag, shownLayout) : null;
       const lens = frame.lens
         ? { box: frame.lens.box, lift: frame.lens.lift, dragging: false, hover: -1 }
@@ -1125,8 +1128,8 @@ export function createNavElementClass(options: NavElementOptions = {}) {
 
       const pill = shown === plan ? this.#pillBox() : shownLayout.pill;
       this.#paintPill(shown.layout.minimized ? null : pill, ink * (1 - (lens?.lift ?? 0)));
-      this.#paintLens(lens, shown, plan);
-      this.#paintAccessory();
+      this.#paintLens(lens, shown, plan, live || (!still && dragFrame !== null));
+      this.#paintAccessory(live);
 
       if (this.#body?.session) {
         const second = frame.second;
@@ -1144,7 +1147,8 @@ export function createNavElementClass(options: NavElementOptions = {}) {
             }
           : null;
         const soft = shown.layout.form === 'sidebar';
-        this.#push(this.#body, box, soft ? 's' : 'c', () => this.#bodyMaterial(soft), morphShape);
+        // A new second shape is a map to rebuild, and the bar does not need it to be right for the few frames it is joined.
+        this.#push(this.#body, box, soft ? 's' : 'c', () => this.#bodyMaterial(soft), live ? undefined : morphShape, live);
       }
     }
 
@@ -1166,15 +1170,15 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       s.setProperty('--vk-pill-op', clamp01(opacity).toFixed(3));
     }
 
-    #paintLens(lens: { box: MorphBox; lift: number; dragging: boolean; hover: number } | null, shown: Plan, plan: Plan): void {
+    #paintLens(lens: { box: MorphBox; lift: number; dragging: boolean; hover: number } | null, shown: Plan, plan: Plan, moving: boolean): void {
       const el = this.#lens;
       const slot = this.#lensSlot;
       if (!el || !slot) return;
       const visible = lens !== null;
       this.toggleAttribute('data-lens', visible);
       if (!lens) {
-        this.#detach(slot);
-        this.#markHover(-1, shown);
+        if (!moving && slot.session) landGlass(slot.session);
+        this.#markUnder([], null);
         return;
       }
       const s = el.style;
@@ -1186,12 +1190,12 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       s.setProperty('--vk-lift', clamp01(lens.lift).toFixed(3));
       el.setAttribute('data-form', shown.layout.form);
       el.toggleAttribute('data-dragging', lens.dragging);
-      this.#markHover(lens.dragging ? lens.hover : -1, shown);
-      const selected = plan.order[plan.selected] ?? null;
-      if (selected !== this.#lensFor) {
-        this.#lensFor = selected;
+      this.#markUnder(lens.dragging ? itemsUnderLens(shown.layout, lens.box) : [], shown, lens.lift);
+      const held = lens.dragging ? (shown.order[lens.hover] ?? null) : (plan.order[plan.selected] ?? null);
+      if (held !== this.#lensFor) {
+        this.#lensFor = held;
         const inner = this.#lensInner!;
-        inner.replaceChildren(...(selected ? Array.from(selected.childNodes).map((node) => node.cloneNode(true)) : []));
+        inner.replaceChildren(...(held ? Array.from(held.childNodes).map((node) => node.cloneNode(true)) : []));
         for (const withId of Array.from(inner.querySelectorAll('[id]'))) withId.removeAttribute('id');
       }
       if (this.#presentation?.glass && !this.#glassBroken) {
@@ -1203,11 +1207,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
           s.setProperty('--vk-body-alpha', body.alpha.toFixed(3));
           s.setProperty('--vk-body-white', body.white.toFixed(3));
           s.setProperty('--vk-body-lift', body.lift.toFixed(3));
-          if (Math.abs(slot.appear - lens.lift) > 0.02) {
-            slot.appear = lens.lift;
-            slot.session.setAppear(clamp01(lens.lift));
-          }
-          this.#push(slot, lens.box, String(step), () => this.#lensMaterial(step), undefined);
+          this.#push(slot, lens.box, String(step), () => this.#lensMaterial(step), undefined, moving);
         }
       }
     }
@@ -1216,17 +1216,27 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       return atomMaterial(VIREGLASS_CONTROL_MATERIAL, 'iconButton', { ...ATOM_AT_REST, pressed: step });
     }
 
-    #hovered: HTMLAnchorElement | null = null;
+    #under = new Set<HTMLAnchorElement>();
 
-    #markHover(index: number, shown: Plan): void {
-      const link = index >= 0 ? (shown.order[index] ?? null) : null;
-      if (link === this.#hovered) return;
-      this.#hovered?.removeAttribute('data-lens-over');
-      this.#hovered = link;
-      link?.setAttribute('data-lens-over', '');
+    /** What the lens covers is not drawn, and what it holds is a copy of: the real glyph is never under its bevel. */
+    #markUnder(indexes: number[], shown: Plan | null, lift = 1): void {
+      const links = new Set<HTMLAnchorElement>();
+      for (const i of indexes) {
+        const link = shown?.order[i];
+        if (link) links.add(link);
+      }
+      for (const link of this.#under) if (!links.has(link)) link.removeAttribute('data-lens-under');
+      for (const link of links) if (!this.#under.has(link)) link.setAttribute('data-lens-under', '');
+      this.#under = links;
+      if (links.size > 0) this.style.setProperty('--vk-under', clamp01(lift).toFixed(3));
+      else this.style.removeProperty('--vk-under');
     }
 
-    #paintAccessory(): void {
+    #accMoving(): boolean {
+      return this.#accAnim.state.t.x < 1 && this.#accAnim.from !== null;
+    }
+
+    #paintAccessory(live: boolean): void {
       const el = this.#accessory;
       const slot = this.#accSlot;
       if (!el || !slot) return;
@@ -1237,7 +1247,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         return;
       }
       this.#setHidden(el, false);
-      const moving = anim.state.t.x < 1 && anim.from !== null;
+      const moving = this.#accMoving();
       el.toggleAttribute('data-moving', moving);
       el.setAttribute('data-placement', frame.placement);
       const box = frame.box;
@@ -1251,7 +1261,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         const f = formMorphFrame(anim.from.box, anim.to.box, anim.state);
         s.setProperty('--vk-ink', clamp01(f.showing === 'from' ? f.ink.outgoing : f.ink.incoming).toFixed(3));
       }
-      this.#push(slot, box, 'c', () => this.#bodyMaterial(false), undefined);
+      this.#push(slot, box, 'c', () => this.#bodyMaterial(false), undefined, live);
     }
 
     // ---- the glass ----------------------------------------------------------------------------------------------
@@ -1262,7 +1272,6 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       slot.session = null;
       slot.key = '';
       slot.last = emptyLast();
-      slot.appear = -1;
     }
 
     #attach(slot: Slot, key: string, material: () => VireGlassMaterial, box: MorphBox): void {
@@ -1298,24 +1307,35 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         });
     }
 
-    /** Hands the lens only what changed: a new morph or material rebuilds its filter, a moved box needs nothing. */
-    #push(slot: Slot, box: MorphBox, materialKey: string, material: () => VireGlassMaterial, lens: GlassMorph | null | undefined): void {
+    /** Hands the lens only what changed: a new morph or material rebuilds its filter, a moved box needs nothing. While the element moves the lens is in interim. */
+    #push(
+      slot: Slot,
+      box: MorphBox,
+      materialKey: string,
+      material: () => VireGlassMaterial,
+      lens: GlassMorph | null | undefined,
+      moving: boolean,
+    ): void {
       const session = slot.session;
       if (!session) return;
-      const geometry = { width: round(box.width), height: round(box.height), cornerRadius: round(box.radius) };
-      const key = {
-        material: materialKey,
-        morph: (lens === undefined ? '-' : (lens ?? 'none')) as MorphKey,
-        geometry: `${geometry.width}x${geometry.height}r${geometry.cornerRadius}`,
-      };
-      const last = slot.last;
-      if (key.material === last.material && sameMorph(key.morph, last.morph) && key.geometry === last.geometry) return;
-      const next: Parameters<GlassSession['frame']>[0] = {};
-      if (key.geometry !== last.geometry) next.geometry = geometry;
-      if (key.material !== last.material) next.material = material();
-      if (lens !== undefined && !sameMorph(key.morph, last.morph)) next.morph = lens;
-      slot.last = key;
-      session.frame(next);
+      moveGlass(session, moving, () => {
+        const geometry = { width: round(box.width), height: round(box.height), cornerRadius: round(box.radius) };
+        // A morph that was never sent needs no null to take it away.
+        if (lens === null && slot.last.morph === '-') lens = undefined;
+        const key = {
+          material: materialKey,
+          morph: (lens === undefined ? '-' : (lens ?? 'none')) as MorphKey,
+          geometry: `${geometry.width}x${geometry.height}r${geometry.cornerRadius}`,
+        };
+        const last = slot.last;
+        if (key.material === last.material && sameMorph(key.morph, last.morph) && key.geometry === last.geometry) return;
+        const next: Parameters<GlassSession['frame']>[0] = {};
+        if (key.geometry !== last.geometry) next.geometry = geometry;
+        if (key.material !== last.material) next.material = material();
+        if (lens !== undefined && !sameMorph(key.morph, last.morph)) next.morph = lens;
+        slot.last = key;
+        session.frame(next);
+      });
     }
 
     // ---- modes --------------------------------------------------------------------------------------------------
@@ -1349,13 +1369,25 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       if (this.#ctx) this.#run();
     }
 
-    /** Attaches the body's and the accessory's glass once the first form is known; the lens waits for its first move. */
+    /** Attaches the glass of every surface once the first form is known; the lens waits, parked where the pill rests, so a morph or a drag finds it ready. */
     #ensureGlass(): void {
-      const layout = this.#plan?.layout;
-      if (!layout) return;
+      const plan = this.#plan;
+      const layout = plan?.layout;
+      if (!plan || !layout) return;
       const key = this.#presentation?.glass && this.#mode ? this.#modeKey : '';
       if (this.#body) this.#attach(this.#body, key, () => this.#bodyMaterial(false), layout.body);
       if (this.#accSlot && layout.accessory) this.#attach(this.#accSlot, key, () => this.#bodyMaterial(false), layout.accessory);
+      const lens = this.#lensSlot;
+      if (lens && key && lens.key !== key) {
+        const park = layout.pill ?? layout.items[plan.selected] ?? layout.body;
+        const s = this.#lens!.style;
+        s.setProperty('--vk-x', px(park.x));
+        s.setProperty('--vk-y', px(park.y));
+        s.setProperty('--vk-w', px(park.width));
+        s.setProperty('--vk-h', px(park.height));
+        s.setProperty('--vk-r', px(park.radius));
+        this.#attach(lens, key, () => this.#lensMaterial(0), park);
+      }
     }
 
     // ---- the drag -----------------------------------------------------------------------------------------------

@@ -112,8 +112,8 @@ ${LINKS},${NAV}>nav>a{position:absolute;left:calc(var(--vk-lx,0px) - var(--vk-x,
 ${LINKS}::before{content:'';position:absolute;inset:calc(var(--vk-slop-y,0)*-1px) calc(var(--vk-slop-x,0)*-1px)}
 ${LINKS}>svg{width:var(--vk-nav-icon);height:var(--vk-nav-icon);flex:none}
 ${LINKS}:focus-visible,${NAV}>nav>button:focus-visible{outline:2px solid currentColor;outline-offset:-2px}
-${LINKS}[data-lens-over]{background:color-mix(in srgb,currentColor 12%,transparent)}
-@media (hover:hover){${LINKS}:hover{background:color-mix(in srgb,currentColor 7%,transparent)}}
+${LINKS}[data-lens-under]{opacity:calc(1 - var(--vk-under,1))}
+@media (hover:hover){${LINKS}:hover{background:color-mix(in srgb,currentColor 5%,transparent)}}
 ${NAV}[data-form=sidebar]>nav a{flex-direction:row;justify-content:flex-start;gap:12px;padding-inline:12px;font-size:15px;line-height:20px}
 ${NAV}[data-form=sidebar]>nav>a[data-search]{background:color-mix(in srgb,currentColor 4%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 18%,transparent)}
 ${NAV}[data-contrast][data-form=sidebar]>nav>a[data-search]{box-shadow:inset 0 0 0 1px currentColor}
@@ -135,16 +135,17 @@ ${NAV}>nav>button[data-vk-toggle]>svg{width:22px;height:22px}
 @media (hover:hover){${NAV}>nav>button[data-vk-toggle]:hover{background:color-mix(in srgb,currentColor 8%,transparent)}}
 ${NAV}[data-moving]>nav>:is(ul,a,button){opacity:var(--vk-ink);filter:blur(calc((1 - var(--vk-ink))*6px))}
 ${NAV}[data-moving]>[data-accessory][data-moving]>*{opacity:var(--vk-ink);filter:blur(calc((1 - var(--vk-ink))*6px))}
-${NAV}>[data-vk-lens]{position:absolute;left:var(--vk-x,0px);top:var(--vk-y,0px);width:var(--vk-w,0px);height:var(--vk-h,0px);box-sizing:border-box;
- border-radius:var(--vk-r,0px);display:none;align-items:center;justify-content:center;overflow:clip;pointer-events:none;color:inherit;
+/* Parked as a clipped speck rather than hidden: a lens that is drawn once is not drawn for the first time on the first frame of a morph. */
+${NAV}>[data-vk-lens]{position:absolute;left:var(--vk-x,0px);top:var(--vk-y,0px);width:2px;height:2px;clip-path:inset(50%);box-sizing:border-box;
+ border-radius:var(--vk-r,0px);display:flex;align-items:center;justify-content:center;overflow:clip;pointer-events:none;color:inherit;
  font-size:11px;line-height:12px;font-weight:500;white-space:nowrap}
-${NAV}[data-lens]>[data-vk-lens]{display:flex}
+${NAV}[data-lens]>[data-vk-lens]{width:var(--vk-w,0px);height:var(--vk-h,0px);clip-path:none;opacity:var(--vk-lift,0)}
 ${NAV}>[data-vk-lens]>div{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
- transform:scale(calc(1 + .15*var(--vk-lift,0)));opacity:var(--vk-lift,0)}
+ transform:scale(calc(1 + .15*var(--vk-lift,0)))}
 ${NAV}>[data-vk-lens]>div>svg{width:var(--vk-nav-icon);height:var(--vk-nav-icon);flex:none}
 ${NAV}>[data-vk-lens][data-form=sidebar]{justify-content:flex-start}
 ${NAV}>[data-vk-lens][data-form=sidebar]>div{flex-direction:row;gap:12px;font-size:15px;line-height:20px;padding-inline-start:calc(12px + ${NAV_SIZES.lens.inflate}px*var(--vk-lift,0))}
-${NAV}>[data-vk-lens][data-dragging]>div{opacity:0}
+${NAV}>[data-vk-lens][data-dragging]>div{color:var(--vire-nav-accent,oklch(.62 .19 255))}
 ${NAV}[data-minimized]>[data-vk-lens]>div,${NAV}[data-form=bar][data-minimized]>[data-vk-lens]>div{font-size:0}
 ${NAV}>[data-vk-scrim]{position:absolute;inset:0;pointer-events:auto;background:color-mix(in srgb,CanvasText 28%,transparent)}
 

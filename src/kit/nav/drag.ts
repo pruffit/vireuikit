@@ -20,6 +20,8 @@ const MAX_STRETCH = 0.25;
 const SATURATION_SPEED = 1500;
 const STRETCH_TAU = 0.05;
 const OVERHANG = 4;
+// Half the widest glyph an item draws, badge and label included; what the lens covers is measured against it.
+const GLYPH_HALF = 26;
 const LAND = { response: 0.2, damping: 0.8 } as const;
 const LIFT = { response: 0.2, damping: 1 } as const;
 
@@ -142,4 +144,14 @@ export function navDragFrame(state: NavDragState, layout: NavLayout): { lens: Mo
     lift,
     hover: indexAt(layout, state.x.x),
   };
+}
+
+/** The items whose glyph lies under the lens: none is drawn there, so the lens's bevel never refracts a real glyph. */
+export function itemsUnderLens(layout: NavLayout, lens: MorphBox): number[] {
+  const under: number[] = [];
+  layout.items.forEach((item, i) => {
+    const centre = item.x + item.width / 2;
+    if (lens.x < centre + GLYPH_HALF && lens.x + lens.width > centre - GLYPH_HALF) under.push(i);
+  });
+  return under;
 }

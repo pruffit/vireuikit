@@ -11,6 +11,9 @@ declare global {
       nav?: { frame: HTMLElement; resize(width: number, height: number): void; scrollOnDocument(): void };
       sheet?: import('./sheet').SheetSandboxHandle;
       toolbar?: import('./toolbar').ToolbarSandboxHandle;
+      /** The core's counters of the work its lenses do: probes, bakes and filter swaps. */
+      renderStats(): import('vireglass/dom').RenderStats;
+      resetRenderStats(): void;
     };
   }
 }

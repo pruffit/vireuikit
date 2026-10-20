@@ -25,7 +25,7 @@ import { CONTROL_SIZES, menuSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { effectiveInput, viewportSegments, watchPointerInput, watchViewport } from './environment';
 import { deepActive, dropEmptyStyle, rootsOf, type Root } from './dom';
-import { attachControlGlass, type GlassFrame, type GlassSession } from './glass';
+import { attachControlGlass, glassMorph, landGlass, moveGlass, type GlassFrame, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
@@ -546,8 +546,9 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       if (!wasOut) this.#natural = null;
       this.#place();
       if (wasOut) return;
-      this.#liveCarrier()?.setCarried?.(1);
+      // Read while the trigger still has its glass, which the probe sees through.
       this.#holdSample();
+      this.#liveCarrier()?.setCarried?.(1);
     }
 
     #triggerBox(): RoundedRect {
@@ -643,6 +644,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         return;
       }
       const list = this.#list!;
+      if (this.#glass) landGlass(this.#glass);
       // The list's own toggle event fires here, once the growth has run back; aria-expanded turned false as it began.
       if (list.matches(':popover-open')) list.hidePopover();
       clearTimeout(this.#inertTimer);
@@ -709,42 +711,33 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       s.setProperty('--vk-body-white', body.white.toFixed(3));
       s.setProperty('--vk-body-lift', body.lift.toFixed(3));
       this.#liveCarrier()?.setCarried?.(f.ink.outgoing);
-      this.#pushGlass(f.box, f.morph, f.activity);
+      this.#pushGlass(f.box, f.morph, f.activity, !settled && this.#forced() === null);
     }
 
     /** Hands the lens only what changed: a new morph or material rebuilds its filter, a moved box needs nothing. */
-    #pushGlass(box: RoundedRect, morph: VireGlassMorph | undefined, activity: number): void {
+    #pushGlass(box: RoundedRect, morph: VireGlassMorph | undefined, activity: number, moving: boolean): void {
       const glass = this.#glass;
       if (!glass) return;
       // Whole pixels, so a repeated open finds its displacement maps in the core's cache.
       const round = Math.round;
       const step = round(Math.min(Math.max(activity, 0), 1) * MATERIAL_STEPS) / MATERIAL_STEPS;
       const geometry = { width: round(box.width), height: round(box.height), cornerRadius: round(box.radius) };
-      const lens: GlassMorph | null = morph
-        ? {
-            smoothing: round(morph.smoothing),
-            shape: {
-              offsetX: round(morph.offsetX),
-              offsetY: round(morph.offsetY),
-              width: round(morph.width),
-              height: round(morph.height),
-              cornerRadius: round(morph.cornerRadius),
-            },
-          }
-        : null;
+      const lens = glassMorph(morph, moving);
       const key = {
         material: String(step),
         morph: lens ? JSON.stringify(lens) : 'none',
         geometry: `${geometry.width}x${geometry.height}r${geometry.cornerRadius}`,
       };
-      const last = this.#lastLens;
-      if (key.material === last.material && key.morph === last.morph && key.geometry === last.geometry) return;
-      const next: GlassFrame = {};
-      if (key.geometry !== last.geometry) next.geometry = geometry;
-      if (key.material !== last.material) next.material = menuMaterial(VIREGLASS_CONTROL_MATERIAL, step);
-      if (key.morph !== last.morph) next.morph = lens;
-      this.#lastLens = key;
-      glass.frame(next);
+      moveGlass(glass, moving, () => {
+        const last = this.#lastLens;
+        if (key.material === last.material && key.morph === last.morph && key.geometry === last.geometry) return;
+        const next: GlassFrame = {};
+        if (key.geometry !== last.geometry) next.geometry = geometry;
+        if (key.material !== last.material) next.material = menuMaterial(VIREGLASS_CONTROL_MATERIAL, step);
+        if (key.morph !== last.morph) next.morph = lens;
+        this.#lastLens = key;
+        glass.frame(next);
+      });
     }
 
     #forced(): string | null {

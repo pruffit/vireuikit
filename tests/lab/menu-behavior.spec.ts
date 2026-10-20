@@ -693,7 +693,7 @@ test.describe('one body', () => {
     await expect(page.locator('#more')).toHaveAttribute('data-phase', 'open');
     await expect(host).toHaveAttribute('data-carried', '');
     expect(await background()).toBe('rgba(0, 0, 0, 0)');
-    expect(await lensBlur()).toBe(0);
+    expect(await lensBlur()).toBeNaN();
     expect(await button.evaluate((el) => getComputedStyle(el, '::after').visibility)).toBe('hidden');
     expect(await host.evaluate((el) => Number(getComputedStyle(el).getPropertyValue('--vk-carry')))).toBe(0);
     await page.keyboard.press('Escape');
@@ -745,7 +745,7 @@ export function attachGlass(el, opts) {
     update() { note(undefined); },
     setMorph(m) { note(m); },
     setAppear(t) { rec.appear = t; },
-    setSample() {}, setAccent() {}, setNeighbourGlow() {},
+    setSample() {}, setInterim() {}, setAccent() {}, setNeighbourGlow() {},
     destroy() {},
   };
 }`;
@@ -810,6 +810,9 @@ test.describe('the core\'s morph', () => {
 test.describe('the ink', () => {
   test('the ink holds while the menu is out, and the backdrop is read again on the next open', async ({ page }) => {
     await openCase(page, 'view=menu&backdrop=light');
+    // The page behind the stage is the backdrop too, wherever the menu reaches past the stage.
+    const page_ = (color: string) => page.addStyleTag({ content: `html,body{background:${color}!important}` });
+    await page_('#f2f2f4');
     const ink = () => page.locator('#more-list').evaluate((el) => el.style.getPropertyValue('--vireglass-ink'));
     await page.locator('#more-trigger').click();
     await expect(page.locator('#more')).toHaveAttribute('data-phase', 'open');
@@ -818,6 +821,7 @@ test.describe('the ink', () => {
       document.getElementById('stage')!.setAttribute('data-backdrop', 'dark');
       window.dispatchEvent(new Event('resize'));
     });
+    await page_('#15161a');
     await page.waitForTimeout(100);
     expect(await ink()).toBe('0');
     await page.keyboard.press('Escape');

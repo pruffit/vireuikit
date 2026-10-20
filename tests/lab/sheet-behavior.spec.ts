@@ -1644,9 +1644,9 @@ export function attachGlass(el, opts) {
   return {
     update() { note(undefined); },
     setMorph(m) { note(m); },
-    setAppear(t) { ${appear ? 'rec.appear = t;' : ''} },
-    setSample() {}, setAccent() {}, setNeighbourGlow() {},
-    destroy() { rec.alive = false; },
+    setAppear(t) { rec.appear = t; },
+    setSample() {}, setInterim() {}, setAccent() {}, setNeighbourGlow() {},
+    destroy() { ${appear ? 'rec.alive = false;' : ''} },
   };
 }`;
 const stubGlass = (page: Page, appear = true) =>
@@ -1697,7 +1697,7 @@ test.describe('one glass surface per open surface', () => {
     await resting(page, 'dlg');
     await expect.poll(() => alive('dlg-surface')).toBe(0);
     expect(await lenses(page, 'dlg')).toEqual([]);
-    expect(await alive('dlg-trigger')).toBe(1);
+    expect(await alive('dlg-trigger')).toBe(0);
   });
 
   test('the lens is handed the box of the surface on every size', async ({ page }) => {
@@ -1714,7 +1714,7 @@ test.describe('one glass surface per open surface', () => {
     expect(last.cornerRadius).toBe(28);
   });
 
-  test('canary: a trigger that keeps its lens while the surface is out fails the count', async ({ page }) => {
+  test('canary: a trigger that cannot let go of its lens while the surface is out fails the count', async ({ page }) => {
     await stubGlass(page, false);
     await sandbox(page, 'rm=1&glass=1', { w: 700, h: 720 });
     await page.locator('#pop-trigger').click();

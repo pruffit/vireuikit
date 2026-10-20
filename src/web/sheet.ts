@@ -47,7 +47,7 @@ import {
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { deepActive, dropEmptyStyle, rootsOf } from './dom';
 import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, isEditable, shellOf, watchAdaptiveContext, windowRect } from './environment';
-import { attachControlGlass, ensureGlass, glassLoaded, probeRect, type GlassFrame, type GlassSession } from './glass';
+import { attachControlGlass, ensureGlass, glassLoaded, glassMorph, landGlass, moveGlass, probeRect, type GlassFrame, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
@@ -835,6 +835,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
 
     #settle(): void {
       const surface = this.#surface!;
+      if (this.#glass) landGlass(this.#glass);
       const back = this.#focusTarget();
       this.#hiding = true;
       try {
@@ -1283,40 +1284,31 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       s.setProperty('--vk-pad-t', px(this.#grabber && !this.#grabber.hidden ? SHEET_SIZES.content.handle : SHEET_SIZES.content.pad));
       this.#syncTouch();
       this.#setCarried(this.#source || this.#anchorEl ? c.carry : null);
-      this.#pushGlass(box, c.morph, c.activity);
+      this.#pushGlass(box, c.morph, c.activity, !this.#forced() && (c.phase !== 'open' || this.#drag.active || height !== null));
     }
 
-    #pushGlass(box: MorphBox, morph: VireGlassMorph | undefined, activity: number): void {
+    #pushGlass(box: MorphBox, morph: VireGlassMorph | undefined, activity: number, moving: boolean): void {
       const glass = this.#glass;
       if (!glass) return;
       const round = Math.round;
       const step = round(clamp01(activity) * MATERIAL_STEPS) / MATERIAL_STEPS;
       const geometry = { width: round(box.width), height: round(box.height), cornerRadius: round(box.radius) };
-      const lens: GlassMorph | null = morph
-        ? {
-            smoothing: round(morph.smoothing),
-            shape: {
-              offsetX: round(morph.offsetX),
-              offsetY: round(morph.offsetY),
-              width: round(morph.width),
-              height: round(morph.height),
-              cornerRadius: round(morph.cornerRadius),
-            },
-          }
-        : null;
+      const lens = glassMorph(morph, moving);
       const key = {
         material: String(step),
         morph: lens ? JSON.stringify(lens) : 'none',
         geometry: `${geometry.width}x${geometry.height}r${geometry.cornerRadius}`,
       };
-      const last = this.#lastLens;
-      if (key.material === last.material && key.morph === last.morph && key.geometry === last.geometry) return;
-      const next: GlassFrame = {};
-      if (key.geometry !== last.geometry) next.geometry = geometry;
-      if (key.material !== last.material) next.material = menuMaterial(VIREGLASS_CONTROL_MATERIAL, step);
-      if (key.morph !== last.morph) next.morph = lens;
-      this.#lastLens = key;
-      glass.frame(next);
+      moveGlass(glass, moving, () => {
+        const last = this.#lastLens;
+        if (key.material === last.material && key.morph === last.morph && key.geometry === last.geometry) return;
+        const next: GlassFrame = {};
+        if (key.geometry !== last.geometry) next.geometry = geometry;
+        if (key.material !== last.material) next.material = menuMaterial(VIREGLASS_CONTROL_MATERIAL, step);
+        if (key.morph !== last.morph) next.morph = lens;
+        this.#lastLens = key;
+        glass.frame(next);
+      });
     }
 
     #backdrop(): BackdropSample | null {

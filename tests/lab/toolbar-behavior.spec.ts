@@ -484,7 +484,7 @@ export function attachGlass(el, opts) {
     update() { note(undefined); },
     setMorph(m) { note(m); },
     setAppear(t) { rec.appear = t; rec.appears.push(t); },
-    setSample(s) { rec.sample = s; }, setAccent() {}, setNeighbourGlow() {},
+    setSample(s) { rec.sample = s; }, setInterim() {}, setAccent() {}, setNeighbourGlow() {},
     destroy() { rec.alive = false; },
   };
 }`;
@@ -546,7 +546,8 @@ test.describe('the glass', () => {
     expect(flips).toHaveLength(1);
     const appears = (s: Sample) => s.lenses.filter((a): a is number => a !== undefined);
     const at = samples[flips[0]!]!;
-    expect(Math.max(...appears(at))).toBeLessThan(0.15);
+    // Two lenses a frame take a new presence on the way (a map is rebuilt for each), so the rest lag the swap by a few frames.
+    expect(Math.min(...appears(at))).toBeLessThan(0.15);
     const before = samples.slice(0, flips[0]).map((s) => Math.min(...appears(s)));
     expect(before.some((v) => v < 0.5 && v > 0.02)).toBe(true);
     const after = samples.slice(flips[0]).map((s) => Math.min(...appears(s)));

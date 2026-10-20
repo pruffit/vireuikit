@@ -117,9 +117,9 @@ export function createControlElementClass(
       this.toggleAttribute('data-carried', this.#carried !== null);
       if (this.#carried === null) this.style.removeProperty('--vk-carry');
       else this.style.setProperty('--vk-carry', this.#carried.toFixed(3));
-      // The lens materialises out rather than being removed, so taking the body back is one synchronous repaint;
-      // a lens that appears only under the finger goes back to absent.
-      if (handedOver) this.#glass?.setAppear(this.#carried === null && this.#glassMode() !== 'touch' ? 1 : 0);
+      // No lens at all while the surface grown from this control is out; a new one comes with the body. Held in interim
+      // instead, it would end itself after two seconds and bake mid-use.
+      if (handedOver && this.#mode) this.#reattachGlass(this.#mode);
     }
 
     connectedCallback(): void {
@@ -431,7 +431,7 @@ export function createControlElementClass(
 
     #reattachGlass(mode: A11yMode): void {
       const control = this.#control;
-      const want = this.#presentation?.glass === true && control !== null;
+      const want = this.#presentation?.glass === true && control !== null && this.#carried === null;
       const key = want ? `${this.#glassMode()}|${JSON.stringify(mode)}|${this.#size()}` : '';
       if (key === this.#glassKey) return;
       this.#dropGlass();

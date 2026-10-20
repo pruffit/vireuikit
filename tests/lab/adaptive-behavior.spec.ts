@@ -535,7 +535,7 @@ export function attachGlass(el, opts) {
   return {
     update() { rec.updates += 1; },
     setMorph() { rec.updates += 1; },
-    setAppear() {}, setSample() {}, setAccent() {}, setNeighbourGlow() {},
+    setAppear() {}, setSample() {}, setInterim() {}, setAccent() {}, setNeighbourGlow() {},
     destroy() { rec.alive = false; },
   };
 }`;
