@@ -707,6 +707,52 @@ test.describe('dragging on the bar', () => {
     expect(await lensNow(page)).toBeNull();
   });
 
+  test('with glass the lens materialises by its own presence: the element never fades, and the presence follows the lift', async ({ page }) => {
+    await openNav(page, 'glass=1&accessory=0&backdrop=photo', 430, 720);
+    const home = await linkBox(page, 'Home');
+    await page.evaluate(() => {
+      type Lens = { el: HTMLElement; appear: number | undefined };
+      const host = document.querySelector('vire-nav') as HTMLElement;
+      const lens = host.querySelector(':scope > [data-vk-lens]') as HTMLElement;
+      const frames: { lift: number; opacity: number; appear: number | undefined }[] = [];
+      const loop = () => {
+        if (host.hasAttribute('data-lens')) {
+          const rec = ((window as unknown as { __labGlass: Lens[] }).__labGlass).find((l) => l.el === lens && l.appear !== undefined);
+          frames.push({ lift: parseFloat(lens.style.getPropertyValue('--vk-lift')), opacity: Number(getComputedStyle(lens).opacity), appear: rec?.appear });
+        }
+        requestAnimationFrame(loop);
+      };
+      (window as unknown as { __frames: typeof frames }).__frames = frames;
+      requestAnimationFrame(loop);
+    });
+    await page.mouse.move(home.cx + 4, home.cy);
+    await page.mouse.down();
+    await page.mouse.move(home.cx + 20, home.cy);
+    await page.waitForTimeout(500);
+    await page.mouse.up();
+    await settle(page);
+    const frames = await page.evaluate(() => (window as unknown as { __frames: { lift: number; opacity: number; appear: number | undefined }[] }).__frames);
+    expect(frames.length).toBeGreaterThan(10);
+    expect(frames.every((f) => f.opacity === 1)).toBe(true);
+    expect(frames.some((f) => f.lift > 0.05 && f.lift < 0.95)).toBe(true);
+    for (const f of frames) expect(Math.abs((f.appear ?? NaN) - f.lift)).toBeLessThanOrEqual(0.011);
+  });
+
+  test('without glass the lens still fades by its element: there is no lens to carry the presence', async ({ page }) => {
+    await openNav(page, 'glass=0&accessory=0', 430, 720);
+    const home = await linkBox(page, 'Home');
+    await page.mouse.move(home.cx + 4, home.cy);
+    await page.mouse.down();
+    await page.mouse.move(home.cx + 20, home.cy);
+    const seen = new Set<number>();
+    for (let i = 0; i < 12; i += 1) {
+      seen.add(await page.evaluate(() => Number(getComputedStyle(document.querySelector('vire-nav > [data-vk-lens]')!).opacity)));
+      await nextFrame(page);
+    }
+    await page.mouse.up();
+    expect(Math.min(...seen)).toBeLessThan(1);
+  });
+
   test('a lens that jumps from item to item fails it', async ({ page }) => {
     await openNav(page, 'glass=0&accessory=0', 430, 720);
     const frame = (await page.locator('#frame').boundingBox())!;

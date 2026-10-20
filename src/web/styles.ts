@@ -140,6 +140,8 @@ ${NAV}>[data-vk-lens]{position:absolute;left:var(--vk-x,0px);top:var(--vk-y,0px)
  border-radius:var(--vk-r,0px);display:flex;align-items:center;justify-content:center;overflow:clip;pointer-events:none;color:inherit;
  font-size:11px;line-height:12px;font-weight:500;white-space:nowrap}
 ${NAV}[data-lens]>[data-vk-lens]{width:var(--vk-w,0px);height:var(--vk-h,0px);clip-path:none;opacity:var(--vk-lift,0)}
+${NAV}[data-glass=on][data-lens]>[data-vk-lens]{opacity:1}
+${NAV}[data-glass=on]>[data-vk-lens]>div{opacity:var(--vk-lift,0)}
 ${NAV}>[data-vk-lens]>div{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
  transform:scale(calc(1 + .15*var(--vk-lift,0)))}
 ${NAV}>[data-vk-lens]>div>svg{width:var(--vk-nav-icon);height:var(--vk-nav-icon);flex:none}

@@ -79,6 +79,8 @@ type Slot = {
   token: number;
   key: string;
   last: { material: string; morph: MorphKey; geometry: string };
+  /** The presence last handed to the lens, for a slot whose presence moves. */
+  appear?: number;
 };
 
 type MorphKey = GlassMorph | 'none' | '-' | '';
@@ -1204,10 +1206,11 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         const step = round(clamp01(lens.lift) * MATERIAL_STEPS) / MATERIAL_STEPS;
         if (slot.session) {
           const body = atomBody(VIREGLASS_CONTROL_MATERIAL, { ...ATOM_AT_REST, pressed: step }, this.#presentation.frost);
-          s.setProperty('--vk-body-alpha', body.alpha.toFixed(3));
+          const lift = clamp01(lens.lift);
+          s.setProperty('--vk-body-alpha', (body.alpha * lift).toFixed(3));
           s.setProperty('--vk-body-white', body.white.toFixed(3));
           s.setProperty('--vk-body-lift', body.lift.toFixed(3));
-          this.#push(slot, lens.box, String(step), () => this.#lensMaterial(step), undefined, moving);
+          this.#push(slot, lens.box, String(step), () => this.#lensMaterial(step), undefined, moving, round(lift * 100) / 100);
         }
       }
     }
@@ -1273,6 +1276,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       slot.session = null;
       slot.key = '';
       slot.last = emptyLast();
+      slot.appear = undefined;
     }
 
     #attach(slot: Slot, key: string, material: () => VireGlassMaterial, box: MorphBox): void {
@@ -1297,6 +1301,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
           if (!session) return;
           slot.session = session;
           slot.last = emptyLast();
+          slot.appear = undefined;
           this.#paint();
           if (slot === this.#body) this.dispatchEvent(new CustomEvent('vire-glass-ready'));
         })
@@ -1316,10 +1321,15 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       material: () => VireGlassMaterial,
       lens: GlassMorph | null | undefined,
       moving: boolean,
+      appear?: number,
     ): void {
       const session = slot.session;
       if (!session) return;
       moveGlass(session, moving, () => {
+        if (appear !== undefined && appear !== slot.appear) {
+          slot.appear = appear;
+          session.setAppear(appear);
+        }
         const geometry = { width: round(box.width), height: round(box.height), cornerRadius: round(box.radius) };
         // A morph that was never sent needs no null to take it away.
         if (lens === null && slot.last.morph === '-') lens = undefined;
