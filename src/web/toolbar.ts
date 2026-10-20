@@ -36,6 +36,7 @@ import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { dropEmptyStyle, deepActive } from './dom';
 import { effectiveInput, shellOf, watchAdaptiveContext, watchPointerInput } from './environment';
 import { attachControlGlassNow, ensureGlass, glassLoaded, moveGlass, probeRect, type GlassSession } from './glass';
+import { createScrollEdge, type ScrollEdge } from './scroll-edge';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
@@ -105,6 +106,8 @@ type Capsule = {
 export interface VireToolbarElement extends HTMLElement {
   a11y: A11yOverride;
   sample: BackdropSample | null;
+  /** The element the toolbar floats over; the `scroller` attribute names it by id instead. */
+  scroller: Element | null;
 }
 
 export type ToolbarElementOptions = { nonce?: string | undefined };
@@ -140,7 +143,7 @@ let ids = 0;
 
 export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
   return class VireToolbar extends HTMLElement implements VireToolbarElement {
-    static observedAttributes = ['placement', 'more-label', 'glass', FORCE_ATTRIBUTE];
+    static observedAttributes = ['placement', 'more-label', 'glass', 'scroller', 'scroll-edge', FORCE_ATTRIBUTE];
 
     #upgraded = false;
     #cleanups: (() => void)[] = [];
@@ -152,6 +155,8 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
     #presentation: Presentation | null = null;
     #glassBroken = false;
     #sample: BackdropSample | null = null;
+    #scrollerProp: Element | null = null;
+    #edge: ScrollEdge | null = null;
     #probed: BackdropSample | null = null;
     #ctx: AdaptiveContext | null = null;
 
@@ -207,8 +212,17 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       if (this.#upgraded) this.#publishInk();
     }
 
+    get scroller(): Element | null {
+      return this.#scrollerProp;
+    }
+
+    set scroller(next: Element | null) {
+      this.#scrollerProp = next;
+      this.#syncEdge();
+    }
+
     connectedCallback(): void {
-      for (const key of ['a11y', 'sample']) {
+      for (const key of ['a11y', 'sample', 'scroller']) {
         if (!Object.prototype.hasOwnProperty.call(this, key)) continue;
         const value: unknown = Reflect.get(this, key);
         Reflect.deleteProperty(this, key);
@@ -231,6 +245,8 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
         capsule.el.remove();
       }
       this.#capsules.clear();
+      this.#edge?.destroy();
+      this.#edge = null;
       const more = this.#more;
       if (more) {
         more.menu.remove();
@@ -278,6 +294,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       }
       if (!this.#upgraded) return;
       if (name === 'glass') this.#refreshMode(true);
+      else if (name === 'scroller' || name === 'scroll-edge') this.#syncEdge();
       else if (name === 'more-label') this.#syncMoreLabel();
       else this.#relayout();
     }
@@ -308,6 +325,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
     #upgrade(): void {
       this.#upgraded = true;
       this.setAttribute('data-vk', '');
+      this.#edge = createScrollEdge(this, 'band', (el) => this.prepend(el));
       this.#keep(this, 'role', 'toolbar');
       this.#cleanups.push(watchSystemA11y(() => this.#refreshMode()));
       this.#cleanups.push(watchA11yOverride(() => this.#refreshMode()));
@@ -624,6 +642,37 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       this.setAttribute('data-orientation', next.orientation);
       this.setAttribute('aria-orientation', next.orientation);
       this.#probed = null;
+      this.#syncEdge();
+    }
+
+    /** The toolbar floats over its scroller's top or bottom edge, so the content that slides under it dissolves before the glass sees it. */
+    #syncEdge(): void {
+      const edge = this.#edge;
+      if (!edge) return;
+      const mode = this.getAttribute('scroll-edge');
+      const side = this.#placement?.edge === 'top' ? 'top' : this.#placement?.edge === 'bottom' ? 'bottom' : null;
+      const scroller = this.#presentation?.glass && side && mode !== 'off' ? this.#lookupScroller() : null;
+      edge.set(
+        scroller && side
+          ? {
+              scroller,
+              side,
+              bar: this,
+              hard: mode === 'hard',
+              ink: () => {
+                const ink = this.style.getPropertyValue('--vireglass-ink');
+                return ink === '' ? 0 : Number(ink);
+              },
+            }
+          : null,
+      );
+    }
+
+    #lookupScroller(): Element | null {
+      if (this.#scrollerProp?.isConnected) return this.#scrollerProp;
+      const id = this.getAttribute('scroller');
+      const root = this.getRootNode() as Document | ShadowRoot;
+      return id && 'getElementById' in root ? root.getElementById(id) : null;
     }
 
     #vertical(): boolean {
@@ -657,6 +706,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
 
     #relayout(): void {
       if (!this.#upgraded || !this.#ctx) return;
+      this.#syncEdge();
       const wanted = this.#wantedPlacement();
       if (!wanted) return;
       if (!this.#placement) {
@@ -977,7 +1027,8 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
         el.setAttribute('data-vk-capsule', '');
         el.setAttribute('aria-hidden', 'true');
         el.inert = true;
-        this.prepend(el);
+        if (this.#edge) this.#edge.after(el);
+        else this.prepend(el);
         capsule = { el, session: null, last: '', appear: -1, clip: '', box: '', used: false };
         this.#capsules.set(key, capsule);
       }
@@ -1045,6 +1096,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
           const value = capsule.el.style.getPropertyValue(name);
           if (value) this.style.setProperty(name, value);
         }
+        this.#edge?.update();
         return;
       }
     }
@@ -1156,6 +1208,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       this.toggleAttribute('data-contrast', next.contrastBorder);
       this.toggleAttribute('data-frost', next.frost);
       this.setAttribute('data-glass', next.glass ? 'on' : 'off');
+      this.#syncEdge();
       const body = atomBody(VIREGLASS_CONTROL_MATERIAL, ATOM_AT_REST, next.frost);
       this.style.setProperty('--vk-body-alpha', body.alpha.toFixed(3));
       this.style.setProperty('--vk-body-white', body.white.toFixed(3));
@@ -1305,7 +1358,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
     #isOwn(node: Node): boolean {
       const more = this.#more;
       if (node === more?.menu) return true;
-      if (node instanceof Element && node.hasAttribute('data-vk-capsule')) return true;
+      if (node instanceof Element && (node.hasAttribute('data-vk-capsule') || node.hasAttribute('data-vk-edge'))) return true;
       return more !== null && more.menu.contains(node);
     }
 
