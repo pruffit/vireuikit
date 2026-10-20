@@ -237,9 +237,10 @@ and changes form through the selected destination.
   nearest link once. A tap is a plain click on the link.
 - Attributes: `form` (`bar`, `rail` or `sidebar`: fixes the form), `collapsed` (the sidebar held as a rail; the toggle
   sets and clears it and the host remembers it), `panes` (panes the content shows; two on a medium window take the bar),
-  `minimize="scroll"` with `scroller` (the id of the scrolling element, resolved in the element's root; or set the
+  `scroll-edge` (`off` or `hard`; see below), `minimize="scroll"` with `scroller` (the id of the scrolling element, resolved in the element's root; or set the
   `scroller` property to an element), `search-key` (default `/`), `toggle-label` (the toggle's name, default "Sidebar";
   it never changes, `aria-expanded` says whether the sidebar is shown), `glass` (empty or `present`: glass; otherwise a plain body).
+- Scroll edge: a bar floats over its scroller's bottom edge, so content that slides under it goes out of focus before the glass sees it (the core's `attachScrollEdge`, reference §10). It needs a `scroller` (the id, or the property; `minimize` is not required), glass on and the bar form; the rail and the sidebar have none. The element makes a `[data-vk-edge]` (`aria-hidden`, `pointer-events: none`) as the host's first child, under the body in the stack, over the scroller's visible width and as deep as the bar's own height reaches into it plus the core's reach, and it follows resizes and a change of form. `scroll-edge` sets it: absent is on, `off` turns it off, `hard` is the flat band for pinned content. Over dark glass the dissolve is a light dimming, following the body's ink.
 - Minimising: the bar becomes a circle with the selected icon, and the search a second circle, after 24 dp scrolled
   down in the scroller, and expands after 24 dp up, at the top, on a tap on it and when focus enters it. Giving the
   bar another scroller expands it. The element looks the id up again on each change: a node that left the document, or
@@ -344,7 +345,8 @@ modal sheet is centred from 600 dp, a dialog with fields is full screen below 60
   close gives back what the shell had. From 1600 dp the third pane is opaque and not glass, like full screen.
 - The scrim is 32 % black under a modal surface and under a popover's sheet form. A press on it closes a bottom sheet or
   a popover, never a centred sheet, a dialog, an alert or a `persistent` surface. The background is never scaled or moved.
-- Attributes: `glass` (as on the menu), `kind`, `detents`, `detent`, `persistent`, `grabber-label`, `detent-labels`. Properties: `a11y`,
+- Scroll edge: while its glass is on, the grabber strip at the top of a sheet or popover floats over the content that scrolls under it, and that content goes out of focus toward the top before it is seen (the surface is its own scroller; the edge is a `[data-vk-edge]` that sticks to its top). `scroll-edge` is absent for on, `off`, or `hard`.
+- Attributes: `glass` (as on the menu), `kind`, `detents`, `detent`, `persistent`, `grabber-label`, `detent-labels`, `scroll-edge`. Properties: `a11y`,
   `sample`, `detent`, `open`, `anchor` (the box to grow from and return into instead of the trigger, cleared on close;
   `retractInto(el)` and `follow()` as on the menu). Reduced transparency and increased contrast make every form opaque, with the same geometry
   and no lens; glass off is a plain opaque body with a shadow.
@@ -416,8 +418,9 @@ strip) comes from the window. Every item stays reachable at every width.
 - An open menu, popover or sheet whose trigger goes into "…" runs back into "…" and closes, and focus goes to "…"; one whose
   trigger only merges stays open and follows it. A trigger removed from the toolbar closes its surface, and focus goes to
   the neighbouring item. A focused item that goes into "…" hands focus to it.
+- Scroll edge: the bottom and top toolbars float over a scroller, and content that slides under them goes out of focus before the glass sees it, as on the navigation bar. `scroller` is the id of the scrolling element (resolved in the element's root) or the `scroller` property, as on `<vire-nav>`; with glass on, an edge sits at the scroller's edge the toolbar stands on (none on the trailing strip, and none for a toolbar that stands clear of the scroller). `scroll-edge` is absent for on, `off`, or `hard` for pinned content.
 - Every item keeps a hit area of 44 dp wherever any coarse input is present, whatever its size. Attributes: `placement`,
-  `more-label`, `glass`. Properties: `a11y`, `sample`. It dispatches `vire-glass-ready` and `vire-toolbar-layout`
+  `more-label`, `glass`, `scroller`, `scroll-edge`. Properties: `a11y`, `sample`, `scroller`. It dispatches `vire-glass-ready` and `vire-toolbar-layout`
   (`{ edge, orientation, stage, overflow }`), and reflects `data-stage` (`separate`, `merged` or `overflow`).
 - The lab forces states with `data-vire-force-state`: `stage:<separate|merged|overflow>` (the available extent is the
   stage's, and the group cap is lifted so every stage shows in every place), `morph:<t>` after it (that stage's change frozen

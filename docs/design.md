@@ -61,6 +61,12 @@ attribute, a development aid of the elements that the lab and the snapshots use.
   placed by the model. A readout lists every decision (an open surface's form, phase, detent and what it clears among them), and scenarios sweep the width, fold and unfold, rotate and attach a keyboard, checking the
   person's state on each step. `foldaware=0` hides the fold from the atoms only, for the canary.
 
+- **Legibility scene** (`?view=legibility&lg=<atom>&backdrop=<text|photo|dark>&glass=&scroll=&edge=`). One atom (`nav-bar`, `nav-rail`,
+  `nav-sidebar`, `toolbar-bottom`, `toolbar-top`, `menu`, `popover`, `button`, `icon-button`) in a window frame, floating over a
+  scroller full of body text scrolled `scroll` dp (420), with the bars given `scroller` and `edge` as their `scroll-edge`.
+  `window.__lab.sample` is the backdrop the lab handed the elements and `window.__lab.probe(selector)` what the core's probe
+  reads behind an element.
+
 - **Sheet gallery and sandbox** (`?atom=sheet&form=<form>&detent=&content=&backdrop=&glass=`, `?view=sheet&w=&h=`). The gallery draws
   one open surface in a window frame (`data-vire-shell`) of the size that gives it its form: `popover` (700 wide),
   `popover-sheet`, `bottom-sheet` (390), `side-sheet` (1000), `side-pane` (1700, the third pane), `centered-sheet`,
@@ -74,8 +80,8 @@ attribute, a development aid of the elements that the lab and the snapshots use.
 | Gate | Checks |
 |---|---|
 | `npm test` | the model: states, flow boundaries, sizes, accessibility responses, and the adaptive model's every class boundary and transition |
-| `npm run check:lab` | Playwright behaviour tests on the lab, no screenshots: roles and keyboard, state transitions, events, upgrade while parsing, glass-off degradation, accessibility modes, hit area, the menu's growth sampled frame by frame and what it hands the lens, the resting body and rim measured on the pixels of a render against bounds taken from the reference (`docs/acceptance.md`, "Resting body"), the atoms' three input layers (a fine pointer with touch present through stubbed media queries) and a menu on a real fold (the DevTools display feature), and the adaptive stage (one navigation body through a sweep, morph continuity, state across thresholds, menus in their half), and the navigation element (a change of form sampled frame by frame and what it hands the lens, the drag, minimising, the accessory, the toggle, the shortcut, hit areas and modes), with canaries that must fail. Runs in CI |
-| `npm run check:lab:visual` | the screenshot set: atom × state × backdrop × glass on/off, the navigation's four forms and the lens frozen mid-morph, and the adaptive stage at six presets, against committed baselines in `tests/lab/__screenshots__/<platform>/`. Local only: the baselines are Windows renders and CI does not run it. `npm run check:lab:visual:update` rewrites them |
+| `npm run check:lab` | Playwright behaviour tests on the lab, no screenshots: roles and keyboard, state transitions, events, upgrade while parsing, glass-off degradation, accessibility modes, hit area, the menu's growth sampled frame by frame and what it hands the lens, the resting body and rim measured on the pixels of a render against bounds taken from the reference (`docs/acceptance.md`, "Resting body"), the atoms' three input layers (a fine pointer with touch present through stubbed media queries) and a menu on a real fold (the DevTools display feature), and the adaptive stage (one navigation body through a sweep, morph continuity, state across thresholds, menus in their half), and the navigation element (a change of form sampled frame by frame and what it hands the lens, the drag, minimising, the accessory, the toggle, the shortcut, hit areas and modes), the scroll edge (where it sits, what it is made of, that the lines under a bar are out of focus in a screenshot) and the legibility of every glass atom over body text and a photo, with canaries that must fail. Runs in CI |
+| `npm run check:lab:visual` | the screenshot set: atom × state × backdrop × glass on/off, the navigation's four forms and the lens frozen mid-morph, the scroll edge's dissolve, dimming and flat band, and the adaptive stage at six presets, against committed baselines in `tests/lab/__screenshots__/<platform>/`. Local only: the baselines are Windows renders and CI does not run it. `npm run check:lab:visual:update` rewrites them |
 | existing | `check:english`, `check:package`, `check:readme`, `typecheck` (the model under `src/kit` is also checked with no DOM lib), `build` |
 
 Visual baselines change only on purpose, in the same commit as the code that changes the look.
@@ -436,6 +442,61 @@ the joined body contracts to the item that stays. Glyphs defocus and come back i
 
 Acceptance is the TB criteria in `docs/acceptance.md`.
 
+## Scroll edge and legibility
+
+Content that scrolls under a floating bar fights the bar's own text through the glass. The reference answers it at the
+screen, not in the material (M 8:52–9:41, D 11:32–12:12; `vireglass` `docs/reference.md` §10): what slides under a bar goes
+out of focus toward the edge and dissolves, over dark glass it becomes a light dimming, and pinned content gets a flat
+band. The glass has to see the content already dissolved, so the effect sits behind it in the stack. `attachScrollEdge`
+in the core does the painting; the kit places it.
+
+- **Where.** The navigation in its bar form, the toolbar on its top and bottom edges, and a sheet's top strip over its own
+  content. Not the rail, the sidebar or the trailing strip (§10 is about top and bottom bars), and not with glass off,
+  which draws a solid body. Reduced transparency and increased contrast keep the glass, so they keep the edge.
+- **The element.** `[data-vk-edge]`, made by the atom: `aria-hidden`, `pointer-events: none`. In the navigation and the
+  toolbar it is the host's first child (a toolbar's capsules go in after it), so it paints under the glass in the same
+  stacking context and the glass's backdrop filter samples what the edge has made. In a sheet it is a sticky child after the
+  grabber, at the top of the surface that is the scroller, and takes no room in the content. Nothing between it and the page
+  may be a backdrop root (a filter, an opacity under 1, a mask, a clip-path or a backdrop filter): a backdrop filter sees only
+  up to the nearest ancestor that is one, which is why the gate checks the ancestors in the lab.
+- **Geometry.** `src/web/scroll-edge.ts` lays it over the scroller's visible width, from the scroller's edge to the bar's
+  inner lip (the accessory above a navigation bar counts) plus `scrollEdgeReachDp` of the bar's own height, which the core
+  measured off the reference as 1.9 times the bar. A bar that stands clear of the scroller's box gets `display: none`. It
+  is written when a `ResizeObserver` on the host, the bar and the scroller says so, and when the atom's form, placement,
+  scroller or attributes change; a scroll only runs the core's own listener, which writes style from `scrollTop` and reads
+  no layout (SE7). The document works as a scroller through a stand-in, since its scroll events go to the window.
+- **Ink.** The edge's style follows the glass's own ink, read from the `--vireglass-ink` the lens writes on its element (the
+  toolbar's host, a sheet's `data-ink`): light ink on dark glass takes the dimming, dark ink the dissolve. It is read again
+  when the lens chooses another.
+- **Attribute.** `scroll-edge`: absent is on whenever a scroller is known and glass is on, `off`, or `hard` for pinned content
+  (a flat band). The toolbar takes `scroller` (an id, or the property) with the navigation's meaning; the navigation takes
+  it without `minimize`; a sheet scrolls itself.
+- **The ramp's direction.** The core's ramp runs from full at the start of the band to nothing at its end, written for a band
+  that starts at the bar; laid over the scroller's edge it would be strongest away from the bar. The element is mirrored
+  (`data-flip`) when the written ramp runs that way, which a check of the mask makes at attach, so a core that turns it round
+  loses the mirror by itself. A gate measures it: a ramp that runs the wrong way leaves the lines sharp (SE6).
+- **How well it works.** The text under a navigation bar keeps a fifth of its sharpness through the glass, against the
+  reference's tenth. It is a cross-fade of the blurred and the sharp content, so what shows under the far end of a bar is
+  fainter, not gone.
+
+**Legibility.** `view=legibility&lg=<atom>&backdrop=<text|photo|dark>` draws one atom floating over a scroller full of
+body text, scrolled under it (the navigation bar, rail and sidebar, the toolbar on the bottom and the top, a menu, a
+popover, the buttons). `tests/lab/legibility-behavior.spec.ts` renders each on the text page and the photo with glass on
+and off, and measures what the atom writes against what is behind it (LG1): the text and glyphs are found, their computed
+ink is read, the ink is made transparent, and a screenshot gives what is left behind it, the glass and what shows through. Two
+readings of the contrast of the ink with that: the median (the sheet gate's), and the tenth of it hardest on the ink, which is
+where a line of text showing through the glass lands. Text needs 4.5:1 and glyphs 3:1 on both. A median alone cannot see a
+line of text under a label: the strokes are a small part of the box.
+
+What fails today is listed in the spec as expected failures, each with its cause (LG4), and turns red when it starts to pass:
+the rail over body text (4.0:1 on the text page, 3.1:1 on the photo, with no scroll edge by decision), a floating button over
+body text (4.0 and 3.1), and the plain button and icon button of glass off (1.4 to 2.3 on the text page, 1.8 to 2.0 on the
+photo), which are a 10 % tint of the page's ink with no body. Over these the body is not denser by how busy the backdrop is:
+the lab's sample reports a busy of 0 for the text page (a probe reads declared colours, not the strokes of text) and 0.088 for the
+photo, the kit hands the core `body: false` and paints one constant body (alpha 0.25, white 0.15, lift 0.1), and the
+core's `resolveBody` itself gives the photo no more than the material's own density at that busy (0.026; it asks for 0.23 to
+0.44 at a busy of 0.3). Raising the body by busy is a core decision, not a kit tint, and is not done here.
+
 ## Acceptance of an atom
 
 An atom is done when:
@@ -455,8 +516,8 @@ An atom is done when:
 7. **its mid-motion frames are in the visual set.** The change is frozen at about a quarter, a half and three quarters
    through (`check:lab:visual`), and a drag is held at a few places, not only the resting forms (MO6);
 8. **its text is legible on the glass.** Contrast of the ink to what lies behind it, over a page of text and over a
-   photo, for every glass atom (WCAG 2.2: 4.5:1 for text, 3:1 for glyphs). Not yet gated: the gate comes with #34, and
-   until it lands an atom is looked at on both backdrops by hand;
+   photo, for every glass atom (WCAG 2.2: 4.5:1 for text, 3:1 for glyphs), gated in `legibility-behavior.spec.ts` (LG1);
+   an atom that floats over scrolling content has a scroll edge (SE1);
 9. **it has been looked at, moving, at speed, before a release:** in Chrome or Yandex Browser on a machine with a GPU,
    beside the reference, not in headless and not frozen. What is seen goes into issues (MO7).
 

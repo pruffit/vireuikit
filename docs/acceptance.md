@@ -445,6 +445,31 @@ are in `tests/lab/toolbar-behavior.spec.ts`.
 Side-by-side: the merge at M 4:46–4:53 (15 fps) against the gallery's toolbar narrowing; the strip and its overflow
 menu at B 5:56 and 11:40 against `preset=phone-landscape`.
 
+## Scroll edge and legibility
+
+Content that scrolls under a floating bar goes out of focus toward the edge and dissolves into the background; over dark
+glass it takes a subtle dimming, and pinned content gets a flat band (M 8:52–9:41; D 11:32–12:12, "they don't block or
+darken like overlays"). It is the screen's job, not the material's, so the glass has to see the content already dissolved:
+the effect sits behind it in the stack. The core paints it (`attachScrollEdge`); the kit places it. Behaviour tests are in
+`tests/lab/scroll-edge-behavior.spec.ts` (SE) and `tests/lab/legibility-behavior.spec.ts` (LG).
+
+| # | Criterion | Check |
+|---|---|---|
+| SE1 | The edge is on the navigation in its bar form at its scroller's bottom, on the toolbar at the top or bottom edge it stands on, and on a sheet's top strip over its own content. The rail, the sidebar and the trailing strip have none, nor has a toolbar that stands clear of the scroller's box. The toolbar takes `scroller` as an id or a property, as the navigation does. | behaviour "the bar form puts one edge under the body…", "the toolbar has one at the edge it stands on…", "a toolbar that stands clear…", "the rail and the sidebar have none", "the toolbar takes the scroller as a property…", "a sheet" |
+| SE2 | The edge is made by the atom: `aria-hidden`, `pointer-events: none`, the host's first child (a sheet's: a sticky child after the grabber), so it paints under the glass in the same stacking context, with no backdrop root between it and the page. | behaviour "the bar form puts one edge under the body…" (order, ancestors, a hit test), "a sheet" |
+| SE3 | It lies over the scroller's visible width, from the scroller's edge to the bar's lip (the accessory above a navigation bar included) plus `scrollEdgeReachDp` of the bar's height; it follows a resize, a change of form and placement, and takes no room in a sheet's content. | behaviour (boxes against the scroller, the placement changed, the content's `scrollHeight` with and without it) |
+| SE4 | Its style is the core's, by the glass's ink: light ink (dark glass) dims, dark ink dissolves, `scroll-edge="hard"` is a flat band with no ramp. It is nothing at the top of the scroller and full once the content has slid 24 dp under the bar; the document works as a scroller. | behaviour "light ink dissolves, dark glass gets a dimming…", "a bar at the top of the scroller…", "the page is a scroller too" |
+| SE5 | `scroll-edge` is absent for on, `off` or `hard`, live. With glass off there is none; reduced transparency and increased contrast keep the glass and the edge. | behaviour "the attribute turns it off and back on…", "a sheet" |
+| SE6 | In a screenshot the content under the bar is out of focus, not just styled: with the glass taken away the lines under a navigation bar keep under three tenths of their sharpness measured without the edge, and through the glass, with the ink taken away, under a third (the reference's zone measures a tenth, M 9:12). A ramp that runs the wrong way fails it. | behaviour "the content under the bar is out of focus in the screenshot" (with its canary) |
+| SE7 | A scroll reads no layout: the edge is written from the scroll position alone, and its geometry on a resize or a change. | behaviour "scrolling reads no layout…" (no `getBoundingClientRect` or `getComputedStyle` over twenty scrolls) |
+| SE8 | The dissolve, the dimming and the flat band, the toolbar's two edges, the bar with glass off and a sheet's top strip are in the visual set. | snapshots `scroll-edge-*` (`scroll-edge-visual.spec.ts`) |
+| LG1 | Every glass atom is legible over body text and a photo: the navigation bar, rail and sidebar, the toolbar on the bottom and the top, the menu, the popover, the button and the icon button, each over a scroller of body text scrolled under it, on the text page and the photo, glass on and off. Its text reaches 4.5:1 and its glyphs 3:1 against what is behind them, read from a screenshot taken with the atom's ink made transparent, by the median of what is behind and by the tenth hardest on the ink (a line of text under a label). The ink is the computed colour. | behaviour "every glass atom stays legible over body text and a photo" |
+| LG2 | The gate can fail: with the scroll edge off the navigation bar's text is under 4.5:1 on the text page (3.3) and on the photo (2.6) and the edge lifts it by more than 1.5 (8.7 and 4.8); an ink forced to the page's fails a toolbar's glyphs. | behaviour "the gate can fail" |
+| LG3 | An atom that floats over scrolling content has a scroll edge (SE1); a sheet's text is gated by SH21. | design (`docs/design.md`, "Acceptance of an atom") |
+| LG4 | Known gaps, in the spec as expected failures with their cause, red when one starts to pass: the rail over body text (4.0, and 3.1 on the photo; no edge by decision), a button floating over body text (4.0 and 3.1), and the plain button and icon button with glass off (a 10 % tint of the page's ink: 1.4 to 2.3 on the text page, 1.8 to 2.0 on the photo). The core's busy-driven ground does not reach them: the lab reports a busy of 0 for the text page and 0.088 for the photo, the kit hands the core `body: false` and paints one constant body, and `resolveBody` asks nothing more of the photo at that busy. Raising the body by busy is the core's decision. | behaviour (`KNOWN` in `legibility-behavior.spec.ts`) |
+
+Side-by-side: the zone at M 9:12–9:41 and D 11:32–12:12 against `?view=legibility&lg=nav-bar&backdrop=text`.
+
 ## Motion
 
 A glass element that changes shape over frames must cost no more per frame than the same element without glass. The core
@@ -509,4 +534,8 @@ merge, overflow and change of place). Adding an element's transition means addin
 - The side sheet and the third pane sit at the right edge of the window; right-to-left layout is not modelled.
 - A host that calls `showModal()` itself, with no trigger, cannot have the backdrop read (the page is inert); it sets
   `sample`.
+- The scroll edge is the core's cross-fade of a blur and the sharp content, so a fifth of the lines' sharpness is left under
+  a bar against the reference's tenth (SE6); a sheet's edge is a strip over the grabber, and its text is gated by SH21, not by
+  LG1. A host that puts a filter, an opacity, a mask or a clip-path between the edge and the page makes a backdrop root, and
+  the glass then sees the content sharp; the lab checks its own ancestors only.
 - Snapshots: Windows baselines only, run locally, not in CI.
