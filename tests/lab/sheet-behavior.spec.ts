@@ -1632,7 +1632,7 @@ test.describe('accessibility modes', () => {
 // ---- one lens per open surface -------------------------------------------------------------------------------------
 
 // The recording stand-in for `vireglass/dom` sees which lens is attached to what, which are alive and which are present.
-const RECORDING_LENS = (appear: boolean) => `
+const RECORDING_LENS = `
 const flat = { luma: 0.9, busy: 0, lo: 0.9, hi: 0.9, r: 0.9, g: 0.9, b: 0.9 };
 export function probeBackdrop() { return flat; }
 export function statsFromSamples() { return flat; }
@@ -1646,11 +1646,11 @@ export function attachGlass(el, opts) {
     setMorph(m) { note(m); },
     setAppear(t) { rec.appear = t; },
     setSample() {}, setInterim() {}, setAccent() {}, setNeighbourGlow() {},
-    destroy() { ${appear ? 'rec.alive = false;' : ''} },
+    destroy() { rec.alive = false; },
   };
 }`;
-const stubGlass = (page: Page, appear = true) =>
-  page.route('**/vireglass_dom.js*', (route) => route.fulfill({ contentType: 'text/javascript', body: RECORDING_LENS(appear) }));
+const stubGlass = (page: Page) =>
+  page.route('**/vireglass_dom.js*', (route) => route.fulfill({ contentType: 'text/javascript', body: RECORDING_LENS }));
 
 /** The glass surfaces a host shows: lenses alive, present and drawn. */
 const lenses = (page: Page, host: string) =>
@@ -1668,6 +1668,7 @@ test.describe('one glass surface per open surface', () => {
     await page.locator('#pop-trigger').click();
     await resting(page, 'pop');
     expect(await lenses(page, 'pop')).toEqual(['pop-surface']);
+    expect(await page.evaluate(() => (window as unknown as { __lenses: { id: string; alive: boolean }[] }).__lenses.filter((l) => l.id === 'pop-trigger' && l.alive).length)).toBe(0);
     await page.keyboard.press('Escape');
     await closed(page, 'pop');
     await expect.poll(() => lenses(page, 'pop')).toEqual(['pop-trigger']);
@@ -1715,7 +1716,16 @@ test.describe('one glass surface per open surface', () => {
   });
 
   test('canary: a trigger that cannot let go of its lens while the surface is out fails the count', async ({ page }) => {
-    await stubGlass(page, false);
+    await stubGlass(page);
+    // The trigger's lens reports itself alive whatever the kit does to it, as a trigger that never destroyed it would.
+    await page.addInitScript(() => {
+      const all: { id: string }[] = [];
+      (window as unknown as { __lenses: unknown[] }).__lenses = all;
+      all.push = (rec) => {
+        if (rec.id === 'pop-trigger') Object.defineProperty(rec, 'alive', { get: () => true, set: () => undefined });
+        return Array.prototype.push.call(all, rec);
+      };
+    });
     await sandbox(page, 'rm=1&glass=1', { w: 700, h: 720 });
     await page.locator('#pop-trigger').click();
     await resting(page, 'pop');
