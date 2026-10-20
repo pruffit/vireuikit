@@ -2,9 +2,6 @@ import { expect, test } from '@playwright/test';
 import { nextFrame, openCase } from './helpers';
 import { settleGlass } from './legibility';
 
-// The scroll edge in its three styles, on body text scrolled under the bar: the dissolve over light glass, the dimming over
-// dark glass, and the flat band for pinned content, with the bars it is made for and a sheet's top strip, and the bar with
-// glass off, which has none. Baselines are per platform and move only on purpose.
 test.use({ viewport: { width: 1700, height: 1000 } });
 
 const CASES: { name: string; query: string; glass?: boolean }[] = [
