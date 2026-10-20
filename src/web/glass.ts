@@ -44,9 +44,10 @@ export function glassMorph(
   moving: boolean,
 ): GlassMorph | null {
   if (!morph) return null;
+  // 0 means no morph at all, so at rest a smoothing the whole pixel rounds to 0 stays 0.
   const snap = (v: number, grid = moving ? MOVING_GRID : 1) => Math.round(v / grid) * grid;
   return {
-    smoothing: morph.smoothing > 0 ? Math.max(snap(morph.smoothing, moving ? MOVING_GRID / 2 : 1), 1) : 0,
+    smoothing: morph.smoothing > 0 && (moving || morph.smoothing >= 0.5) ? Math.max(snap(morph.smoothing, moving ? MOVING_GRID / 2 : 1), 1) : 0,
     shape: {
       offsetX: snap(morph.offsetX),
       offsetY: snap(morph.offsetY),
