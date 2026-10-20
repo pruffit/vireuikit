@@ -8,7 +8,7 @@ export default defineConfig({
   workers: 1,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:5179',
+    baseURL: `http://127.0.0.1:${process.env.VIREUIKIT_LAB_PORT ?? 5179}`,
     viewport: { width: 900, height: 700 },
     deviceScaleFactor: 1,
     colorScheme: 'light',
@@ -17,7 +17,7 @@ export default defineConfig({
   expect: { toHaveScreenshot: { threshold: 0.02, maxDiffPixelRatio: 0.0005, animations: 'disabled' } },
   webServer: {
     command: 'npm run lab',
-    url: 'http://127.0.0.1:5179',
+    url: `http://127.0.0.1:${process.env.VIREUIKIT_LAB_PORT ?? 5179}`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },

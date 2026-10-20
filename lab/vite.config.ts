@@ -109,5 +109,5 @@ export default defineConfig({
     alias: { 'vireuikit/web': resolve(HERE, '../src/web/index.ts') },
   },
   optimizeDeps: { include: ['vireglass', 'vireglass/dom'] },
-  server: { port: 5179, strictPort: true, host: '127.0.0.1' },
+  server: { port: Number(process.env.VIREUIKIT_LAB_PORT ?? 5179), strictPort: true, host: '127.0.0.1' },
 });
