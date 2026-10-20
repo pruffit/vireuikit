@@ -30,6 +30,8 @@ export type GlassSession = {
   setSample(sample: BackdropSample | null): void;
   /** While on, the lens keeps its probe and baked maps through changes of shape; turning it off bakes once. */
   setInterim(on: boolean): void;
+  /** Tells the core a held gesture is still going: restarts its 2 s safety net if this lens is in interim, and does nothing otherwise. */
+  beat(): void;
   /** What the probe reads behind the element where it is now. */
   probe(): BackdropSample;
   destroy(): void;
@@ -93,6 +95,21 @@ export function moveGlass(session: GlassSession, moving: boolean, apply: () => v
   }
 }
 
+const HEARTBEAT_MS = 1000;
+
+/**
+ * A pointer held still sends no geometry, and the core ends an interim that hears nothing for 2 s. For the life of one
+ * gesture this tells it once a second that the gesture is still held, and stops by itself when `held` turns false; call
+ * the result when the pointer is released, cancelled or loses its capture. A surface that never lands is still ended by the core's own net.
+ */
+export function holdGlass(held: () => boolean, sessions: () => Iterable<GlassSession | null | undefined>): () => void {
+  const timer = window.setInterval(() => {
+    if (!held()) window.clearInterval(timer);
+    else for (const session of sessions()) session?.beat();
+  }, HEARTBEAT_MS);
+  return () => window.clearInterval(timer);
+}
+
 let loaded: typeof import('vireglass/dom') | null = null;
 
 export const glassLoaded = (): boolean => loaded !== null;
@@ -154,6 +171,7 @@ function attachLoaded(el: HTMLElement, params: GlassParams): GlassSession {
   if (params.sample) opts.sample = params.sample;
   const handle: GlassHandle = attachGlass(el, opts);
 
+  let interim = false;
   const session: GlassSession = {
     setMaterial(material) {
       opts.material = material;
@@ -172,7 +190,13 @@ function attachLoaded(el: HTMLElement, params: GlassParams): GlassSession {
     setAppear: (t) => handle.setAppear(t),
     setMorph: (morph) => handle.setMorph(morph),
     setSample: (sample) => handle.setSample(sample),
-    setInterim: (on) => handle.setInterim(on),
+    setInterim(on) {
+      interim = on;
+      handle.setInterim(on);
+    },
+    beat() {
+      if (interim) handle.setInterim(true);
+    },
     probe: () => probeBackdrop(el),
     destroy: () => {
       waiting.delete(session);

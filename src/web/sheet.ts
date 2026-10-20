@@ -47,7 +47,7 @@ import {
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { deepActive, dropEmptyStyle, rootsOf } from './dom';
 import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, isEditable, shellOf, watchAdaptiveContext, windowRect } from './environment';
-import { attachControlGlass, ensureGlass, glassLoaded, glassMorph, landGlass, moveGlass, probeRect, type GlassFrame, type GlassSession } from './glass';
+import { attachControlGlass, ensureGlass, glassLoaded, glassMorph, holdGlass, landGlass, moveGlass, probeRect, type GlassFrame, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
@@ -1429,6 +1429,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #beginDrag(e: PointerEvent): void {
       const press = this.#press!;
       press.started = true;
+      holdGlass(() => this.#press === press, () => [this.#glass]);
       pressSheetDrag(this.#drag, this.#drag.height.x, e.clientY);
       try {
         this.#surface!.setPointerCapture(e.pointerId);

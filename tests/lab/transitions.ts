@@ -37,7 +37,7 @@ const TOOLBAR_ACTIVE = "document.querySelector('vire-toolbar').hasAttribute('dat
 const NAV_SURFACES = 'vire-nav > nav, vire-nav > [data-vk-lens], vire-nav > [data-accessory]';
 
 /** One pointer step per animation frame, so the input arrives at the rate a hand would give it. */
-async function drag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }, steps: number): Promise<void> {
+export async function drag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }, steps: number): Promise<void> {
   for (let i = 1; i <= steps; i += 1) {
     await page.mouse.move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
     await nextFrame(page);

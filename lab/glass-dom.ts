@@ -24,6 +24,8 @@ declare global {
     __labNoLand?: string;
     /** How many lenses have been attached, so a gate can tell a surface that was created from one that was rebuilt. */
     __labAttached?: number;
+    /** From now on only the kit's heartbeat ('beat') or nothing ('none') reaches the core's `setInterim`: a held gesture that sends no geometry. */
+    __labHear?: 'beat' | 'none';
     __labGlass?: LabLens[];
     /** Forgets that any lens has entered interim, so a recording counts only its own. */
     __labGlassMark?: () => void;
@@ -47,6 +49,8 @@ export function attachGlass(el: HTMLElement, options?: AttachGlassOptions): Glas
   handle.setInterim = (on: boolean) => {
     const hit = (selector?: string) => Boolean(selector) && el.matches(selector!);
     if (hit(window.__labNoInterim) || (!on && hit(window.__labNoLand))) return;
+    const hear = window.__labHear;
+    if (hear && (hear === 'none' || !/beat/.test(new Error().stack ?? ''))) return;
     lens.interim = on;
     if (on) lens.entered = true;
     realInterim?.(on);

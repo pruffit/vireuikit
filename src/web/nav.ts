@@ -39,7 +39,7 @@ import {
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, effectiveInput, isEditable, shellOf, watchAdaptiveContext } from './environment';
 import { deepActive, dropEmptyStyle } from './dom';
-import { attachControlGlass, landGlass, moveGlass, type GlassSession } from './glass';
+import { attachControlGlass, holdGlass, landGlass, moveGlass, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
@@ -1410,7 +1410,9 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       win.addEventListener('pointermove', move);
       win.addEventListener('pointerup', up);
       win.addEventListener('pointercancel', cancel);
+      const release = holdGlass(() => this.#press !== null, () => [this.#body?.session, this.#lensSlot?.session, this.#accSlot?.session]);
       this.#endPress = () => {
+        release();
         win.removeEventListener('pointermove', move);
         win.removeEventListener('pointerup', up);
         win.removeEventListener('pointercancel', cancel);

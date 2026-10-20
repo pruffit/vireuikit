@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openCase } from './helpers';
-import { TRANSITIONS, lensStates, recordTransition, workReport, type Recording, type Transition } from './transitions';
+import { TRANSITIONS, drag, lensStates, recordTransition, workReport, type Recording, type Transition } from './transitions';
 
 // The motion gate (docs/acceptance.md, MO1 to MO3). A glass element that changes shape over frames must not make the
 // core probe the backdrop, bake a map or swap a filter on any frame of the change: it holds its lens in interim and
@@ -133,6 +133,56 @@ test.describe('the landing frame is exact', () => {
       expect(landed.length).toBeGreaterThan(0);
       for (const lens of landed) expect(lens.geometry && { width: lens.geometry.width, height: lens.geometry.height }).toEqual(lens.size);
       expect(landed).toEqual(fresh);
+    });
+  }
+});
+
+// A pointer held still sends no geometry, and the core ends an interim that hears nothing for 2 s. The kit tells it once
+// a second while the gesture is held (`holdGlass`), so a held drag stays in interim and nothing is baked until it lets go.
+// From the start of the hold the shim lets only the heartbeat through (or nothing, for the canary), since in the lab the
+// kit repaints every frame and that would keep the lens alive by itself.
+test.describe('a gesture held still', () => {
+  const HOLD_MS = 2500;
+  const hold = async (page: Page, hear: 'beat' | 'none') => {
+    await page.evaluate((h) => ((window.__labHear = h), window.__lab.resetRenderStats()), hear);
+    await page.waitForTimeout(HOLD_MS);
+    await page.evaluate(() => ((window as unknown as { __held: unknown }).__held = window.__lab.renderStats()));
+  };
+  const held = (page: Page) => page.evaluate(() => (window as unknown as { __held: { probes: number; fullBakes: number; filterSwaps: number } }).__held);
+
+  const navDrag = (hear: 'beat' | 'none'): Transition => ({
+    ...named('navigation drag of the lens'),
+    async run(page) {
+      const box = (await page.locator('vire-nav > nav').boundingBox())!;
+      const y = box.y + box.height / 2;
+      await drag(page, { x: box.x + box.width * 0.4 + 8, y }, { x: box.x + box.width * 0.7, y }, 12);
+      await hold(page, hear);
+      await page.mouse.up();
+    },
+  });
+  const sheetDrag = (hear: 'beat' | 'none'): Transition => ({
+    ...named('sheet detent drag and spring'),
+    async run(page) {
+      const box = (await page.locator('#sup [data-vk-grabber]').boundingBox())!;
+      const from = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      await drag(page, from, { x: from.x, y: from.y - 120 }, 12);
+      await hold(page, hear);
+      await page.mouse.up();
+    },
+  });
+
+  for (const [what, make] of [['the navigation lens', navDrag], ['the sheet', sheetDrag]] as const) {
+    test(`${what} held still for ${HOLD_MS} ms neither probes nor bakes`, async ({ page }) => {
+      await recordTransition(page, make('beat'), '1', { query: 'backdrop=photo' });
+      expect(await held(page)).toMatchObject({ probes: 0, fullBakes: 0, filterSwaps: 0 });
+    });
+
+    test(`canary: ${what} without the heartbeat falls out of interim while held`, async ({ page }) => {
+      await recordTransition(page, make('none'), '1', { query: 'backdrop=photo' });
+      const stats = await held(page);
+      expect(stats.fullBakes + stats.probes + stats.filterSwaps).toBeGreaterThan(0);
     });
   }
 });
