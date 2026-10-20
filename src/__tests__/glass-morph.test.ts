@@ -21,7 +21,7 @@ describe('glassMorph', () => {
   });
 
   it('snaps the shape to whole pixels at rest and to a coarse grid while moving', () => {
-    expect(glassMorph({ ...shape, smoothing: 4 }, false)!.shape.offsetX).toBe(10);
-    expect(glassMorph({ ...shape, smoothing: 4 }, true)!.shape.offsetX).toBe(8);
+    expect(glassMorph({ ...shape, smoothing: 4 }, false)!.shape!.offsetX).toBe(10);
+    expect(glassMorph({ ...shape, smoothing: 4 }, true)!.shape!.offsetX).toBe(8);
   });
 });
