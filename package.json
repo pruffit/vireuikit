@@ -62,7 +62,7 @@
     "check:lab:perf": "playwright test --config playwright.perf.config.ts"
   },
   "peerDependencies": {
-    "vireglass": "^3.1.1"
+    "vireglass": "^3.2.1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
@@ -70,7 +70,7 @@
     "esbuild": "0.27.7",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
-    "vireglass": "^3.1.1",
+    "vireglass": "^3.2.1",
     "vite": "8.3.2",
     "vitest": "^4.1.11"
   }
