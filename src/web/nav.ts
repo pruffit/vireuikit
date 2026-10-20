@@ -40,6 +40,7 @@ import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, effectiveInput, isEditable, shellOf, watchAdaptiveContext } from './environment';
 import { deepActive, dropEmptyStyle } from './dom';
 import { attachControlGlass, holdGlass, landGlass, moveGlass, type GlassSession } from './glass';
+import { createScrollEdge, type ScrollEdge } from './scroll-edge';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
@@ -150,6 +151,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       'panes',
       'minimize',
       'scroller',
+      'scroll-edge',
       'search-key',
       'toggle-label',
       FORCE_ATTRIBUTE,
@@ -188,6 +190,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     #scrollerProp: Element | null = null;
     #scrollerEl: Element | null = null;
     #unbindScroller: (() => void) | null = null;
+    #edge: ScrollEdge | null = null;
     #over = false;
     #pillAnim: { state: FormMorphState; from: MorphBox | null; to: MorphBox | null } = {
       state: { ...createFormMorph(), t: { x: 1, v: 0, target: 1 } },
@@ -229,6 +232,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     set sample(next: BackdropSample | null) {
       this.#sample = next;
       for (const slot of [this.#body, this.#lensSlot, this.#accSlot]) slot?.session?.setSample(next);
+      this.#edge?.update();
     }
 
     get scroller(): Element | null {
@@ -266,6 +270,8 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#tapping = false;
       this.#unbindScroller?.();
       this.#unbindScroller = null;
+      this.#edge?.destroy();
+      this.#edge = null;
       for (const slot of [this.#body, this.#lensSlot, this.#accSlot]) if (slot) this.#detach(slot);
       this.#releaseShortcut();
       this.#markUnder([], null);
@@ -337,7 +343,8 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       else if (name === 'minimize' || name === 'scroller') {
         this.#bindScroller();
         this.#replan();
-      } else if (name === 'toggle-label') this.#syncToggle();
+      } else if (name === 'scroll-edge') this.#syncEdge();
+      else if (name === 'toggle-label') this.#syncToggle();
       else this.#replan();
     }
 
@@ -373,6 +380,10 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       pill.setAttribute('aria-hidden', 'true');
       nav.prepend(pill);
       this.#pill = pill;
+      this.#edge = createScrollEdge(this, 'band', (el) => {
+        this.#mine.add(el);
+        this.prepend(el);
+      });
 
       const toggle = own(this.ownerDocument.createElement('button'));
       toggle.type = 'button';
@@ -417,6 +428,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
           }
         }
         if (this.#syncScroller()) changed = true;
+        this.#syncEdge();
         if (changed) this.#scheduleReplan();
       });
       markup.observe(this, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['aria-current'] });
@@ -440,7 +452,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     }
 
     #isOwn(node: Node): boolean {
-      return node === this.#pill || [this.#lens, this.#toggle, this.#scrim, this.#probe].some((own) => own?.contains(node));
+      return node === this.#pill || node === this.#edge?.el || [this.#lens, this.#toggle, this.#scrim, this.#probe].some((own) => own?.contains(node));
     }
 
     #scheduleReplan(): void {
@@ -708,6 +720,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       }
       this.#syncKeyShortcut(plan);
       this.#ensureGlass();
+      this.#syncEdge();
       this.#publish(plan);
       this.#run();
     }
@@ -817,12 +830,39 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     // ---- scrolling ----------------------------------------------------------------------------------------------
 
     /** The property wins while its node is in the document; the id is looked up again each time, as the node may be parsed late or replaced. */
-    #wantedScroller(): Element | null {
-      if (this.getAttribute('minimize') !== 'scroll') return null;
+    #lookupScroller(): Element | null {
       if (this.#scrollerProp?.isConnected) return this.#scrollerProp;
       const id = this.getAttribute('scroller');
       const root = this.getRootNode() as Document | ShadowRoot;
       return id && 'getElementById' in root ? root.getElementById(id) : null;
+    }
+
+    #wantedScroller(): Element | null {
+      return this.getAttribute('minimize') === 'scroll' ? this.#lookupScroller() : null;
+    }
+
+    /** The bar floats over its scroller's bottom edge, so the content that slides under it dissolves before the glass sees it. */
+    #syncEdge(): void {
+      const edge = this.#edge;
+      const nav = this.#navEl;
+      if (!edge || !nav) return;
+      const mode = this.getAttribute('scroll-edge');
+      const scroller = this.#presentation?.glass && this.#plan?.layout.form === 'bar' && mode !== 'off' ? this.#lookupScroller() : null;
+      edge.set(
+        scroller
+          ? {
+              scroller,
+              side: 'bottom',
+              bar: nav,
+              beside: () => this.#accessory,
+              hard: mode === 'hard',
+              ink: () => {
+                const ink = nav.style.getPropertyValue('--vireglass-ink');
+                return ink === '' ? 0 : Number(ink);
+              },
+            }
+          : null,
+      );
     }
 
     #isPage(el: Element): boolean {
@@ -1303,7 +1343,10 @@ export function createNavElementClass(options: NavElementOptions = {}) {
           slot.last = emptyLast();
           slot.appear = undefined;
           this.#paint();
-          if (slot === this.#body) this.dispatchEvent(new CustomEvent('vire-glass-ready'));
+          if (slot === this.#body) {
+            this.#edge?.update();
+            this.dispatchEvent(new CustomEvent('vire-glass-ready'));
+          }
         })
         .catch(() => {
           if (token !== slot.token) return;
@@ -1377,6 +1420,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         for (const slot of [this.#body, this.#lensSlot, this.#accSlot]) if (slot) this.#detach(slot);
         this.#ensureGlass();
       }
+      this.#syncEdge();
       if (this.#ctx) this.#run();
     }
 
