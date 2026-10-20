@@ -48,6 +48,7 @@ import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { deepActive, dropEmptyStyle, rootsOf } from './dom';
 import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, isEditable, shellOf, watchAdaptiveContext, windowRect } from './environment';
 import { attachControlGlass, ensureGlass, glassLoaded, glassMorph, holdGlass, landGlass, moveGlass, probeRect, type GlassFrame, type GlassSession } from './glass';
+import { createScrollEdge, type ScrollEdge } from './scroll-edge';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
@@ -143,11 +144,12 @@ function setInset(shell: Element, owner: object, inset: number): void {
 
 export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: SurfaceElementOptions = {}) {
   return class VireSurface extends HTMLElement implements VireSurfaceElement {
-    static observedAttributes = ['glass', 'kind', 'detents', 'detent', 'persistent', 'grabber-label', 'detent-labels', FORCE_ATTRIBUTE];
+    static observedAttributes = ['glass', 'kind', 'detents', 'detent', 'persistent', 'grabber-label', 'detent-labels', 'scroll-edge', FORCE_ATTRIBUTE];
 
     #surface: HTMLElement | null = null;
     #dialog: HTMLDialogElement | null = null;
     #grabber: HTMLElement | null = null;
+    #edge: ScrollEdge | null = null;
     #cleanups: (() => void)[] = [];
     #restore: (() => void)[] = [];
     #lifted = new Map<HTMLButtonElement, Lifted>();
@@ -304,6 +306,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         else if (surface.matches(':popover-open')) surface.hidePopover();
         this.#hiding = false;
         this.#grabber?.remove();
+        this.#edge?.destroy();
         for (const name of ['data-form', 'data-scrim', 'data-vk-touch']) surface.removeAttribute(name);
         for (const name of Array.from(surface.style)) if (name.startsWith('--vk-')) surface.style.removeProperty(name);
       }
@@ -316,7 +319,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       }
       for (const name of Array.from(this.style)) if (name.startsWith('--vk-')) this.style.removeProperty(name);
       dropEmptyStyle(this, this.#hadStyle.host);
-      this.#surface = this.#dialog = this.#grabber = this.#shell = this.#ctx = null;
+      this.#surface = this.#dialog = this.#grabber = this.#shell = this.#ctx = this.#edge = null;
       this.#open = this.#out = this.#focused = false;
       this.#pg = createGrowthState();
       this.#sg = createSheetGrowth();
@@ -352,6 +355,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       else if (name === 'glass') this.#refreshMode(true);
       else if (name === 'detent') this.#reflecting || this.#setDetent(this.getAttribute('detent'), true);
       else if (name === 'grabber-label' || name === 'detent-labels') this.#syncGrabber();
+      else if (name === 'scroll-edge') this.#syncEdge();
       else {
         if (name === 'kind' && this.getAttribute('data-kind') !== this.#kind()) this.setAttribute('data-kind', this.#kind());
         if (this.#out) this.#remeasure();
@@ -413,6 +417,8 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
 
       this.#grabber = this.#makeGrabber();
       surface.prepend(this.#grabber);
+      const grabber = this.#grabber;
+      this.#edge = createScrollEdge(surface, 'sticky', (el) => grabber.after(el));
       this.#scanTriggers();
       this.#listen(surface);
       this.#observeContent();
@@ -484,7 +490,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       };
 
       const markup = new MutationObserver((records) => {
-        const own = (node: Node) => node === this.#grabber || node === this.#probe || this.#grabber?.contains(node);
+        const own = (node: Node) => node === this.#grabber || node === this.#edge?.el || node === this.#probe || this.#grabber?.contains(node);
         let changed = false;
         for (const record of records) {
           if (record.type === 'childList' && ![...record.addedNodes, ...record.removedNodes].every(own)) changed = true;
@@ -726,7 +732,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       const resizer = this.#resizer;
       const surface = this.#surface;
       if (!resizer || !surface) return;
-      const content = new Set(Array.from(surface.children).filter((child) => child !== this.#grabber));
+      const content = new Set(Array.from(surface.children).filter((child) => child !== this.#grabber && child !== this.#edge?.el));
       for (const el of [...this.#sizes.keys()]) {
         if (content.has(el)) continue;
         resizer.unobserve(el);
@@ -1093,7 +1099,24 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       }
       const dimmed = !this.#probed && this.#layout?.scrim ? 1 - SHEET_SIZES.scrimAlpha : 1;
       const ink = surfaceInk(sample.luma * dimmed, opaque, canvas);
-      if (this.getAttribute('data-ink') !== ink) this.setAttribute('data-ink', ink);
+      if (this.getAttribute('data-ink') !== ink) {
+        this.setAttribute('data-ink', ink);
+        this.#edge?.update();
+      }
+    }
+
+    /** The header strip of a scrolling surface floats over its content, so what slides under it dissolves before the glass shows it. */
+    #syncEdge(): void {
+      const edge = this.#edge;
+      const grabber = this.#grabber;
+      const surface = this.#surface;
+      if (!edge || !grabber || !surface) return;
+      const mode = this.getAttribute('scroll-edge');
+      edge.set(
+        this.#glassKey === 'on' && mode !== 'off'
+          ? { scroller: surface, side: 'top', bar: grabber, hard: mode === 'hard', ink: () => (this.getAttribute('data-ink') === 'light' ? 1 : 0) }
+          : null,
+      );
     }
 
     #instant(): boolean {
@@ -1593,6 +1616,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       if (key === this.#glassKey) return;
       this.#dropGlass();
       this.#glassKey = key;
+      this.#syncEdge();
       if (!want) return;
       const token = this.#glassToken;
       const box = this.#layout?.box ?? { width: 300, height: 200, radius: SHEET_SIZES.dialog.radius };
