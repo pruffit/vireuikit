@@ -3,6 +3,7 @@ import type { BackdropSample } from 'vireglass';
 import { defineVireElements, effectiveInput, setA11yOverride, setInputOverride, type VireControlElement } from 'vireuikit/web';
 import { adaptiveStage } from './adaptive';
 import { BACKDROPS, paintBackdrop, type Backdrop } from './backdrops';
+import { LEGIBILITY_ATOMS, legibilityScene, type LegibilityAtom } from './legibility';
 import { MENU_STATES, menuGallery, menuSandbox, type MenuLabState } from './menu';
 import { menuReference } from './menu-reference';
 import { NAV_FORMS, navGallery, navSandbox, type NavLabForm, type NavSandboxHandle } from './nav';
@@ -30,7 +31,7 @@ const flag = (name: string): boolean | undefined => {
   return v === '1' ? true : v === '0' ? false : undefined;
 };
 
-const VIEWS = ['gallery', 'sandbox', 'menu', 'nav', 'sheet', 'toolbar', 'reference', 'menu-reference', 'adaptive'] as const;
+const VIEWS = ['gallery', 'sandbox', 'menu', 'nav', 'sheet', 'toolbar', 'reference', 'menu-reference', 'adaptive', 'legibility'] as const;
 const view = pick('view', VIEWS, 'gallery');
 const atomParam = pick('atom', ['all', ...ATOMS, 'menu', 'nav', 'sheet', 'toolbar'] as const, 'all');
 const navForm = pick('form', NAV_FORMS, 'bar') as NavLabForm;
@@ -242,7 +243,15 @@ else if (view === 'sheet') {
     detents: params.get('detents'),
   });
 }
-else if (view === 'menu') menuSandbox(document.getElementById('rows')!, note, { size, glass, sample: hosted ? sample : null });
+else if (view === 'legibility') {
+  legibilityScene(stage, document.getElementById('rows')!, pick('lg', LEGIBILITY_ATOMS, 'nav-bar') as LegibilityAtom, {
+    backdrop,
+    glass,
+    sample: hosted ? sample : null,
+    scroll: Number(params.get('scroll') ?? 420),
+    edge: params.get('edge'),
+  });
+} else if (view === 'menu') menuSandbox(document.getElementById('rows')!, note, { size, glass, sample: hosted ? sample : null });
 else if (view === 'reference') await reference();
 else if (view === 'menu-reference') await menuReference(stage, document.getElementById('rows')!);
 else if (view === 'adaptive') await adaptiveStage(stage, document.getElementById('rows')!, params, { glass, backdrop, chrome });
@@ -340,6 +349,11 @@ window.__lab = {
   upgraded: upgrade,
   renderStats: () => counters?.renderStats() ?? { probes: 0, fullBakes: 0, reducedBakes: 0, filterSwaps: 0 },
   resetRenderStats: () => counters?.resetRenderStats(),
+  sample,
+  probe: (selector) => {
+    const el = document.querySelector<HTMLElement>(selector);
+    return el && counters ? counters.probeBackdrop(el) : null;
+  },
   ...(navHandle ? { nav: navHandle } : {}),
   ...(sheetHandle ? { sheet: sheetHandle } : {}),
   ...(toolbarHandle ? { toolbar: toolbarHandle } : {}),
