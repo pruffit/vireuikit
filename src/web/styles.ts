@@ -15,6 +15,7 @@ const SURF = `${SH}>:is(dialog,[popover])`;
 const GRAB = `${SURF}>[data-vk-grabber]`;
 
 const TB = 'vire-toolbar[data-vk]';
+const EDGE = `:is(${NAV},${TB})>[data-vk-edge]`;
 const TB_ITEM = `${TB} [data-vk-item]`;
 const TB_BARE = `${TB} button[data-vk-item]`;
 const TB_CAP = `${TB}>[data-vk-capsule]`;
@@ -150,6 +151,8 @@ ${NAV}>[data-vk-lens][data-form=sidebar]>div{flex-direction:row;gap:12px;font-si
 ${NAV}>[data-vk-lens][data-dragging]>div{color:var(--vire-nav-accent,oklch(.62 .19 255))}
 ${NAV}[data-minimized]>[data-vk-lens]>div,${NAV}[data-form=bar][data-minimized]>[data-vk-lens]>div{font-size:0}
 ${NAV}>[data-vk-scrim]{position:absolute;inset:0;pointer-events:auto;background:color-mix(in srgb,CanvasText 28%,transparent)}
+${EDGE}{position:absolute;pointer-events:none;box-sizing:border-box;margin:0}
+:is(${NAV},${TB},${SURF})>[data-vk-edge][data-flip]{transform:scaleY(-1)}
 
 ${NAV}[data-surface=glass]>nav,${NAV}[data-surface=glass]>[data-accessory],${NAV}[data-surface=glass]>[data-vk-lens],${NAV}[data-surface=glass]${CIRCLE}{color:var(--vireglass-ink-color,inherit);
  ${GLASS_BODY}}
@@ -184,6 +187,8 @@ ${SH}:is([data-phase=growing],[data-phase=morph])>:is(dialog,[popover])>:not([da
 ${SH}[data-measure]>:is(dialog,[popover]){display:block!important;--vk-pad-t:var(--vk-mpt,var(--vk-pad))!important;width:var(--vk-mw,max-content)!important;height:auto!important;left:0!important;top:0!important;
  padding:0 var(--vk-pad) var(--vk-pad)!important;max-width:none!important;overflow:visible!important;visibility:hidden;clip-path:none}
 ${SH}[data-measure]>:is(dialog,[popover])>:not([data-vk-grabber]){width:auto!important;transform:none!important;filter:none!important;opacity:1!important}
+${SURF}>[data-vk-edge]{position:sticky;top:0;display:block;flex:none;pointer-events:none;box-sizing:border-box;margin-inline:calc(var(--vk-pad,16px)*-1)}
+${SH}:is([data-phase=growing],[data-phase=morph],[data-measure])>:is(dialog,[popover])>[data-vk-edge]{display:none}
 ${GRAB}{position:sticky;top:0;z-index:1;display:block;box-sizing:border-box;flex:none;width:var(--vk-grab-hit);height:var(--vk-grab-hit);
  margin:0 auto calc(var(--vk-pad-t) - var(--vk-grab-hit));padding:0;border:0;background:none;outline:none;
  touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
@@ -265,6 +270,7 @@ ${HOST}[data-disabled]>button{-webkit-text-fill-color:currentColor;color:GrayTex
 ${HOST}[data-focus]>button{outline-color:Highlight}
 ${BODIES}{color:CanvasText!important;background:Canvas!important;border:1px solid CanvasText;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 ${NAV}>[data-vk-lens]{display:none!important}
+:is(vire-nav,vire-toolbar,vire-popover,vire-sheet)[data-vk] [data-vk-edge]{display:none!important}
 ${NAV}>nav>[data-vk-pill]{background:Highlight;opacity:.4}
 ${NAV}>nav>:is(ul,a,button){filter:none!important;opacity:1!important}
 ${SURFACE}{color:CanvasText!important;background:Canvas!important;border:1px solid CanvasText;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}

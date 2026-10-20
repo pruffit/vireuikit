@@ -1,5 +1,5 @@
 import type { BackdropSample, VireGlassAccessibility, VireGlassGeometry, VireGlassMaterial } from 'vireglass';
-import type { AttachGlassOptions, GlassHandle, GlassMorph } from 'vireglass/dom';
+import type { AttachGlassOptions, GlassHandle, GlassMorph, ScrollEdgeHandle, ScrollEdgeOptions } from 'vireglass/dom';
 import type { Rect } from '../kit/geometry';
 
 export type GlassParams = {
@@ -204,4 +204,9 @@ function attachLoaded(el: HTMLElement, params: GlassParams): GlassSession {
     },
   };
   return session;
+}
+
+/** The core's scroll edge on an element the host placed, or null until the glass module has loaded. */
+export function attachEdgeNow(scroller: HTMLElement, el: HTMLElement, options: ScrollEdgeOptions): ScrollEdgeHandle | null {
+  return loaded ? loaded.attachScrollEdge(scroller, el, options) : null;
 }
