@@ -2,10 +2,11 @@ import { expect, test } from '@playwright/test';
 import { TRANSITIONS, frameReport, recordTransition, type FrameReport } from './transitions';
 
 // Local, headed, GPU: `npm run check:lab:perf`. Replays every transition of the motion gate with glass on and off and
-// times the animation frames. No frame over 33 ms and a p90 of at most 20 ms with glass on; the glass-off run is the
+// times the animation frames from the first active one to 400 ms past the last, which takes in the deferred landing and
+// its full bakes. No frame over 33 ms in any replay and a p90 of at most 20 ms with glass on; the glass-off run is the
 // reference the table prints beside it. A transition is replayed once to warm it up (shaders, decoding, first layout)
-// and then three times to measure; the middle one of the three is judged, because a shared GPU drops a frame here and
-// there on any replay, and a kit that costs a frame in every replay is what the gate is for.
+// and then three times to measure. The worst of the three is judged for the slowest frame and the frames over 33 ms,
+// the median for the p90: a stall that one replay in three shows is a stall.
 const MAX_FRAME = 33;
 const MAX_P90 = 20;
 const REPLAYS = 3;
@@ -40,8 +41,13 @@ for (const transition of TRANSITIONS) {
     await recordTransition(page, transition, '1');
     const replays: FrameReport[] = [];
     for (let i = 0; i < REPLAYS; i += 1) replays.push(frameReport(await recordTransition(page, transition, '1')));
-    replays.sort((a, b) => a.over - b.over || a.max - b.max);
-    const on = replays[Math.floor(REPLAYS / 2)]!;
+    const byP90 = [...replays].sort((a, b) => a.p90 - b.p90);
+    const on: FrameReport = {
+      frames: byP90[Math.floor(REPLAYS / 2)]!.frames,
+      p90: byP90[Math.floor(REPLAYS / 2)]!.p90,
+      max: Math.max(...replays.map((r) => r.max)),
+      over: Math.max(...replays.map((r) => r.over)),
+    };
     await recordTransition(page, transition, '0');
     const off = frameReport(await recordTransition(page, transition, '0'));
     rows.push({ name: transition.name, on, off });

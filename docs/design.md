@@ -183,8 +183,8 @@ here the anchor is the selected destination. `<vire-nav>` builds it:
   at rest a bar and its search are one lens with two silhouettes. A form change is `navMorphFrame` on one spring: the
   selection lifts into a lens, the body contracts into it while its content defocuses, the lens travels to the
   selection's place in the new form, the new body grows out of it while the new content comes into focus, and the lens
-  settles into the pill. The search circle buds off the bar's trailing end as it grows and merges back as it contracts
-  (M 8:42, the split of an organ, M 5:02). The DOM switches `data-form` at the middle, where the body is the lens and no
+  settles into the pill. The search circle is the bar's second shape at a standstill (M 8:42, the split of an organ, M 5:02); while the bar
+  moves the lens is handed no new second shape, so the neck is not drawn on the way and the landed frame is exact. The DOM switches `data-form` at the middle, where the body is the lens and no
   content shows; the lens carries a copy of the selected destination, magnified, so the selection is never out of
   sight. Turning back runs the same frames backwards; a third form swaps the target while the body is still the lens,
   and rebases from the current frame once it grows. Under reduced motion the new form is there in the next frame.
@@ -449,7 +449,8 @@ An atom is done when:
 6. **it moves at frame rate.** Every transition that changes a glass element's shape over frames is in
    `tests/lab/transitions.ts`. `check:lab` counts the core's work over it (`renderStats`): no backdrop probe, no
    full bake and no filter swap on any frame of the change, one landing after it. `check:lab:perf` replays it in a
-   headed Chromium with the GPU and requires no frame over 33 ms and a p90 of at most 20 ms with glass on. Gates that
+   headed Chromium with the GPU, timing the frames from the start to 400 ms past the last active one (the landing's
+   bakes fall there), and requires no frame over 33 ms in any of three replays and a p90 of at most 20 ms with glass on. Gates that
    read the model's boxes frame by frame say nothing about what the browser draws; these two say it (MO1–MO5);
 7. **its mid-motion frames are in the visual set.** The change is frozen at about a quarter, a half and three quarters
    through (`check:lab:visual`), and a drag is held at a few places, not only the resting forms (MO6);
