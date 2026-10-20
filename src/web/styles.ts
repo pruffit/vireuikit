@@ -54,7 +54,7 @@ ${HOST}[data-surface=glass]>button{color:var(--vireglass-ink-color,inherit);
  ${GLASS_BODY}}
 ${HOST}[data-frost][data-surface=glass]>button{${FROST_INK}}
 
-${HOST}[data-surface=plain]>button{background:color-mix(in srgb,currentColor calc(10% + var(--vk-hover)*6% + var(--vk-press)*14%),transparent)}
+${HOST}[data-surface=plain]>button{background:color-mix(in srgb,currentColor calc(10% + var(--vk-hover)*6% + var(--vk-press)*14%),Canvas)}
 
 ${HOST}[data-surface=frosted]>button{
  background:color-mix(in srgb,Canvas calc(88% - var(--vk-hover)*4% - var(--vk-press)*10%),currentColor);

@@ -42,6 +42,7 @@ const CSS = `
 .lg-frame .lg-row { position: absolute; left: 32px; right: 32px; top: 90px; display: flex; flex-wrap: wrap; gap: 24px; align-items: center; }
 .lg-frame .lg-menu { position: absolute; left: 40px; top: 190px; }
 .lg-frame vire-toolbar[data-edge='top'] { margin: 8px; }
+.lg-frame [data-accessory] .meta small { opacity: 0.8; }
 `;
 
 function ensureCss(): void {
