@@ -380,10 +380,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       pill.setAttribute('aria-hidden', 'true');
       nav.prepend(pill);
       this.#pill = pill;
-      this.#edge = createScrollEdge(this, 'band', (el) => {
-        this.#mine.add(el);
-        this.prepend(el);
-      });
+      this.#edge = createScrollEdge(this, 'band', (el) => this.prepend(el));
 
       const toggle = own(this.ownerDocument.createElement('button'));
       toggle.type = 'button';
@@ -423,7 +420,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
           } else if (record.type === 'characterData' || (selected && selected.contains(record.target))) {
             if (selected?.contains(record.target)) this.#lensFor = null;
             changed = true;
-          } else if (![...record.addedNodes, ...record.removedNodes].every((node) => this.#mine.has(node))) {
+          } else if (![...record.addedNodes, ...record.removedNodes].every((node) => this.#mine.has(node) || node === this.#edge?.el)) {
             changed = true;
           }
         }
@@ -433,6 +430,15 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       });
       markup.observe(this, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['aria-current'] });
       this.#cleanups.push(() => markup.disconnect());
+      let ink = nav.style.getPropertyValue('--vireglass-ink');
+      const inkWatch = new MutationObserver(() => {
+        const next = nav.style.getPropertyValue('--vireglass-ink');
+        if (next === ink) return;
+        ink = next;
+        this.#edge?.update();
+      });
+      inkWatch.observe(nav, { attributes: true, attributeFilter: ['style'] });
+      this.#cleanups.push(() => inkWatch.disconnect());
 
       this.#mode = null;
       this.#modeKey = '';
@@ -841,7 +847,6 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       return this.getAttribute('minimize') === 'scroll' ? this.#lookupScroller() : null;
     }
 
-    /** The bar floats over its scroller's bottom edge, so the content that slides under it dissolves before the glass sees it. */
     #syncEdge(): void {
       const edge = this.#edge;
       const nav = this.#navEl;
@@ -854,7 +859,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
               scroller,
               side: 'bottom',
               bar: nav,
-              beside: () => this.#accessory,
+              beside: this.#accessory,
               hard: mode === 'hard',
               ink: () => {
                 const ink = nav.style.getPropertyValue('--vireglass-ink');

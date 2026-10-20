@@ -645,7 +645,6 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       this.#syncEdge();
     }
 
-    /** The toolbar floats over its scroller's top or bottom edge, so the content that slides under it dissolves before the glass sees it. */
     #syncEdge(): void {
       const edge = this.#edge;
       if (!edge) return;
@@ -1323,6 +1322,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
           if (record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].every((n) => this.#isOwn(n))) continue;
           changed = true;
         }
+        this.#syncEdge();
         if (!changed) return;
         this.#scan();
         this.#applySizes();

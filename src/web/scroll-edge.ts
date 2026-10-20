@@ -3,13 +3,11 @@ import type { ScrollEdgeHandle } from 'vireglass/dom';
 import { attachEdgeNow, ensureGlass, glassLoaded } from './glass';
 
 export type EdgeSpec = {
-  /** The scrolling element the bar floats over; the document's own scrolling element stands for the page. */
   scroller: Element;
   side: 'top' | 'bottom';
-  /** The bar the edge sits under: its box sets how deep the band reaches, and a bar clear of the band gets no edge. */
   bar: Element;
-  /** Another body that floats over the same edge, such as the accessory above a bar: the band reaches past it too. */
-  beside?: () => Element | null;
+  /** Another body over the same edge, such as a navigation bar's accessory: the band reaches past it too. */
+  beside?: Element | null;
   hard: boolean;
   /** Ink polarity of the bar's glass, 1 light and 0 dark. */
   ink: () => number;
@@ -18,9 +16,8 @@ export type EdgeSpec = {
 export type ScrollEdge = {
   readonly el: HTMLElement;
   set(spec: EdgeSpec | null): void;
-  /** Re-reads the ink after the glass chose another. */
   update(): void;
-  /** Puts an element straight after the edge, so it paints over it; the first child of the host when the edge is not there. */
+  /** Puts an element straight after the edge, so it paints over it. */
   after(el: Element): void;
   destroy(): void;
 };
@@ -31,7 +28,7 @@ const GEOMETRY = ['left', 'top', 'width', 'height', 'display', 'margin-bottom'];
 
 const px = (v: number) => `${v.toFixed(2)}px`;
 
-/** A stand-in for the page: the core listens on the scroller, and a document's scroll events go to the window. */
+// A document's scroll events go to the window, and the core listens on the scroller.
 function pageSource(doc: Document): HTMLElement {
   const root = () => doc.scrollingElement ?? doc.documentElement;
   const win = doc.defaultView!;
@@ -52,7 +49,6 @@ function pageSource(doc: Document): HTMLElement {
 
 const isPage = (el: Element) => el === el.ownerDocument.documentElement || el === el.ownerDocument.body || el === el.ownerDocument.scrollingElement;
 
-/** The scroll edge a bar floats over (reference §10), under the bar's glass so the glass sees the dissolved content. `band` lays it over the scroller's edge from the host's box; `sticky` keeps it at the top of a scroller that is the host itself. */
 export function createScrollEdge(host: HTMLElement, mode: Mount, mount: (el: HTMLElement) => void): ScrollEdge {
   const doc = host.ownerDocument;
   const el = doc.createElement('div');
@@ -60,7 +56,7 @@ export function createScrollEdge(host: HTMLElement, mode: Mount, mount: (el: HTM
   el.setAttribute('aria-hidden', 'true');
   if (mode === 'sticky') el.setAttribute('data-sticky', '');
   let spec: EdgeSpec | null = null;
-  let live: { scroller: Element; side: string; hard: boolean; bar: Element; beside: (() => Element | null) | undefined; handle: ScrollEdgeHandle; observer: ResizeObserver | null } | null = null;
+  let live: { scroller: Element; side: string; hard: boolean; bar: Element; beside: Element | null | undefined; handle: ScrollEdgeHandle; observer: ResizeObserver | null } | null = null;
   let written = '';
   let loading = false;
 
@@ -90,7 +86,7 @@ export function createScrollEdge(host: HTMLElement, mode: Mount, mount: (el: HTM
     const top = rect.top + (page ? 0 : root.clientTop);
     const width = root.clientWidth;
     const bottom = top + root.clientHeight;
-    const boxes = [barBox, live.beside?.()?.getBoundingClientRect()].filter((box): box is DOMRect => box !== undefined && box.width > 0 && box.height > 0);
+    const boxes = [barBox, live.beside?.getBoundingClientRect()].filter((box): box is DOMRect => box !== undefined && box.width > 0 && box.height > 0);
     const lip = Math.max(...boxes.map((box) => (live!.side === 'top' ? box.bottom - top : bottom - box.top)));
     const height = Math.min(lip + reach, root.clientHeight);
     const bandTop = live.side === 'top' ? top : bottom - height;
@@ -133,10 +129,7 @@ export function createScrollEdge(host: HTMLElement, mode: Mount, mount: (el: HTM
       }
       return;
     }
-    if (live && live.scroller === spec.scroller && live.side === spec.side && live.hard === spec.hard && live.bar === spec.bar) {
-      place();
-      return;
-    }
+    if (live && live.scroller === spec.scroller && live.side === spec.side && live.hard === spec.hard && live.bar === spec.bar && live.beside === spec.beside) return;
     stop();
     const handle = attachEdgeNow(isPage(spec.scroller) ? pageSource(doc) : (spec.scroller as HTMLElement), el, {
       side: spec.side,
@@ -148,8 +141,8 @@ export function createScrollEdge(host: HTMLElement, mode: Mount, mount: (el: HTM
     let observer: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
       observer = new ResizeObserver(place);
-      const targets = mode === 'band' ? [host, spec.bar, isPage(spec.scroller) ? doc.documentElement : spec.scroller] : [spec.bar];
-      for (const target of targets) observer.observe(target);
+      const targets = mode === 'band' ? [host, spec.bar, spec.beside, isPage(spec.scroller) ? doc.documentElement : spec.scroller] : [spec.bar];
+      for (const target of targets) if (target) observer.observe(target);
     }
     live = { scroller: spec.scroller, side: spec.side, hard: spec.hard, bar: spec.bar, beside: spec.beside, handle, observer };
     place();
