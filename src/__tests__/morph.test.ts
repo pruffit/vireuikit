@@ -192,3 +192,36 @@ describe('spring', () => {
     expect(s).toEqual({ x: 1, v: 0, target: 1 });
   });
 });
+
+describe('the growth against the reference (M 5:11, docs/acceptance.md N29)', () => {
+  it("the source's glyphs stay in focus into the first quarter of the drop's forming and are gone when it has formed", () => {
+    expect(growthFrame(source, target, ANCHOR, { shrink: 0.2, grow: 0 }).ink.outgoing).toBe(1);
+    expect(growthFrame(source, target, ANCHOR, { shrink: 0.5, grow: 0 }).ink.outgoing).toBeGreaterThan(0.4);
+    expect(growthFrame(source, target, ANCHOR, { shrink: 0.9, grow: 0 }).ink.outgoing).toBe(0);
+  });
+
+  it('the drop forms where the source was and rises toward the target as it swells, ahead of it', () => {
+    const formed = growthFrame(source, target, ANCHOR, { shrink: 1, grow: 0 }).body.center;
+    expect(Math.hypot(formed.x - source.center.x, formed.y - source.center.y)).toBeLessThan(0.15 * SOURCE_GEOMETRY.height * 2);
+    const travel = Math.hypot(target.center.x - source.center.x, target.center.y - source.center.y);
+    const half = growthFrame(source, target, ANCHOR, { shrink: 1, grow: 0.5 }).body.center;
+    expect(Math.hypot(half.x - source.center.x, half.y - source.center.y)).toBeGreaterThan(0.5 * travel);
+  });
+
+  it('with its own rise the body overshoots the target\'s centre and goes past the source\'s when closing', () => {
+    const over = growthFrame(source, target, ANCHOR, { shrink: 1, grow: 0.95, rise: 1.15 }).body.center;
+    expect(over.y).toBeGreaterThan(target.center.y);
+    const past = growthFrame(source, target, ANCHOR, { shrink: 0, grow: 0, rise: -0.15 }).body.center;
+    expect(past.y).toBeLessThan(source.center.y);
+  });
+
+  it('the content follows its own focus once there is one', () => {
+    expect(growthFrame(source, target, ANCHOR, { shrink: 1, grow: 1, focus: 0.3 }).ink.incoming).toBeCloseTo(0.3 / 0.97, 6);
+    expect(growthFrame(source, target, ANCHOR, { shrink: 1, grow: 1, focus: 1 }).ink.incoming).toBe(1);
+  });
+
+  it('closing finds the capsule whole until the drop has swelled a third of the way', () => {
+    const closing = growthFrame(source, target, ANCHOR, { shrink: 0, grow: 0.2 });
+    expect(closing.merge?.width ?? closing.body.geometry.width).toBeGreaterThanOrEqual(SOURCE_GEOMETRY.width - 1e-6);
+  });
+});

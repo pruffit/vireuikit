@@ -9,6 +9,7 @@ import {
   createGrowthState,
   growthPhase,
   menuActivity,
+  menuCapsule,
   menuBody,
   menuCorner,
   menuGlass,
@@ -292,13 +293,84 @@ describe('the surface on each frame of the growth', () => {
     expect(menuBody(VIREGLASS_CONTROL_MATERIAL, 1)).toEqual(MENU_DROP_BODY);
   });
 
-  // M 5:11: the drop is white over a light grey; the light is the surroundings', so it adds lightness, not white.
-  it('the drop lifts what it covers and adds little white of its own', () => {
+  // M 5:11: the drop is bright white and nearly opaque (0.97 inside its silhouette against 0.78 for the menu at rest).
+  it('the drop is a bright, nearly opaque body, far above the resting one', () => {
     const drop = menuBody(VIREGLASS_CONTROL_MATERIAL, 1);
     const rest = menuBody(VIREGLASS_CONTROL_MATERIAL, 0);
-    expect(drop.alpha).toBeGreaterThan(rest.alpha * 2);
-    expect(drop.lift).toBeGreaterThanOrEqual(0.15);
-    expect(drop.white).toBeLessThanOrEqual(rest.white);
+    expect(drop.alpha).toBeGreaterThan(0.9);
+    expect(drop.alpha).toBeGreaterThan(rest.alpha * 3);
+    expect(drop.lift).toBeGreaterThanOrEqual(0.25);
+    expect(drop.lift).toBeGreaterThan(rest.lift * 2);
+  });
+
+  it('the glass is still lit once the body has its size, until the content is in focus', () => {
+    const sized = { shrink: 1, grow: 1, glow: 1 };
+    expect(menuActivity({ ...sized, focus: 0 })).toBeGreaterThan(0.3);
+    expect(menuActivity({ ...sized, focus: 0.5 })).toBeLessThan(menuActivity({ ...sized, focus: 0 }));
+    expect(menuActivity({ ...sized, focus: 1 })).toBe(0);
+  });
+
+  it('a capsule that has re-formed is still lit: the glow lets go of the shrink slowly', () => {
+    expect(menuActivity({ shrink: 0.02, grow: 0.1, glow: 0.9 })).toBeGreaterThan(0.8);
+    expect(menuActivity({ shrink: 0.02, grow: 0.1 })).toBeLessThan(0.1);
+  });
+
+  it('while the surface is the capsule its glyphs are seen through lightly scattering glass, and once the drop has formed through the sheet scattering', () => {
+    expect(menuCapsule({ shrink: 0, grow: 0 })).toBe(1);
+    expect(menuCapsule({ shrink: 0.47, grow: 0 })).toBeGreaterThan(0.9);
+    expect(menuCapsule({ shrink: 1, grow: 0.5 })).toBe(0);
+    const glyphs = resolveOptics(menuMaterial(VIREGLASS_CONTROL_MATERIAL, 0, 1)).blur;
+    expect(glyphs).toBeCloseTo(resolveOptics(VIREGLASS_CONTROL_MATERIAL).blur, 6);
+    expect(resolveOptics(menuMaterial(VIREGLASS_CONTROL_MATERIAL, 0, 0)).blur).toBeGreaterThan(glyphs * 3);
+  });
+
+  it('the surface is one body of the capsule and the drop rising out of it, and of the drop and the capsule merging back', () => {
+    const bud = menuSurfaceFrame(trigger, menu, anchor, { shrink: 0.5, grow: 0, glow: 0.5 }, undefined, { outline: true });
+    expect(bud.outline).toBeDefined();
+    expect(bud.morph).toBeUndefined();
+    expect(bud.box.width).toBeGreaterThan(menuSurfaceFrame(trigger, menu, anchor, { shrink: 0.5, grow: 0, glow: 0.5 }).box.width - 1);
+    const rest = menuSurfaceFrame(trigger, menu, anchor, { shrink: 0, grow: 0 }, undefined, { outline: true });
+    expect(rest.outline).toBeUndefined();
+    const settled = menuSurfaceFrame(trigger, menu, anchor, { shrink: 1, grow: 1 }, undefined, { outline: true });
+    expect(settled.outline).toBeUndefined();
+  });
+
+  it('the content rides inside the lens while the body is still growing, and is blurred and out of its place until it settles', () => {
+    const s = createGrowthState();
+    let seen = false;
+    let sharpAtSize = false;
+    for (let i = 0; i < 480; i += 1) {
+      stepGrowth(s, 1 / 240, true);
+      const f = menuSurfaceFrame(trigger, menu, anchor, growthPhase(s));
+      if (f.ink.incoming > 0.1 && f.ink.incoming < 0.9 && s.grow.x < 1.06) seen = true;
+      if (s.grow.x > 1 && f.ink.incoming === 1) sharpAtSize = true;
+    }
+    expect(seen).toBe(true);
+    expect(sharpAtSize).toBe(true);
+  });
+
+  it('closing takes the content out of focus first', () => {
+    const s = createGrowthState();
+    for (let i = 0; i < 480; i += 1) stepGrowth(s, 1 / 240, true);
+    expect(growthPhase(s).focus).toBe(1);
+    for (let i = 0; i < 12; i += 1) stepGrowth(s, 1 / 240, false);
+    expect(growthPhase(s).focus!).toBeLessThan(0.5);
+    expect(growthPhase(s).grow).toBeGreaterThan(0.8);
+  });
+
+  it('closing runs back to where the drop formed, a little past it away from the menu, and ends on the trigger', () => {
+    const s = createGrowthState();
+    for (let i = 0; i < 480; i += 1) stepGrowth(s, 1 / 240, true);
+    const centre = (r: RoundedRect) => r.y + r.height / 2;
+    const travel = centre(menu) - centre(trigger);
+    let past = 0;
+    for (let i = 0; i < 480; i += 1) {
+      stepGrowth(s, 1 / 240, false);
+      if (s.grow.x < 0.2) past = Math.max(past, centre(trigger) - centre(menuSurfaceFrame(trigger, menu, anchor, growthPhase(s)).box));
+    }
+    expect(menuSurfaceFrame(trigger, menu, anchor, growthPhase(s)).box).toEqual({ ...trigger });
+    expect(past).toBeGreaterThan(0.03 * travel);
+    expect(past).toBeLessThan(0.25 * travel);
   });
 
   // M 7:19: a menu presented from a toolbar button scatters light more softly than the button.
@@ -327,7 +399,7 @@ describe('items', () => {
   });
 });
 
-// Reference: M 5:11 frame by frame at 29.97 fps (docs/acceptance.md, N9).
+// Reference: M 5:11 frame by frame at 29.97 fps (docs/acceptance.md, N9, N29).
 describe('timing against the reference', () => {
   const dt = 1 / 240;
 
@@ -360,7 +432,7 @@ describe('timing against the reference', () => {
       stepGrowth(s, dt, false);
       t += dt;
       if (drop < 0 && s.grow.x < 0.12) drop = t;
-      if (back < 0 && growthPhase(s).shrink < 0.01 && s.grow.x < 0.01) back = t;
+      if (back < 0 && growthPhase(s).shrink < 0.05 && s.grow.x < 0.05) back = t;
     }
     return { drop, back };
   }
@@ -373,20 +445,37 @@ describe('timing against the reference', () => {
     expect(o.atSize).toBeLessThan(0.35);
   });
 
-  it('it overshoots by about 3.5 % at about 0.37 s and settles soon after', () => {
+  // The width of the reference's menu peaks at 1.054 of its settled size 0.45 s after the first frame that changes.
+  it('it overshoots by about 4 % at about 0.43 s and settles by about 0.7 s', () => {
     const o = opening();
     expect(o.peak).toBeGreaterThan(1.02);
-    expect(o.peak).toBeLessThan(1.05);
-    expect(o.peakAt).toBeGreaterThan(0.32);
-    expect(o.peakAt).toBeLessThan(0.42);
-    expect(o.settled).toBeLessThan(0.6);
+    expect(o.peak).toBeLessThan(1.06);
+    expect(o.peakAt).toBeGreaterThan(0.36);
+    expect(o.peakAt).toBeLessThan(0.48);
+    expect(o.settled).toBeLessThan(0.8);
   });
 
-  it('closing reaches the drop at about 0.25 s and is back in the trigger at about 0.42 s', () => {
+  it('the content is sharp at about 0.6 s, well after the body is at size', () => {
+    const s = createGrowthState();
+    let t = 0;
+    let atSize = -1;
+    let sharp = -1;
+    for (let i = 0; i < 480; i += 1) {
+      stepGrowth(s, dt, true);
+      t += dt;
+      if (atSize < 0 && s.grow.x > 0.95) atSize = t;
+      if (sharp < 0 && s.focus.x / 0.97 >= 1) sharp = t;
+    }
+    expect(sharp).toBeGreaterThan(0.5);
+    expect(sharp).toBeLessThan(0.75);
+    expect(sharp).toBeGreaterThan(atSize + 0.15);
+  });
+
+  it('closing reaches the drop at about 0.28 s and is back in the trigger at about 0.42 s', () => {
     const c = closing();
     expect(c.drop).toBeGreaterThan(0.2);
-    expect(c.drop).toBeLessThan(0.29);
+    expect(c.drop).toBeLessThan(0.33);
     expect(c.back).toBeGreaterThan(0.38);
-    expect(c.back).toBeLessThan(0.48);
+    expect(c.back).toBeLessThan(0.5);
   });
 });

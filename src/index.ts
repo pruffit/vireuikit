@@ -5,6 +5,7 @@ export * from './kit/behavior';
 export * from './kit/geometry';
 export * from './kit/menu';
 export * from './kit/morph';
+export * from './kit/union';
 export * from './kit/nav';
 export * from './kit/response';
 export * from './kit/sheet';

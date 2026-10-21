@@ -3,7 +3,8 @@
 import { VIREGLASS_SHEET_MATERIAL, type VireGlassMaterial, type VireGlassMorph } from 'vireglass';
 import { ATOM_AT_REST, atomBody, atomMaterial, type AtomBody } from './atom';
 import { intersectRect, type Rect, type Size } from './geometry';
-import { growthFrame, type GrowthInk, type GrowthPhase, type GrowthPoint } from './morph';
+import { growthFrame, smoothstep, type GrowthInk, type GrowthPhase, type GrowthPoint } from './morph';
+import { unionBounds, unionOutline, type OutlinePoint } from './union';
 
 /**
  * `disabled`: cannot be chosen. `focusable` (default: not disabled): whether focus can land on it. A native
@@ -200,21 +201,47 @@ export type RoundedRect = Rect & { radius: number };
 export type MenuSurfaceFrame = {
   /** The surface's box this frame: the growth frame's body. */
   box: RoundedRect;
-  /** The second shape for the lens's `setMorph`, offset from the box's centre; undefined once there is one body. */
+  /** The second shape for the lens's `setMorph`, offset from the box's centre; undefined once there is one body, and
+   *  when the outline is asked for, which draws the second shape into the silhouette instead. */
   morph: VireGlassMorph | undefined;
+  /** The silhouette of one body made of two shapes (a drop rising out of its source or merging back into it), relative to
+   *  `box`, which then holds both; undefined while one shape is the body. */
+  outline: OutlinePoint[] | undefined;
   /** Where the content's origin sits relative to the box's: it keeps its final place while the box moves. */
   content: { x: number; y: number };
   ink: GrowthInk;
   /** How much of a drop the surface is: 0 as the trigger and as the menu, highest in between. */
   activity: number;
+  /** 1 while the surface is still the trigger's capsule, whose glyphs show through its glass: 0 once the drop has formed. */
+  capsule: number;
 };
 
 const center = (r: Rect): GrowthPoint => ({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
 
+/** The lens's smoothing is a fusion margin; the outline's neck is the distance over which two shapes blend. */
+const OUTLINE_NECK = 2;
+
+// M 5:11: the drop is at its brightest from the moment it forms and has lost its lift by the time the menu has
+// reached size; the lightness inside the silhouette falls from 0.97 to 0.78 between 0.18 and 0.38 s.
+const ACTIVITY_FALLS_FROM = 0.45;
+const ACTIVITY_FALLS_TO = 1;
+
+// What is left of the lift once the body has its size, until the content is in focus.
+const ACTIVITY_TAIL = 0.5;
+
+// The glyphs of the capsule are seen through the lens until the drop has formed (M 5:11, +0.051 s).
+const CAPSULE_FROM = 0.45;
+const CAPSULE_TO = 0.9;
+
+export function menuCapsule(phase: GrowthPhase): number {
+  return 1 - smoothstep(CAPSULE_FROM, CAPSULE_TO, Math.min(Math.max(phase.shrink, 0), 1));
+}
+
 export function menuActivity(phase: GrowthPhase): number {
-  const shrink = Math.min(Math.max(phase.shrink, 0), 1);
-  const grow = Math.min(Math.max(phase.grow, 0), 1);
-  return shrink * (1 - grow);
+  const shrink = Math.min(Math.max(phase.glow ?? phase.shrink, 0), 1);
+  const unfocused = 1 - Math.min(Math.max(phase.focus ?? 1, 0), 1);
+  const sized = smoothstep(ACTIVITY_FALLS_FROM, ACTIVITY_FALLS_TO, Math.max(phase.grow, 0));
+  return shrink * (1 - sized * (1 - ACTIVITY_TAIL * unfocused));
 }
 
 /** `bounds`, the menu's region, holds every frame inside it: the overshoot runs away from the anchor and could
@@ -225,6 +252,7 @@ export function menuSurfaceFrame(
   anchor: GrowthPoint,
   phase: GrowthPhase,
   bounds?: Rect,
+  options: { outline?: boolean } = {},
 ): MenuSurfaceFrame {
   const frame = growthFrame(
     { geometry: { width: trigger.width, height: trigger.height, cornerRadius: trigger.radius }, center: center(trigger) },
@@ -241,19 +269,37 @@ export function menuSurfaceFrame(
     radius: geometry.cornerRadius,
   };
   let morph = frame.merge;
+  let outline: OutlinePoint[] | undefined;
+  if (options.outline && morph) {
+    const other = {
+      x: c.x + morph.offsetX - morph.width / 2,
+      y: c.y + morph.offsetY - morph.height / 2,
+      width: morph.width,
+      height: morph.height,
+      radius: morph.cornerRadius,
+    };
+    const both = unionBounds(box, other);
+    outline = unionOutline(box, other, morph.smoothing * OUTLINE_NECK, both);
+    box = { ...both, radius: box.radius };
+    morph = undefined;
+  }
   const held = bounds ? intersectRect(box, bounds) : null;
   if (held && (held.width < box.width || held.height < box.height)) {
     const was = center(box);
     const now = center(held);
+    const shift = { x: held.x - box.x, y: held.y - box.y };
     box = { ...held, radius: Math.min(box.radius, held.width / 2, held.height / 2) };
     if (morph) morph = { ...morph, offsetX: morph.offsetX + was.x - now.x, offsetY: morph.offsetY + was.y - now.y };
+    if (outline) outline = outline.map((p) => ({ x: p.x - shift.x, y: p.y - shift.y }));
   }
   return {
     box,
     morph,
+    outline,
     content: { x: menu.x - box.x, y: menu.y - box.y },
     ink: frame.ink,
     activity: menuActivity(phase),
+    capsule: menuCapsule(phase),
   };
 }
 
@@ -263,14 +309,17 @@ export function menuGlass(base: VireGlassMaterial): VireGlassMaterial {
   return { ...base, roughness: Math.max(base.roughness, VIREGLASS_SHEET_MATERIAL.roughness) };
 }
 
-/** The drop is the medium at its active end, the menu at rest is the resting glass. */
-export function menuMaterial(base: VireGlassMaterial, activity: number): VireGlassMaterial {
-  return atomMaterial(menuGlass(base), 'menu', { ...ATOM_AT_REST, pressed: activity });
+/** The drop is the medium at its active end, the menu at rest is the resting glass. While the surface is still the
+ *  trigger's capsule (`capsule` 1) it scatters as the trigger's own glass does, so its glyphs stay legible. */
+export function menuMaterial(base: VireGlassMaterial, activity: number, capsule = 0): VireGlassMaterial {
+  const sheet = menuGlass(base);
+  const roughness = sheet.roughness + (base.roughness - sheet.roughness) * capsule;
+  return atomMaterial({ ...sheet, roughness }, 'menu', { ...ATOM_AT_REST, pressed: activity });
 }
 
-/** The gathered medium lit by a concentrate of its surroundings: about 0.2 lighter than what it covers at
- *  M 5:11, so white over a light backdrop, and only brighter over a dark one. */
-export const MENU_DROP_BODY: AtomBody = { alpha: 0.9, white: 0.1, lift: 0.2 };
+/** The gathered medium lit by a concentrate of its surroundings: 0.2 lighter than what it covers at M 5:11 and nearly
+ *  opaque, so white over a light backdrop (0.97 inside the silhouette), and only brighter over a dark one. */
+export const MENU_DROP_BODY: AtomBody = { alpha: 1, white: 0.2, lift: 0.3 };
 
 export function menuBody(base: VireGlassMaterial, activity: number, frost = false): AtomBody {
   const rest = atomBody(base, ATOM_AT_REST, frost);

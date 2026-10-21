@@ -412,9 +412,11 @@ describe('the sizes', () => {
     expect(SHEET_SIZES.entryScale).toBe(0.96);
   });
 
-  it('slows the menu growth by a quarter', () => {
-    expect(SHEET_GROWTH_TIMING.growOpen).toBeCloseTo(DEFAULT_GROWTH_TIMING.growOpen * 1.25, 9);
-    expect(SHEET_GROWTH_TIMING.growClose).toBeCloseTo(DEFAULT_GROWTH_TIMING.growClose * 1.25, 9);
+  // The menu's growth was fitted to M 5:11 after the popover took its pace from it; the popover keeps that pace.
+  it("slows the pace the menu's growth had before the reference by a quarter", () => {
+    expect(SHEET_GROWTH_TIMING.growOpen).toBeCloseTo(0.38 * 1.25, 9);
+    expect(SHEET_GROWTH_TIMING.growClose).toBeCloseTo(0.4 * 1.25, 9);
+    expect(SHEET_GROWTH_TIMING.growOpen).toBeLessThan(DEFAULT_GROWTH_TIMING.growOpen);
   });
 });
 
@@ -476,7 +478,12 @@ describe('growth and closing frames', () => {
     };
     const sheet = createSheetGrowth();
     const menu = createGrowthState();
-    expect(settle((dt) => stepSheetGrowth(sheet, dt, true))).toBeGreaterThan(settle((dt) => stepGrowth(menu, dt, true)) * 0.9);
+    expect(settle((dt) => stepSheetGrowth(sheet, dt, true))).toBeGreaterThan(
+      settle((dt) => {
+        stepGrowth(menu, dt, true, false, { ...DEFAULT_GROWTH_TIMING, growOpen: 0.38, growDampingOpen: 0.72 });
+        return menu.grow.x !== 1 || menu.grow.target !== 1;
+      }) * 0.9,
+    );
     const instant = createSheetGrowth();
     stepSheetGrowth(instant, 1 / 60, true, true);
     expect(instant.x).toBe(1);

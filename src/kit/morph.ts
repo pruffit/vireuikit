@@ -1,11 +1,11 @@
 // Two-phase "capsule → drop → target" growth: atom behavior, not layout. The body contracts into
-// a drop, a neck grows from its side toward the target, the drop grows into the target with a
-// slight overshoot; closing retraces the same path in reverse, because the model holds no
+// a drop that rises toward the target, swells into it with a slight overshoot, and the content
+// clears as it settles; closing retraces the same path in reverse, because the model holds no
 // direction, only the current phase. Source and target sizes are layout, supplied as parameters.
 import { halfMinDp, type VireGlassGeometry, type VireGlassMorph } from 'vireglass';
 
 /** A spring with `response`-second settle time; `damping` < 1 overshoots. `instant` skips
- *  integration entirely, for reduced motion. */
+ *  integration entirely, for reduced motion. `rest` scales how near it must be to stop. */
 export type Spring = { x: number; v: number; target: number };
 
 export function stepSpring(
@@ -14,6 +14,7 @@ export function stepSpring(
   response: number,
   damping: number,
   instant = false,
+  rest = 1,
 ): boolean {
   if (instant) {
     const moved = s.x !== s.target || s.v !== 0;
@@ -31,7 +32,7 @@ export function stepSpring(
     s.v += (stiffness * (s.target - s.x) - friction * s.v) * step;
     s.x += s.v * step;
   }
-  if (Math.abs(s.target - s.x) < 1e-3 && Math.abs(s.v) < 1e-2) {
+  if (Math.abs(s.target - s.x) < 1e-3 * rest && Math.abs(s.v) < 1e-2 * rest) {
     s.x = s.target;
     s.v = 0;
     return false;
@@ -53,8 +54,13 @@ export type GrowthPoint = { x: number; y: number };
 export type GrowthShape = { geometry: VireGlassGeometry; center: GrowthPoint };
 
 /** `shrink` — capsule → drop, no overshoot. `grow` — drop → target; may exceed 1 for the
- *  overshoot. Both are read as-is; `stepGrowth` owns the bounds and the handoff between them. */
-export type GrowthPhase = { shrink: number; grow: number };
+ *  overshoot. `rise` — where the body is on its way from the drop to the target's centre; it has its own spring
+ *  because the body rises ahead of its swelling and overshoots the centre, and closing lets it go back later than
+ *  it shrinks. `focus` — how far the target's content has come into focus; the content clears after the body has
+ *  reached its size. `glow` — how lit the glass is: it follows `shrink` quickly and lets go of it slowly, so the
+ *  capsule that has re-formed is still bright. Without `rise` and `focus` they follow `grow`, without `glow` it is
+ *  `shrink`. All are read as-is; `stepGrowth` owns the bounds and the handoff. */
+export type GrowthPhase = { shrink: number; grow: number; focus?: number; rise?: number; glow?: number };
 
 export type GrowthInk = {
   /** 0…1: how much of the source's ink is still visible (1) vs. already defocused into the drop (0). */
@@ -78,15 +84,25 @@ export type GrowthFrame = {
 
 /** The drop's size — a fraction of the source's diameter, with headroom for the neck. */
 const DROP_DIAMETER = 1.1;
-/** How far the drop travels from the source toward the target, as a fraction of the source's diameter. */
-const DROP_LIFT = 0.5;
+/** How far the drop sits above the source's centre when it has formed (M 5:11: 5 dp of a 44 dp toolbar), as a
+ *  fraction of the source's diameter; it rises toward the target as it swells, not before. */
+const DROP_LIFT = 0.07;
+/** Without a `rise`, the drop rises ahead of its swelling (M 5:11: it is at the menu's centre when 60 % grown). */
+const RISE_AHEAD = 0.9;
+/** The bud starts smaller than a square root would make it (M 5:11: the bump on the capsule is a few dp high at first). */
+const SEED_GROWTH = 0.8;
+const KEEP_UNTIL = 0.3;
 const NECK_GAIN = 0.3;
 const NECK_RAMP = 4;
 const CORNER_EASE_START = 0.55;
-const INK_OUT_END = 0.4;
-// M 5:11: nothing of the menu shows until it is at 95 % of its height, and it is sharp by the overshoot.
+// M 5:11: the toolbar's glyphs begin to soften a quarter of the way into the drop and are gone by the time it has formed.
+const INK_OUT_START = 0.25;
+const INK_OUT_END = 0.85;
+// Without a `focus` the content comes into focus as the body reaches size; with one, what counts as in focus,
+// since a spring never quite arrives.
 const INK_IN_START = 0.9;
 const INK_IN_END = 1;
+const FOCUS_DONE = 0.97;
 
 export function growthInk(phase: GrowthPhase): GrowthInk {
   const a = Math.min(Math.max(phase.shrink, 0), 1);
@@ -94,8 +110,11 @@ export function growthInk(phase: GrowthPhase): GrowthInk {
   // Ink leaves and arrives by going out of focus, not by plain transparency — the blur amount is
   // the drawer's job, this only reports the fraction of focus.
   return {
-    outgoing: 1 - smoothstep(0, INK_OUT_END, a),
-    incoming: smoothstep(INK_IN_START, INK_IN_END, b),
+    outgoing: 1 - smoothstep(INK_OUT_START, INK_OUT_END, a),
+    incoming:
+      phase.focus === undefined
+        ? smoothstep(INK_IN_START, INK_IN_END, b)
+        : Math.min(Math.max(phase.focus / FOCUS_DONE, 0), 1),
   };
 }
 
@@ -125,7 +144,14 @@ export function growthFrame(
 
   const a = Math.min(Math.max(phase.shrink, 0), 1);
   const b = Math.max(phase.grow, 0);
-  const keep = Math.max(1 - b, 0);
+  const reached = Math.min(b, 1);
+  const rise = phase.rise ?? reached * (1 + RISE_AHEAD * (1 - reached));
+  // Closing, the body runs on past the drop's place (M 5:11: the capsule sinks about 12 dp as the drop merges into it)
+  // and settles back; the whole body goes with it.
+  const dip = Math.min(rise, 0);
+  const sink: GrowthPoint = { x: (target.center.x - drop.x) * dip, y: (target.center.y - drop.y) * dip };
+  // The capsule goes into the swelling drop once the drop is a third grown; until then, closing finds it whole.
+  const keep = 1 - smoothstep(KEEP_UNTIL, 1, b);
   const d = DROP_DIAMETER * sourceSize;
 
   const shrunkGeometry: VireGlassGeometry = {
@@ -141,18 +167,18 @@ export function growthFrame(
   );
   const shrunk: GrowthShape = {
     geometry: shrunkGeometry,
-    center: { x: mix(source.center.x, drop.x, a), y: mix(source.center.y, drop.y, a) },
+    center: { x: mix(source.center.x, drop.x, a) + sink.x, y: mix(source.center.y, drop.y, a) + sink.y },
   };
 
-  const seed = d * Math.sqrt(a);
-  // The sign of the corner the body pins to. Zero means the anchor sits on the same axis as the
-  // source's center, so growth along that axis centers instead of hugging an edge.
+  const seed = d * Math.min(Math.max(phase.glow ?? phase.shrink, 0), 1) ** SEED_GROWTH;
+  // The sign of the corner the body pins to once it overshoots. Zero means the anchor sits on the same axis as the
+  // source's center, so the overshoot along that axis is centred instead of hugging an edge.
   const cornerX = Math.sign(anchor.x - source.center.x);
   const cornerY = Math.sign(anchor.y - source.center.y);
-  const edgeX = mix(drop.x + cornerX * (seed / 2), anchor.x, Math.min(b, 1));
-  const edgeY = mix(drop.y + cornerY * (seed / 2), anchor.y, Math.min(b, 1));
   const width = mix(seed, target.geometry.width, b);
   const height = mix(seed, target.geometry.height, b);
+  const overX = Math.max(width - target.geometry.width, 0) / 2;
+  const overY = Math.max(height - target.geometry.height, 0) / 2;
   const grownGeometry: VireGlassGeometry = { width, height, cornerRadius: 0 };
   grownGeometry.cornerRadius = Math.min(
     mix(halfMinDp(grownGeometry), target.geometry.cornerRadius, smoothstep(CORNER_EASE_START, 1, b)),
@@ -160,7 +186,10 @@ export function growthFrame(
   );
   const grown: GrowthShape = {
     geometry: grownGeometry,
-    center: { x: edgeX - cornerX * (width / 2), y: edgeY - cornerY * (height / 2) },
+    center: {
+      x: mix(drop.x, target.center.x, rise) - cornerX * overX,
+      y: mix(drop.y, target.center.y, rise) - cornerY * overY,
+    },
   };
 
   const { main, other } = largerOf(grown, shrunk);
@@ -184,16 +213,31 @@ export function growthFrame(
   };
 }
 
-export type GrowthState = { shrink: Spring; grow: Spring };
+export type GrowthState = { shrink: Spring; grow: Spring; focus: Spring; rise: Spring; glow: Spring };
 
 export const createGrowthState = (): GrowthState => ({
   shrink: { x: 0, v: 0, target: 0 },
   grow: { x: 0, v: 0, target: 0 },
+  focus: { x: 0, v: 0, target: 0 },
+  rise: { x: 0, v: 0, target: 0 },
+  glow: { x: 0, v: 0, target: 0 },
+});
+
+/** Every spring at rest on `x`: the surface held open (1) or closed (0) with nothing moving. */
+export const heldGrowthState = (x: 0 | 1): GrowthState => ({
+  shrink: { x, v: 0, target: x },
+  grow: { x, v: 0, target: x },
+  focus: { x, v: 0, target: x },
+  rise: { x, v: 0, target: x },
+  glow: { x, v: 0, target: x },
 });
 
 export const growthPhase = (state: GrowthState): GrowthPhase => ({
   shrink: state.shrink.x,
   grow: state.grow.x,
+  focus: state.focus.x,
+  rise: state.rise.x,
+  glow: state.glow.x,
 });
 
 /** Durations are client-specific: the default is fitted to the menu growing out of its toolbar at
@@ -206,20 +250,44 @@ export type GrowthTiming = {
   growClose: number;
   /** < 1 gives the target a slight overshoot on open; closing never overshoots. */
   growDampingOpen: number;
+  /** The body's rise toward the target's centre: it overshoots it on open (`riseDampingOpen` < 1), and goes back on close
+   *  without. */
+  riseOpen: number;
+  riseDampingOpen: number;
+  riseClose: number;
+  riseDampingClose: number;
+  /** The content coming into focus once the body is nearly at size, and leaving it first on close. */
+  focusOpen: number;
+  focusClose: number;
+  /** The glass lighting up as the drop forms, and going back to its resting body after the capsule is back. */
+  glowOpen: number;
+  glowClose: number;
 };
 
 export const DEFAULT_GROWTH_TIMING: GrowthTiming = {
-  shrinkOpen: 0.21,
-  shrinkClose: 0.14,
-  growOpen: 0.38,
-  growClose: 0.4,
-  growDampingOpen: 0.72,
+  shrinkOpen: 0.23,
+  shrinkClose: 0.08,
+  growOpen: 0.49,
+  growClose: 0.5,
+  growDampingOpen: 0.68,
+  riseOpen: 0.4,
+  riseDampingOpen: 0.5,
+  riseClose: 0.6,
+  riseDampingClose: 0.45,
+  focusOpen: 0.38,
+  focusClose: 0.15,
+  glowOpen: 0.08,
+  glowClose: 0.6,
 };
 
 const GROW_DAMPING_CLOSE = 1;
 const SHRINK_DAMPING = 1;
 const GROW_STARTS_AT = 0.8;
-const SHRINK_RETURNS_AT = 0.12;
+const SHRINK_RETURNS_AT = 0.3;
+const FOCUS_STARTS_AT = 0.7;
+const FOCUS_DAMPING = 1;
+// A tail of 0.8 % of a rise, a light or a focus is not seen, and waiting for it would hold the surface out.
+const LOOSE_REST = 8;
 
 /** Growth starts once the drop has gathered, and the reverse on close. `reduceMotion` turns off
  *  the spring entirely: both phases jump straight to their target in one step, with no overshoot
@@ -231,15 +299,23 @@ export function stepGrowth(
   reduceMotion = false,
   timing: GrowthTiming = DEFAULT_GROWTH_TIMING,
 ): boolean {
-  const { shrink, grow } = state;
+  const { shrink, grow, focus, rise, glow } = state;
   if (reduceMotion) {
     shrink.target = open ? 1 : 0;
     grow.target = open ? 1 : 0;
+    focus.target = open ? 1 : 0;
+    rise.target = open ? 1 : 0;
   } else if (open) {
     shrink.target = 1;
-    if (shrink.x > GROW_STARTS_AT) grow.target = 1;
+    if (shrink.x > GROW_STARTS_AT) {
+      grow.target = 1;
+      rise.target = 1;
+    }
+    if (grow.x > FOCUS_STARTS_AT) focus.target = 1;
   } else {
     grow.target = 0;
+    rise.target = 0;
+    focus.target = 0;
     if (grow.x < SHRINK_RETURNS_AT) shrink.target = 0;
   }
   const movedShrink = stepSpring(
@@ -256,5 +332,16 @@ export function stepGrowth(
     open ? timing.growDampingOpen : GROW_DAMPING_CLOSE,
     reduceMotion,
   );
-  return movedShrink || movedGrow;
+  glow.target = reduceMotion ? (open ? 1 : 0) : shrink.x;
+  const movedGlow = stepSpring(glow, dt, open ? timing.glowOpen : timing.glowClose, 1, reduceMotion, LOOSE_REST);
+  const movedRise = stepSpring(
+    rise,
+    dt,
+    open ? timing.riseOpen : timing.riseClose,
+    open ? timing.riseDampingOpen : timing.riseDampingClose,
+    reduceMotion,
+    LOOSE_REST,
+  );
+  const movedFocus = stepSpring(focus, dt, open ? timing.focusOpen : timing.focusClose, FOCUS_DAMPING, reduceMotion, LOOSE_REST);
+  return movedShrink || movedGrow || movedRise || movedFocus || movedGlow;
 }

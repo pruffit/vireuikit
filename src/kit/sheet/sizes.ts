@@ -49,11 +49,34 @@ export function sheetOpacity(fraction: number): number {
   return smoothstep(SHEET_SIZES.opacity.glassUntil, SHEET_SIZES.opacity.opaqueFrom, fraction);
 }
 
-/** The menu's growth slowed by a quarter, because a sheet's path is longer; it overshoots less on open. */
+/** The pace the menu's growth had before it was fitted to M 5:11 (acceptance N9), which the popover and the sheets keep:
+ *  a panel is not the reference's menu, and a longer closing holds the lens on mid-size maps for more frames. */
+const POPOVER_PACE = { shrinkOpen: 0.21, shrinkClose: 0.14, growOpen: 0.38, growClose: 0.4, glowClose: 0.3 };
+
+export const POPOVER_GROWTH_TIMING: GrowthTiming = {
+  ...DEFAULT_GROWTH_TIMING,
+  ...POPOVER_PACE,
+  growDampingOpen: 0.72,
+  riseOpen: POPOVER_PACE.growOpen,
+  riseDampingOpen: 0.72,
+  riseClose: POPOVER_PACE.growClose,
+  riseDampingClose: 1,
+  focusClose: 0.1,
+};
+
+/** The growth of a sheet from its trigger: the popover's pace slowed by a quarter, because its path is longer; it overshoots less on open. */
 export const SHEET_GROWTH_TIMING: GrowthTiming = {
-  shrinkOpen: DEFAULT_GROWTH_TIMING.shrinkOpen * SHEET_SIZES.growthSlowdown,
-  shrinkClose: DEFAULT_GROWTH_TIMING.shrinkClose * SHEET_SIZES.growthSlowdown,
-  growOpen: DEFAULT_GROWTH_TIMING.growOpen * SHEET_SIZES.growthSlowdown,
-  growClose: DEFAULT_GROWTH_TIMING.growClose * SHEET_SIZES.growthSlowdown,
+  shrinkOpen: POPOVER_PACE.shrinkOpen * SHEET_SIZES.growthSlowdown,
+  shrinkClose: POPOVER_PACE.shrinkClose * SHEET_SIZES.growthSlowdown,
+  growOpen: POPOVER_PACE.growOpen * SHEET_SIZES.growthSlowdown,
+  growClose: POPOVER_PACE.growClose * SHEET_SIZES.growthSlowdown,
   growDampingOpen: 0.8,
+  riseOpen: POPOVER_PACE.growOpen * SHEET_SIZES.growthSlowdown,
+  riseDampingOpen: 0.8,
+  riseClose: POPOVER_PACE.growClose * SHEET_SIZES.growthSlowdown,
+  riseDampingClose: 1,
+  glowOpen: DEFAULT_GROWTH_TIMING.glowOpen * SHEET_SIZES.growthSlowdown,
+  glowClose: POPOVER_PACE.glowClose * SHEET_SIZES.growthSlowdown,
+  focusOpen: DEFAULT_GROWTH_TIMING.focusOpen * SHEET_SIZES.growthSlowdown,
+  focusClose: DEFAULT_GROWTH_TIMING.focusClose * SHEET_SIZES.growthSlowdown,
 };
