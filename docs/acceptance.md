@@ -148,11 +148,11 @@ button or a bare `<button>`; it grows only because it opens a menu (B5). Behavio
 | N22 | Under forced colours the menu uses system colours: a Canvas surface with a border, the active item in Highlight, disabled items in GrayText. | behaviour "forced colours" (colours asserted, not the look) |
 | N23 | Upgrading while the page is parsed adopts the trigger and the list and synthesizes nothing; items added later get their role. | behaviour "upgrade while the page is parsed" |
 | N24 | `sample` on the menu reaches its surface, set before or after the lens attaches. | behaviour "a sample on the menu reaches its surface" |
-| N25 | The press that opened the menu chooses nothing. The menu grows in under the pointer, so its first item lands where the trigger was: the second click of a double click, a pointer click before the menu has arrived (its content in focus and the surface past its overshoot, about 0.5 s) or whose press began before it had, and a held Enter or Space all leave it as it is; a pointer click once it has arrived chooses. A deliberate key is not under the pointer, so Enter or Space on an item chooses from the first frame the content is drawn (opaque, still out of focus, about 0.25 s), long before the surface settles; only a key before the content shows is dropped. Until the menu has arrived its items take no pointer events (`data-arrived`: no hover, no press), because the content is transformed while it grows and a hit would land on a row other than the one drawn there. The platform's own popover never puts an item under the pointer, so it needs none of this. | behaviour "input that began on the trigger" (a double click, second clicks 40 to 250 ms later, Enter and Space held on the trigger and on an item, a second Enter before the content, a key that chooses in the first frame the content is drawn while a pointer click there is still dropped, the items' pointer events off until arrival, and a later click that does choose) |
+| N25 | The press that opened the menu chooses nothing. The menu grows in under the pointer, so its first item lands where the trigger was: the second click of a double click, a pointer click before the menu has arrived (its content in focus and the surface past its overshoot, about 0.5 s) or whose press began before it had, and a held Enter or Space all leave it as it is; a pointer click once it has arrived chooses. A deliberate key is not under the pointer, so Enter or Space on an item chooses from the first frame the content is drawn (opaque, still out of focus, about 0.3 s), long before the surface settles; only a key before the content shows is dropped. Until the menu has arrived its items take no pointer events (`data-arrived`: no hover, no press), because the content is transformed while it grows and a hit would land on a row other than the one drawn there. The platform's own popover never puts an item under the pointer, so it needs none of this. | behaviour "input that began on the trigger" (a double click, second clicks 40 to 250 ms later, Enter and Space held on the trigger and on an item, a second Enter before the content, a key that chooses in the first frame the content is drawn while a pointer click there is still dropped, the items' pointer events off until arrival, and a later click that does choose) |
 | N26 | A scroll or a resize while the menu is out puts it back over its trigger once a frame, measures nothing and hands the lens nothing when the surface's shape has not changed; the lens is handed a morph only when it changes. | behaviour "a scroll or a resize while the menu is out costs the lens nothing…" (a recording stand-in for `vireglass/dom`) |
 | N27 | `glass` parses as on the buttons: empty, `present` or `touch` is a lens, anything else none. Taking a forced state away closes the menu and resets `aria-expanded`. | behaviour "glass is parsed as on the buttons…", "taking a forced state away…" |
 | N28 | The list's own `toggle` event fires once the growth has run back, when the list leaves the top layer; `aria-expanded` turns false as the closing begins. | behaviour "the list's own toggle event fires once the growth has run back…" |
-| N29 | The menu's rendering follows the reference's frame by frame at the ten instants of the lab's `view=menu-reference` stage (M 5:11, opening +0.051 to +0.852 s, closing +0.084 to +0.284 s). Per instant, ours and the reference are measured against the frame before the menu opened: (a) the glass silhouette (pixels more than 6/255 away from it, despeckled, holes filled) and its intersection over union with the reference's; (b) the mean lightness inside it; (c) the edge energy inside it, pulled in 8 px from the rim (the mean distance of the luma from its 7 × 7 average) relative to the settled menu's, so a drop reads 0, content magnified and blurred reads between, sharp content reads 1; (d) its centroid. The tolerance is what the reference varies by: one frame of its own (1/30 s) either way, so ours may lead or lag by a frame, plus what the settled instant leaves open and the kit does not model (the menu's offset and size, the resting body, a JPEG against a PNG): IoU at least the smallest IoU of the reference with its two neighbouring frames minus 0.15, lightness and relative edge energy within the reference's largest change to a neighbour plus 0.06 and 0.05, centroid within its largest move to a neighbour plus 4 dp. | local gate `npm run check:lab:reference` (needs the frames in `VIREUIKIT_REFERENCE_DIR`; prints the table and skips with a message without them; not in CI) |
+| N29 | The menu's rendering follows the reference's frame by frame at the ten instants of the lab's `view=menu-reference` stage (M 5:11, opening +0.051 to +0.852 s, closing +0.084 to +0.284 s). Per instant, ours and the reference are measured against the frame before the menu opened: (a) the glass silhouette (pixels more than 6/255 away from it, despeckled, holes filled; ours is taken over a dark backdrop, where a resting body is unmistakable) and its intersection over union with the reference's; (b) the mean lightness inside it; (c) the edge energy inside it, pulled in 8 px from the rim (the mean distance of the luma from its 7 × 7 average) relative to the settled menu's, so a drop reads 0, content magnified and blurred reads between, sharp content reads 1; (d) its centroid. Ours may lead or lag by one reference frame (1/30 s), so each measure is judged against the reference's frames at t − 1, t and t + 1 as an envelope, not a radius: lightness and relative edge energy by their distance to the interval the three span, the centroid by its distance to the path through the three centroids, the silhouette by the best IoU against the three masks. What the kit does not model, the reference's menu sitting 6 dp further out and 9.5 lower (window-concentric), is removed by registration, not by slack: the settled instant's centroid offset is measured in the run, printed, applied to centroids and silhouettes in proportion to how much of the settled menu the reference has grown, and fails the run beyond 12 dp (the documented layout, 11.2 dp, and a little). The slacks are fixed and have sources that are not the settled instant's residual: IoU at least 0.8 (the ceiling for shapes the kit draws is 0.89: 0.96 for the static size difference, 167 × 202 dp against 169 × 207, times 0.93 for a one-pixel boundary error on the smallest shape, the 57 × 51 dp drop; the rest allows the pointed top and the tail that the union does not draw); lightness within 0.057 (the largest documented static body difference, the reference's +0.072 against ours +0.017 over a light backdrop, N15, plus 0.002, the spread of the reference's own settled frames); relative edge energy within 0.05 (bounded below by the same spread, 0.002, and above by what one frame of lead changes it by where the content comes into focus, 0.1 to 0.3); centroid within 2.5 dp (that spread, 0.86 dp, plus 1.6 dp, half of the static size difference, which registration takes off in proportion and not entirely at every instant). The table prints each measure's value and its margin (tolerance minus value; negative fails). A canary runs inside the gate: the reference's own frames, shifted in time by 0 and by ±3 frames (0.1 s), go through the same comparison as ours; the unshifted ones pass at every instant and the shifted ones fail at all nine moving instants (the gate holds 8), which shows it tells a 0.1 s lag from a match. A measure that cannot be matched goes on the spec's `KNOWN` list with its instant and reason, prints as KNOWN and is counted in the summary: o+0.051 IoU (ours contracts about 0.01 s early and has no bud) and c+0.084 IoU (the reference drop's tail toward the capsule is not drawn). | local gate `npm run check:lab:reference` (needs the frames in `VIREUIKIT_REFERENCE_DIR`; prints the table and skips with a message without them; not in CI); unit `parity-measures` (thresholding, despeckle and hole fill, IoU, lightness, edge energy, centroid, the envelope, canaries: a shifted shape moves the centroid by as much, a blurred patch reads lower) |
 | N30 | The popover takes the menu's drop, its rise, its lit glass and its content's own focus (blur and opacity on the focus spring), but not two things: the silhouette, which it hands to its lens as the second shape because its surface takes no clip path, and the content riding inside the lens (`--vk-tx`, `--vk-ty`, `--vk-s`), which exists only for the menu: a popover's layout is the author's, so its content is neither magnified nor moved. It keeps the pace the menu's growth had before it was fitted to the reference (`POPOVER_GROWTH_TIMING`: a longer closing held the lens on mid-size maps for frames that ran over 33 ms); a sheet takes that pace with every duration slowed by a quarter and a damping of 0.8 on opening (`SHEET_GROWTH_TIMING`), and a change of form takes its opening response (`FORM_MORPH_TIMING`), so the three cannot drift apart. A popover held part-way open (a forced phase) takes its springs from `growthStateAt`, the live curves run to that point, not from a separate approximation. | unit `POPOVER_GROWTH_TIMING`, `SHEET_GROWTH_TIMING`, `growthStateAt`; behaviour "a popover grows out of its trigger"; perf `popover growth`, `popover retraction` |
 
 ### Against the reference
@@ -169,11 +169,11 @@ M 5:11 against ours at the touch tier, with the same label width:
 | height, four rows | 206 dp | 202 |
 | corner | ≈ 37 dp | 35 |
 | body over what it covers, ΔL / ΔC | +0.058 to +0.072 / 0.000, over a grey of L 0.66 to 0.80 | +0.043 / 0.000 over the mid grey (L 0.62); +0.019 dark, +0.026 photo, +0.017 light |
-| the drop's lightness | 0.97 to 1.00 over 0.79 to 0.82 (ΔL ≈ +0.2), 0.97 mean inside the silhouette | bright, nearly opaque white (alpha 1, 0.2 of white and 0.3 of lightness over what it covers): 0.99 over light, 0.97 mean inside the silhouette on the stage; over a dark backdrop it brightens to about 0.6 |
-| the drop's size | ≈ 63 dp, from a 172 × 44 dp toolbar | 48 dp (1.1 × the source's smaller side) |
-| the drop's shape | a bud on the capsule, a drop that swells round on both axes, a bowl, the rounded rectangle; closing, a drop with a tail, then the capsule with a bump on top | the same, in the silhouette: the union of the capsule and the drop (N14); the bowl's glow at the bottom and the tail are not drawn |
-| the content | none until the body is 80 % grown (0.25 s), then magnified about 1.3 times and heavily blurred inside the lens, sharp by about 0.58 s | the same: from the body's 70 % growth, 1.35 times and 8 px of blur at first, sharp at 0.59 s |
-| where it sits | the toolbar's bottom-leading corner, 6 dp further out and 9.5 dp lower | flush on the trigger's corner |
+| the drop's lightness | 0.97 to 1.00 over 0.79 to 0.82 (ΔL ≈ +0.2), 0.97 mean inside the silhouette | an opaque body (alpha 1, a fifth of white and a lift of 0.3 over what it covers): 0.99 over light, 0.97 mean inside the silhouette on the stage; over a dark backdrop it brightens to about 0.6 |
+| the drop's size | 57 × 51 dp at its smallest (the silhouette at 0.117 s), from a 172 × 44 dp toolbar (the stage's trigger is that toolbar) | 56 × 44 dp: 0.62 × the geometric mean of the source's sides (54 dp), so a round 44 dp button gets one of 27 dp, smaller than itself |
+| the drop's shape | a bud on the capsule, a drop that swells round on both axes, a bowl, the rounded rectangle; closing, a drop with a tail, then the capsule with a bump on top | the same, in the silhouette: the union of the capsule and the drop (N14), the height trailing the width; the bowl's glow at the bottom, the drop's pointed top and the tail are not drawn |
+| the content | none until the body is 80 % grown (0.25 s), then magnified about 1.5 times and heavily blurred inside the lens, sharp by about 0.58 s | the same: from the body's 70 % growth, 1.6 times and 5 px of blur at first (fitted to the content's edge energy: 0.16 against the reference's 0.17 at 0.318 s, 0.50 against 0.45 at 0.384 s), in focus at about 0.5 s |
+| where it sits | the toolbar's bottom-leading corner, 6 dp further out and 9.5 dp lower | flush on the trigger's corner (registered out in N29: 10.7 dp at the settled instant) |
 
 Timing. The reference is tracked frame by frame (the box of everything that differs from the frame before the menu
 opened by more than 6 of 255, so ±0.033 s), from the first frame that changes (311.578 s opening, 313.447 s closing);
@@ -184,65 +184,61 @@ growth begins and "reached" on closing when growth is below 0.12:
 
 | | reference | `DEFAULT_GROWTH_TIMING` before | after |
 |---|---|---|---|
-| the drop has formed and rises out of the source | 0.12 s | 0.10 | 0.11 |
+| the drop has formed and rises out of the source | 0.12 s | 0.10 | 0.12 |
 | at size (95 % of the width) | 0.34 s | 0.28 | 0.33 |
-| overshoot | 5.4 % of the width at 0.45 s | 3.2 % at 0.37 | 4.9 % at 0.44 |
-| settled | 0.65 s in size, then sliding 13 dp down into its window-concentric place | 0.52 | 0.64 |
-| the content is sharp | 0.58 s | 0.31 | 0.59 |
-| the body's centre at 0.18, 0.25, 0.32, 0.38 s | 144, 107, 92, 94 (the box's top edge 6 dp past its rest at 0.38 s) | 131, 112, 110, 108 | 144, 105, 92, 103 |
-| closing reaches the drop | 0.25 s | 0.23 | 0.29 |
-| closing is back in the source, its ridge gone | 0.42 s | 0.44 | 0.38 |
+| at size (95 % of the height) | 0.45 s | 0.28 | 0.47 |
+| overshoot | 5.4 % of the width at 0.45 s | 3.2 % at 0.37 | 4.9 % at 0.43 (the height does not overshoot) |
+| settled | 0.65 s in size, then sliding 13 dp down into its window-concentric place | 0.52 | 0.62 |
+| the content is sharp | 0.58 s (its edge energy follows ours within the envelope from 0.32 s) | 0.31 | 0.50 |
+| the body's centre at 0.18, 0.25, 0.32, 0.38 s | 144, 107, 92, 94 (the box's top edge 6 dp past its rest at 0.38 s) | 131, 112, 110, 108 | 149, 109, 88, 89 (within 2.3, 0.6, 2.3 and 1.1 dp of the reference's path once the layout offset is registered) |
+| closing reaches the drop | 0.25 s | 0.23 | 0.26 |
+| closing is back in the source, its ridge gone | 0.42 s | 0.44 | 0.35 |
 
 The rows and their spacing, the timing, the silhouette, the lightness inside it, the content's edge energy and the
-centroid are held (unit tests, N15 and N29). The drop's size, the menu's offset from the toolbar and the slide that
-settles it there are layout of the reference (a wide toolbar gathers more glass; the menu sits concentric with the
-window, which the kit does not know), and the reference's height trails its width (95 % at 0.45 s against 0.34 s),
-which one spring for both does not follow; they are reported, not held. The lab's `view=menu-reference` puts ten of the
-frames (opening and closing) next to ours at the same time since the start, over the frame before the menu opened with
-the toolbar filled in from its surround; `npm run check:lab:reference` measures it.
+centroid are held (unit tests, N15 and N29). The reference's height trails its width (95 % at 0.45 s against 0.34 s), which
+the body's second spring follows (critically damped, 0.46 s, against 0.47 s at 95 % for the height). The menu's offset from
+the toolbar and the slide that settles it there are layout of the reference (the menu sits concentric with the window,
+which the kit does not know): the gate registers them out and bounds them (N29). The lab's `view=menu-reference` puts ten of
+the frames (opening and closing) next to ours at the same time since the start, over the frame before the menu opened with
+the toolbar filled in from its surround; its trigger is the reference toolbar's size, 172 × 44 dp, and its menu is held to the
+reference's width, 167 dp, since a label's width depends on the font; `npm run check:lab:reference` measures it.
 
 ### The parity gate on that stage
 
-`check:lab:reference` measures both columns of the stage against the frame before the menu opened, the reference's
-JPEG crop and our screenshot of one tile at a time (a menu's shadow reaches into the next tile). Before the growth was
-fitted, on `feat/legibility` with vireglass 3.4.0, it failed at eight of the ten instants:
+`check:lab:reference` measures both columns of the stage against the frame before the menu opened: the reference's JPEG
+crop and our screenshot of one tile at a time (a menu's shadow reaches into the next tile), the silhouette of ours over a dark
+backdrop (our resting body lifts what it covers by about 0.02 over this light backdrop, under the 6/255 threshold in places,
+while the core's shadow at menu thickness reaches 14 dp, which the reference's does not: both would fake or hide a shape). The
+criteria and where the tolerances come from are N29. The last run, on this branch with vireglass 3.4.0:
 
 ```
-instant      IoU  min IoU     L ref    L ours     L tol  edge ref edge ours     e tol   ref x,y  ours x,y       off   off tol  result
-o+0.051         0.44      0.48     0.861     0.826     0.131      0.35      0.05      1.32   107,185   106,171      14.2       5.9  FAIL IoU+centroid
-o+0.117         0.33      0.35     0.971     0.852     0.099      0.00      0.03      0.13   106,180   105,157      22.6      18.9  FAIL IoU+lightness+centroid
-o+0.184         0.47      0.33     0.965     0.790     0.081      0.02      0.21      0.06   104,144   103,131      12.8      24.8  FAIL lightness+edge
-o+0.251         0.51      0.52     0.881     0.737     0.124      0.05      0.16      0.10   102,107   101,112       5.7      21.7  FAIL IoU+lightness+edge
-o+0.318         0.64      0.70     0.809     0.710     0.082      0.17      1.00      0.19    100,92   101,108      16.5       8.5  FAIL IoU+lightness+edge+centroid
-o+0.384         0.75      0.77     0.780     0.711     0.066      0.45      1.01      0.18    100,94   102,108      13.6       8.3  FAIL IoU+lightness+edge+centroid
-o+0.852         0.88      0.84     0.761     0.709     0.062      1.00      1.00      0.05    99,111   101,108       3.4       4.9        ok
-c+0.084         0.76      0.55     0.877     0.782     0.122      0.13      0.21      0.23   103,117   102,129      11.9      17.3        ok
-c+0.184         0.55      0.50     0.982     0.848     0.073      0.01      0.11      0.09   106,174   104,150      24.1      22.8  FAIL lightness+edge+centroid
-c+0.284         0.47      0.64     0.923     0.795     0.089      0.21      0.05      0.29   108,190   107,176      13.9       6.2  FAIL IoU+lightness+centroid
+instant        IoU   margin     L off   margin  edge off   margin  centroid   margin   ref x,y ours x,y  result
+o+0.051       0.72   -0.08~    0.000   0.057      0.00    0.05       2.4     0.1   107,185  107,181  KNOWN iou
+o+0.117       0.82    0.02     0.000   0.057      0.00    0.05       2.5     0.0   106,180  109,179  ok
+o+0.184       0.87    0.07     0.011   0.046      0.02    0.03       2.3     0.2   104,144  106,149  ok
+o+0.251       0.90    0.10     0.000   0.057      0.02    0.03       0.6     1.9   102,107  105,109  ok
+o+0.318       0.90    0.10     0.014   0.043      0.00    0.05       2.3     0.2    100,92   107,88  ok
+o+0.384       0.91    0.11     0.050   0.007      0.00    0.05       1.1     1.4    100,94   106,89  ok
+o+0.852       0.98    0.18     0.041   0.016      0.00    0.05       0.0     2.5    99,111  105,103  ok
+c+0.084       0.75   -0.05~    0.009   0.048      0.00    0.05       2.0     0.5   103,117  106,130  KNOWN iou
+c+0.184       0.83    0.03     0.007   0.050      0.00    0.05       1.5     1.0   106,174  107,170  ok
+c+0.284       0.81    0.01     0.006   0.051      0.00    0.05       1.1     1.4   108,190  107,187  ok
+registration, the settled menu's centroid (ours minus the reference's), taken off every centroid and silhouette: 6.3, -8.6 dp (10.7; bound 12)
+slack: IoU 0.8, lightness 0.057, edge 0.05, centroid 2.5 dp
+noise in the reference's own settled frames: IoU 0.990, lightness 0.002, edge 0.002, centroid 0.86 dp
+canary (the reference's own frames as ours, shifted in time; ~ marks a known measure, ! a failure):
+  shift +0 frames: 0 of 9 moving instants fail: -
+  shift +3 frames: 9 of 9 moving instants fail: o+0.051(iou+edge+centroid) o+0.117(iou+centroid) o+0.184(iou+lightness+edge+centroid) o+0.251(iou+edge+centroid) o+0.318(edge+centroid) o+0.384(edge+centroid) o+0.852(edge) c+0.084(iou+lightness+edge+centroid) c+0.184(iou+edge+centroid) c+0.284(iou+edge+centroid)
+  shift -3 frames: 9 of 9 moving instants fail: o+0.051(edge) o+0.117(iou+lightness+edge) o+0.184(iou+centroid) o+0.251(iou+centroid) o+0.318(iou+lightness+edge+centroid) o+0.384(iou+edge) c+0.084(iou+edge+centroid) c+0.184(iou+lightness+edge+centroid) c+0.284(iou+edge+centroid)
+summary: 8 of 10 instants pass clean, 0 fail, 2 measures known (o+0.051: iou; c+0.084: iou)
 ```
 
-After:
-
-```
-instant      IoU  min IoU     L ref    L ours     L tol  edge ref edge ours     e tol   ref x,y  ours x,y       off   off tol  result
-o+0.051         0.63      0.48     0.861     0.833     0.131      0.35      0.79      1.32   107,185   107,180       5.0       5.9        ok
-o+0.117         0.86      0.35     0.971     0.901     0.099      0.00      0.01      0.13   106,180   107,178       1.4      18.9        ok
-o+0.184         0.92      0.33     0.965     0.974     0.081      0.02      0.00      0.06   104,144   103,144       0.7      24.8        ok
-o+0.251         0.87      0.52     0.881     0.943     0.124      0.05      0.02      0.10   102,107    99,105       2.8      21.7        ok
-o+0.318         0.85      0.70     0.809     0.792     0.082      0.17      0.08      0.19    100,92     98,92       2.4       8.5        ok
-o+0.384         0.78      0.77     0.780     0.733     0.066      0.45      0.35      0.18    100,94   101,103       8.3       8.3        ok
-o+0.852         0.89      0.84     0.761     0.708     0.062      1.00      1.00      0.05    99,111   100,108       3.2       4.9        ok
-c+0.084         0.80      0.55     0.877     0.932     0.122      0.13      0.05      0.23   103,117   101,127      10.3      17.3        ok
-c+0.184         0.77      0.50     0.982     0.989     0.073      0.01      0.00      0.09   106,174   106,170       3.2      22.8        ok
-c+0.284         0.82      0.64     0.923     0.961     0.089      0.21      0.28      0.29   108,190   108,195       4.4       6.2        ok
-```
-
-The tolerance columns are what the reference itself varies by within one of its own frames (1/30 s) of that instant,
-plus what the settled instant leaves open and the kit does not model: IoU 0.15, lightness 0.06, relative edge energy
-0.05, centroid 4 dp (our menu's offset and size, our resting body, JPEG against PNG: at the settled instant ours reads
-IoU 0.89, lightness 0.054 under, centroid 3.7 dp away). The stage must be wider than the window's region: a menu is held
-inside the viewport, so the gate runs in a 2400 px window; in a narrower one the right-hand tiles are pushed to its
-edge and read as a closing into the corner.
+The `KNOWN` list is two entries, both a shape the union outline does not draw: o+0.051 IoU (0.72: ours contracts about
+0.01 s ahead of the reference and has no bud on the capsule) and c+0.084 IoU (0.75: the reference's drop has a tail toward
+the capsule's centre). Nothing is on it as layout of the reference: that is registered (the settled offset, 6.3 and −8.6 dp,
+is printed and bounded). Before this fit, the growth of the previous commit fails six of the ten instants on the same gate: the two known ones (IoU 0.69 and 0.78), o+0.117 (IoU 0.77, centroid 3.1 dp), o+0.384 (edge energy 0.19 against the reference's 0.31 to 0.58, centroid 4.5 dp: the body's lag), c+0.184 (IoU 0.78) and c+0.284 (centroid 4.6 dp). The stage must be wider than the window's region: a menu is held
+inside the viewport, so the gate runs in a 2400 px window; in a narrower one the right-hand tiles are pushed to its edge and
+read as a closing into the corner.
 
 ## Resting body
 

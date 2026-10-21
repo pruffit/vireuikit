@@ -40,9 +40,9 @@ const FORCED_PHASE = /^-?\d*\.?\d+( -?\d*\.?\d+){1,5}$/;
 const GLASS_ON = new Set(['', 'present', 'touch']);
 const MATERIAL_STEPS = 10;
 // The rows are this much larger while the lens still holds them out of focus.
-const CONTENT_MAGNIFY = 0.35;
-// The content is fully opaque from here (styles: opacity is the ink four times over).
-const CONTENT_DRAWN = 0.25;
+const CONTENT_MAGNIFY = 0.6;
+// The content is fully opaque from here (styles: opacity is the ink ten times over).
+const CONTENT_DRAWN = 0.1;
 const VIEWPORT_MARGIN = 8;
 const TRIGGER = ':scope > button, :scope > vire-button > button, :scope > vire-icon-button > button';
 const ACTIVATION_KEYS = new Set(['Enter', ' ']);

@@ -87,7 +87,7 @@ ${MENU}[data-phase=moving]>[popover]{padding:0;clip-path:var(--vk-outline,none)}
 ${MENU}[data-joined]>[popover]{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 ${MENU}[data-phase=moving]>[popover]>*{transform-origin:0 0;
  transform:translate(var(--vk-tx),calc(var(--vk-ty) - var(--vk-i,0)*var(--vk-menu-row)*(1 - var(--vk-s))))scale(var(--vk-s));
- opacity:min(1,calc(var(--vk-ink-in)*4));filter:blur(calc((1 - var(--vk-ink-in))*8px))}
+ opacity:min(1,calc(var(--vk-ink-in)*10));filter:blur(calc((1 - var(--vk-ink-in))*5px))}
 ${MENU}:not([data-arrived])>[popover]>*{pointer-events:none}
 ${MENU}[data-measure]>[popover]{width:max-content!important;height:auto!important;left:0!important;top:0!important;padding:var(--vk-menu-pad)!important;visibility:hidden}
 ${MENU}[data-measure]>[popover]>*{width:auto!important;transform:none!important}
