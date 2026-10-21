@@ -1,7 +1,7 @@
 // A class change flows a body from one form into the next: one body reshaped on the growth's springs, never a swap
 // or a crossfade. Turning back mid-way runs the same spring the other way; reduced motion lands in one frame.
 import type { Rect } from '../geometry';
-import { smoothstep, stepSpring, type Spring } from '../morph';
+import { POPOVER_GROWTH_TIMING, smoothstep, stepSpring, type Spring } from '../morph';
 import type { AdaptiveContext } from './context';
 
 export type MorphBody = 'navigation' | 'surface' | 'panes' | 'supporting' | 'accessory' | 'toolbar';
@@ -32,7 +32,7 @@ export function formMorph(change: FormChange, ctx: Pick<AdaptiveContext, 'reduce
 
 /** A class change moves at the pace the menu's growth had before it was fitted to M 5:11; critically damped, because a
  *  layout that overshoots would bounce off the window's edge. */
-export const FORM_MORPH_TIMING = { response: 0.38, damping: 1 } as const;
+export const FORM_MORPH_TIMING = { response: POPOVER_GROWTH_TIMING.growOpen, damping: 1 } as const;
 
 /** 0 is the form it comes from, 1 the form it goes to. */
 export type FormMorphState = { t: Spring; fromInk?: number };

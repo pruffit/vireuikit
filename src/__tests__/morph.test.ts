@@ -4,6 +4,7 @@ import {
   createGrowthState,
   growthFrame,
   growthPhase,
+  growthStateAt,
   stepGrowth,
   stepSpring,
   type GrowthShape,
@@ -223,5 +224,79 @@ describe('the growth against the reference (M 5:11, docs/acceptance.md N29)', ()
   it('closing finds the capsule whole until the drop has swelled a third of the way', () => {
     const closing = growthFrame(source, target, ANCHOR, { shrink: 0, grow: 0.2 });
     expect(closing.merge?.width ?? closing.body.geometry.width).toBeGreaterThanOrEqual(SOURCE_GEOMETRY.width - 1e-6);
+  });
+});
+
+describe('the drop and the sink', () => {
+  const toolbar = capsuleGeometry(172, 44);
+  const button = capsuleGeometry(44, 44);
+  const at = (g: typeof toolbar, y: number): GrowthShape => ({ geometry: g, center: { x: 100, y } });
+  const menu = (height: number): GrowthShape => ({ geometry: roundedRectGeometry(167, height, 35), center: { x: 100, y: 200 - height / 2 } });
+
+  it('is sized from the source\'s area: a wide toolbar gathers more glass, a round button a drop smaller than itself', () => {
+    const drop = (g: typeof toolbar) => growthFrame(at(g, 200), menu(200), { x: 20, y: 222 }, { shrink: 1, grow: 0 }).grown.geometry.width;
+    expect(drop(toolbar)).toBeGreaterThan(50);
+    expect(drop(toolbar)).toBeLessThan(63);
+    expect(drop(button)).toBeLessThan(44);
+    expect(drop(toolbar)).toBeGreaterThan(drop(button) * 1.5);
+  });
+
+  it('sinks as far past the drop for a tall menu as for a short one: the source\'s size bounds it', () => {
+    const sunk = (height: number) => {
+      const source = at(toolbar, 222);
+      const frame = growthFrame(source, menu(height), { x: 20, y: 222 }, { shrink: 0, grow: 0, rise: -0.15 });
+      return Math.hypot(frame.body.center.x - source.center.x, frame.body.center.y - source.center.y);
+    };
+    expect(sunk(600)).toBeCloseTo(sunk(120), 6);
+    expect(sunk(600)).toBeLessThan(0.3 * 44);
+  });
+
+  it('turns back from the dip without a jump when the menu is opened again', () => {
+    const state = createGrowthState();
+    for (let i = 0; i < 300; i += 1) stepGrowth(state, 1 / 60, true);
+    const source = at(toolbar, 222);
+    const target = menu(200);
+    const centre = () => growthFrame(source, target, { x: 20, y: 222 }, growthPhase(state)).body.center;
+    let dipped = false;
+    for (let i = 0; i < 120 && !dipped; i += 1) {
+      stepGrowth(state, 1 / 60, false);
+      dipped = state.rise.x < -0.02;
+    }
+    expect(dipped).toBe(true);
+    let last = centre();
+    let widest = 0;
+    for (let i = 0; i < 240; i += 1) {
+      stepGrowth(state, 1 / 60, true);
+      const now = centre();
+      widest = Math.max(widest, Math.hypot(now.x - last.x, now.y - last.y));
+      last = now;
+    }
+    const plain = createGrowthState();
+    let before = growthFrame(source, target, { x: 20, y: 222 }, growthPhase(plain)).body.center;
+    let fastest = 0;
+    for (let i = 0; i < 240; i += 1) {
+      stepGrowth(plain, 1 / 60, true);
+      const now = growthFrame(source, target, { x: 20, y: 222 }, growthPhase(plain)).body.center;
+      fastest = Math.max(fastest, Math.hypot(now.x - before.x, now.y - before.y));
+      before = now;
+    }
+    expect(widest).toBeLessThan(fastest * 1.1);
+    expect(last.y).toBeCloseTo(target.center.y, 1);
+  });
+});
+
+describe('holding a surface part of the way open', () => {
+  it('is where the live springs are when the width has got that far', () => {
+    const held = growthStateAt({ shrink: 1, grow: 0.5 });
+    const live = createGrowthState();
+    while (live.grow.x < 0.5) stepGrowth(live, 1 / 240, true);
+    expect(growthPhase(held)).toEqual(growthPhase(live));
+    expect(held.focus.x).toBeLessThan(0.3);
+    expect(held.rise.x).toBeGreaterThan(held.grow.x * 0.8);
+  });
+
+  it('is at rest closed and at rest open at the ends', () => {
+    expect(growthPhase(growthStateAt({ shrink: 0, grow: 0 }))).toEqual(growthPhase(createGrowthState()));
+    expect(growthStateAt({ shrink: 1, grow: 1 }).grow).toEqual({ x: 1, v: 0, target: 1 });
   });
 });

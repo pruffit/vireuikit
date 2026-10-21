@@ -243,6 +243,19 @@ export const heldGrowthState = (x: 0 | 1): GrowthState => ({
   glow: { x, v: 0, target: x },
 });
 
+/** The springs where an opening is when its width has reached `grow` (or, while that is 0, its capsule has reached `shrink`),
+ *  for holding a surface part of the way open on the same curves it runs. */
+export function growthStateAt(reach: { shrink: number; grow: number }, timing: GrowthTiming = DEFAULT_GROWTH_TIMING): GrowthState {
+  if (reach.grow >= 1) return heldGrowthState(1);
+  const state = createGrowthState();
+  const dt = 1 / 240;
+  for (let i = 0; i < 1200; i += 1) {
+    if (reach.grow > 0 ? state.grow.x >= reach.grow : state.shrink.x >= reach.shrink) break;
+    stepGrowth(state, dt, true, false, timing);
+  }
+  return state;
+}
+
 export const growthPhase = (state: GrowthState): GrowthPhase => ({
   shrink: state.shrink.x,
   grow: state.grow.x,
@@ -300,6 +313,31 @@ export const DEFAULT_GROWTH_TIMING: GrowthTiming = {
   focusClose: 0.15,
   glowOpen: 0.08,
   glowClose: 0.6,
+};
+
+const POPOVER_OPEN = 0.38;
+const POPOVER_CLOSE = 0.4;
+
+/** The pace the menu's growth had before it was fitted to the reference: the popover keeps it, a sheet slows it
+ *  (`SHEET_GROWTH_TIMING`) and a change of form moves at its opening response (`FORM_MORPH_TIMING`). */
+export const POPOVER_GROWTH_TIMING: GrowthTiming = {
+  shrinkOpen: 0.21,
+  shrinkClose: 0.14,
+  shrinkDampingClose: 1,
+  growOpen: POPOVER_OPEN,
+  growClose: POPOVER_CLOSE,
+  growDampingOpen: 0.72,
+  heightOpen: POPOVER_OPEN,
+  heightDampingOpen: 0.72,
+  heightClose: POPOVER_CLOSE,
+  riseOpen: POPOVER_OPEN,
+  riseDampingOpen: 0.72,
+  riseClose: POPOVER_CLOSE,
+  riseDampingClose: 1,
+  focusOpen: 0.38,
+  focusClose: 0.1,
+  glowOpen: 0.08,
+  glowClose: 0.3,
 };
 
 const GROW_DAMPING_CLOSE = 1;

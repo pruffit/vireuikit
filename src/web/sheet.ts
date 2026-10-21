@@ -13,9 +13,8 @@ import {
 import { presentationForm, type PresentationForm, type SurfaceKind } from '../kit/adaptive/presentation';
 import type { Rect, Size } from '../kit/geometry';
 import { menuBody, menuMaterial, type RoundedRect } from '../kit/menu';
-import { createGrowthState, growthPhase, heldGrowthState, smoothstep, stepGrowth, type GrowthPoint } from '../kit/morph';
+import { POPOVER_GROWTH_TIMING, createGrowthState, growthPhase, growthStateAt, heldGrowthState, stepGrowth, type GrowthPoint } from '../kit/morph';
 import {
-  POPOVER_GROWTH_TIMING,
   SHEET_SIZES,
   createSheetDrag,
   createSheetGrowth,
@@ -1698,14 +1697,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         }
       } else {
         this.#sg = { x: forced.t, v: 0, target: forced.t };
-        this.#pg = {
-          shrink: { x: clamp01(forced.t * 2), v: 0, target: 1 },
-          grow: { x: clamp01(forced.t * 2 - 1), v: 0, target: 1 },
-          height: { x: clamp01(forced.t * 2 - 1), v: 0, target: 1 },
-          focus: { x: smoothstep(0.9, 1, clamp01(forced.t * 2 - 1)), v: 0, target: 1 },
-          rise: { x: clamp01(forced.t * 2 - 1), v: 0, target: 1 },
-          glow: { x: clamp01(forced.t * 2), v: 0, target: 1 },
-        };
+        this.#pg = growthStateAt({ shrink: clamp01(forced.t * 2), grow: clamp01(forced.t * 2 - 1) }, POPOVER_GROWTH_TIMING);
       }
       this.#morph = null;
       this.#syncTriggers();
