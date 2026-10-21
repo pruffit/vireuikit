@@ -58,6 +58,7 @@
     "lab": "vite --config lab/vite.config.ts",
     "check:lab": "playwright test behavior",
     "check:lab:visual": "playwright test visual",
+    "check:lab:reference": "node scripts/check-lab-reference.mjs",
     "check:lab:visual:update": "playwright test visual --update-snapshots",
     "check:lab:perf": "playwright test --config playwright.perf.config.ts"
   },

@@ -37,7 +37,7 @@ function crop(img: HTMLImageElement): HTMLCanvasElement {
 }
 
 /** The rest frame with the toolbar filled in from its surround: the backdrop our menu grows over. */
-function withoutToolbar(canvas: HTMLCanvasElement): { url: string; pixels: { r: number; g: number; b: number }[] } {
+function withoutToolbar(canvas: HTMLCanvasElement): { url: string; rgba: string; pixels: { r: number; g: number; b: number }[] } {
   const g = canvas.getContext('2d', { willReadFrequently: true })!;
   const px = g.getImageData(0, 0, W, H);
   const hw = TOOLBAR.width / PX_PER_DP / 2;
@@ -68,7 +68,7 @@ function withoutToolbar(canvas: HTMLCanvasElement): { url: string; pixels: { r: 
     pixels.push({ r: px.data[i * 4]!, g: px.data[i * 4 + 1]!, b: px.data[i * 4 + 2]! });
   }
   g.putImageData(px, 0, 0);
-  return { url: canvas.toDataURL('image/png'), pixels };
+  return { url: canvas.toDataURL('image/png'), rgba: base64(px.data), pixels };
 }
 
 function phaseAt(t: number): GrowthPhase {
@@ -81,6 +81,27 @@ function phaseAt(t: number): GrowthPhase {
   return growthPhase(state);
 }
 
+const base64 = (bytes: Uint8ClampedArray) => {
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(out);
+};
+
+declare global {
+  interface Window {
+    __menuReference?: {
+      width: number;
+      height: number;
+      opens: number;
+      closes: number;
+      frames: readonly number[];
+      /** RGBA of a reference frame's crop, base64: the parity gate reads the neighbours of each instant from here. */
+      frame(t: number): Promise<string>;
+      rest(): string;
+    };
+  }
+}
+
 export async function menuReference(stage: HTMLElement, rows: HTMLElement): Promise<void> {
   stage.style.width = `${MENU_REFERENCE_FRAMES.length * (W + 12) + 24}px`;
   rows.style.cssText = `display:grid;grid-template-columns:repeat(${MENU_REFERENCE_FRAMES.length},${W}px);gap:8px 12px;padding:12px;font:12px system-ui`;
@@ -88,6 +109,15 @@ export async function menuReference(stage: HTMLElement, rows: HTMLElement): Prom
   const rest = withoutToolbar(crop(await loadImage(frameFile(REST_FRAME))));
   const { statsFromSamples } = await import('vireglass/dom');
   const sample = statsFromSamples(rest.pixels.filter((_, i) => i % 7 === 0));
+  window.__menuReference = {
+    width: W,
+    height: H,
+    opens: OPENS,
+    closes: CLOSES,
+    frames: MENU_REFERENCE_FRAMES,
+    frame: async (t) => base64(crop(await loadImage(frameFile(t))).getContext('2d')!.getImageData(0, 0, W, H).data),
+    rest: () => rest.rgba,
+  };
   const frames = await Promise.all(MENU_REFERENCE_FRAMES.map((t) => loadImage(frameFile(t))));
   frames.forEach((img, i) => {
     const t = MENU_REFERENCE_FRAMES[i]!;
@@ -95,8 +125,10 @@ export async function menuReference(stage: HTMLElement, rows: HTMLElement): Prom
     label.textContent = t < CLOSES ? `open +${(t - OPENS).toFixed(3)} s` : `close +${(t - CLOSES).toFixed(3)} s`;
     label.style.gridRow = '1';
     const ref = crop(img);
+    ref.dataset.tile = `ref-${i}`;
     ref.style.cssText = `grid-row:2;width:${W}px;height:${H}px`;
     const ours = document.createElement('div');
+    ours.dataset.tile = `ours-${i}`;
     ours.style.cssText = `grid-row:3;position:relative;width:${W}px;height:${H}px;background:url(${rest.url}) 0 0/100% 100%;color:#1b1c20;color-scheme:light;font-size:17px`;
     const phase = phaseAt(t);
     const menu = makeMenu({

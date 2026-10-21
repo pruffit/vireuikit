@@ -23,6 +23,7 @@ npm run check:readme
 npm run check:lab
 npm run check:lab:visual   # local, Windows baselines
 npm run check:lab:perf     # local, a headed Chromium with a GPU
+npm run check:lab:reference # local, needs VIREUIKIT_REFERENCE_DIR (frames, never committed)
 ```
 
 `check:package` packs the package, installs it into an empty project and loads every entry point
