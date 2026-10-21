@@ -1,3 +1,4 @@
+import type { Look } from './parity-shape';
 // The four measures of the menu parity gate, on plain RGBA buffers (no browser needed).
 export type Rgba = { width: number; height: number; data: Uint8Array };
 export type Mask = { width: number; height: number; on: Uint8Array };
@@ -5,7 +6,7 @@ export type Mask = { width: number; height: number; on: Uint8Array };
 const luma = (img: Rgba, i: number) =>
   (0.2126 * img.data[i * 4]! + 0.7152 * img.data[i * 4 + 1]! + 0.0722 * img.data[i * 4 + 2]!) / 255;
 
-function erode(m: Mask, r: number): Mask {
+export function erode(m: Mask, r: number): Mask {
   const { width: w, height: h } = m;
   const on = new Uint8Array(w * h);
   for (let y = 0; y < h; y += 1) {
@@ -27,7 +28,7 @@ function erode(m: Mask, r: number): Mask {
   return { width: w, height: h, on };
 }
 
-function dilate(m: Mask, r: number): Mask {
+export function dilate(m: Mask, r: number): Mask {
   const { width: w, height: h } = m;
   const on = new Uint8Array(w * h);
   for (let y = 0; y < h; y += 1) {
@@ -207,8 +208,10 @@ export function distanceToPolyline(p: Point, path: readonly Point[]): number {
   return best;
 }
 
-export type Measured = { mask: Mask; lightness: number; edge: number; centroid: Point | null };
+export type Measured = { mask: Mask; lightness: number; edge: number; centroid: Point | null; look?: Look };
 export type Slack = { iou: number; lightness: number; edge: number; centroid: number };
+export type LookSlack = { aspect: number; taper: number; vertical: number; rim: number; scale: number; shift: number };
+export type Measure = keyof Slack | keyof LookSlack;
 
 export type Verdict = {
   /** The best overlap of ours (registered) with any of the reference's frames around the instant. */
@@ -217,26 +220,54 @@ export type Verdict = {
   edge: number;
   centroid: number;
   /** Tolerance minus value (the IoU's: value minus floor); negative fails. */
-  margin: Slack;
-  failed: (keyof Slack)[];
+  margin: Partial<Record<Measure, number>>;
+  /** The distance of each of the proportions, the light, the rim and the content from the reference's range; absent where one side has none. */
+  look: Partial<LookSlack>;
+  failed: Measure[];
 };
 
 /**
  * Ours against the reference's frames at t - 1, t and t + 1 (1/30 s apart): ours may lead or lag by one reference frame, so
  * lightness and relative edge energy must lie within the envelope of the three, the centroid (less `offset`, the layout the kit
- * does not model) on the path through their centroids, and the silhouette (shifted by the same offset) overlap one of them
+* does not model) on the path through their centroids, and the silhouette (shifted by the same offset) overlap one of them
  * best. `edge` of every measure is already relative to its own settled menu.
  */
-export function compareToReference(ours: Measured, around: readonly Measured[], offset: Point, slack: Slack): Verdict {
+export function compareToReference(ours: Measured, around: readonly Measured[], offset: Point, slack: Slack & Partial<LookSlack>, centre = Math.floor(around.length / 2)): Verdict {
   const shifted = shiftMask(ours.mask, -Math.round(offset.x), -Math.round(offset.y));
   const best = Math.max(...around.map((r) => iou(shifted, r.mask)));
   const lightness = distanceToRange(ours.lightness, around.map((r) => r.lightness));
   const edge = distanceToRange(ours.edge, around.map((r) => r.edge));
   const path = around.map((r) => r.centroid).filter((c): c is Point => c !== null);
   const centroid = ours.centroid ? distanceToPolyline({ x: ours.centroid.x - offset.x, y: ours.centroid.y - offset.y }, path) : Number.POSITIVE_INFINITY;
-  const margin = { iou: best - slack.iou, lightness: slack.lightness - lightness, edge: slack.edge - edge, centroid: slack.centroid - centroid };
-  const failed = (Object.keys(margin) as (keyof Slack)[]).filter((k) => !(margin[k] >= 0));
-  return { iou: best, lightness, edge, centroid, margin, failed };
+  const margin: Partial<Record<Measure, number>> = { iou: best - slack.iou, lightness: slack.lightness - lightness, edge: slack.edge - edge, centroid: slack.centroid - centroid };
+  const look: Partial<LookSlack> = {};
+  // A pear or a bowl lives for about a frame, so the look is judged at half a frame either way: the values at t, and halfway to each neighbour.
+  const seen = (f: (l: Look) => number | null | undefined) => {
+    const at = (k: number) => (around[k]?.look ? f(around[k]!.look!) : null);
+    const mid = at(centre);
+    if (typeof mid !== 'number') return [];
+    const halfway = (k: number) => {
+      const v = at(k);
+      return typeof v === 'number' ? (v + mid) / 2 : null;
+    };
+    return [halfway(centre - 1), mid, halfway(centre + 1)].filter((v): v is number => typeof v === 'number');
+  };
+  const judge = (key: keyof LookSlack, mine: number | null | undefined, theirs: number[]) => {
+    const tolerance = slack[key];
+    if (tolerance === undefined || typeof mine !== 'number' || theirs.length === 0) return;
+    look[key] = distanceToRange(mine, theirs);
+    margin[key] = tolerance - look[key]!;
+  };
+  if (ours.look) {
+    judge('aspect', ours.look.aspect, seen((l) => l.aspect));
+    judge('taper', ours.look.taper, seen((l) => l.taper));
+    judge('vertical', ours.look.vertical, seen((l) => l.vertical));
+    judge('rim', ours.look.rim, seen((l) => l.rim));
+    judge('scale', ours.look.content?.scale, seen((l) => l.content?.scale));
+    judge('shift', ours.look.content?.shift, seen((l) => l.content?.shift));
+  }
+  const failed = (Object.keys(margin) as Measure[]).filter((k) => !(margin[k]! >= 0));
+  return { iou: best, lightness, edge, centroid, margin, look, failed };
 }
 
 export function bounds(m: Mask): { x0: number; y0: number; x1: number; y1: number } | null {

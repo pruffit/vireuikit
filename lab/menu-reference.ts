@@ -10,6 +10,8 @@ const TOOLBAR = { x: 938, y: 1411, width: 1102, height: 282 };
 const REST_FRAME = 311.478;
 // The reference menu's width (167 dp): a label's width depends on the font, which the stage does not hold.
 const MENU_WIDTH = 167;
+// Two rows of five, so the stage fits a window of 1440 dp and a menu is never held against its edge.
+const COLUMNS = 5;
 // Halfway between the last unchanged frame and the first changed one.
 const OPENS = 311.561;
 const CLOSES = 313.43;
@@ -112,8 +114,8 @@ declare global {
 }
 
 export async function menuReference(stage: HTMLElement, rows: HTMLElement): Promise<void> {
-  stage.style.width = `${MENU_REFERENCE_FRAMES.length * (W + 12) + 24}px`;
-  rows.style.cssText = `display:grid;grid-template-columns:repeat(${MENU_REFERENCE_FRAMES.length},${W}px);gap:8px 12px;padding:12px;font:12px system-ui`;
+  stage.style.width = `${COLUMNS * (W + 12) + 24}px`;
+  rows.style.cssText = `display:grid;grid-template-columns:repeat(${COLUMNS},${W}px);gap:8px 12px;padding:12px;font:12px system-ui`;
   stage.setAttribute('data-backdrop', 'ref-light');
   const rest = withoutToolbar(crop(await loadImage(frameFile(REST_FRAME))));
   const { statsFromSamples } = await import('vireglass/dom');
@@ -133,13 +135,14 @@ export async function menuReference(stage: HTMLElement, rows: HTMLElement): Prom
     const t = MENU_REFERENCE_FRAMES[i]!;
     const label = document.createElement('div');
     label.textContent = t < CLOSES ? `open +${(t - OPENS).toFixed(3)} s` : `close +${(t - CLOSES).toFixed(3)} s`;
-    label.style.gridRow = '1';
+    const band = Math.floor(i / COLUMNS) * 3;
+    label.style.cssText = `grid-row:${band + 1};grid-column:${(i % COLUMNS) + 1}`;
     const ref = crop(img);
     ref.dataset.tile = `ref-${i}`;
-    ref.style.cssText = `grid-row:2;width:${W}px;height:${H}px`;
+    ref.style.cssText = `grid-row:${band + 2};grid-column:${(i % COLUMNS) + 1};width:${W}px;height:${H}px`;
     const ours = document.createElement('div');
     ours.dataset.tile = `ours-${i}`;
-    ours.style.cssText = `grid-row:3;position:relative;width:${W}px;height:${H}px;background:url(${rest.url}) 0 0/100% 100%;color:#1b1c20;color-scheme:light;font-size:17px`;
+    ours.style.cssText = `grid-row:${band + 3};grid-column:${(i % COLUMNS) + 1};position:relative;width:${W}px;height:${H}px;background:url(${rest.url}) 0 0/100% 100%;color:#1b1c20;color-scheme:light;font-size:17px`;
     const menu = makeMenu({
       id: `ref-${i}`,
       size: 'touch',
