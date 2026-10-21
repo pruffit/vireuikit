@@ -109,11 +109,17 @@ same growth run backwards, and it closes after a choice. How the web element get
   then; the keyboard follows the menu-button pattern (`stepMenu`).
 - **One body.** The menu replaces its trigger (M 5:11 and the showcase frames: the trigger is gone while the menu is
   out). The list is the one glass surface; while the menu is out the trigger hands its body over (`setCarried` on the
-  control elements: no lens, no body, the glyph defocusing with the growth), so the two never stack as glass on glass,
-  and the trigger takes the body back when the surface has retracted onto it.
-- **The core's morph.** Each frame the surface's box is the growth frame's body (`menuSurfaceFrame`) and the second
-  shape goes to the lens's `setMorph`, offset from the surface's centre; the content keeps its final position while
-  the box moves, so it is revealed and comes into focus rather than sliding in.
+  control elements: no lens, no body), so the two never stack as glass on glass, and the trigger takes the body back
+  when the surface has retracted onto it. Its glyphs stay in focus until the drop has formed: they are cut to the body
+  as it contracts, and seen through the surface's veil, or through glass that scatters as the trigger's own does, while the surface is still the capsule.
+- **One body of two shapes.** Each frame the surface's box is the growth frame's body (`menuSurfaceFrame`). While a drop
+  and the capsule are joined (a bud rising out of it, a bump merging back into it) the box holds both and the surface
+  is clipped to their smooth union (`unionOutline`); the lens's `setMorph` shapes only the refraction and cannot draw
+  outside its element, so the popover, which takes no clip path, still hands it the second shape. The drop is bright
+  white and nearly opaque through the body, lit by `glow`; it rises toward the menu's centre ahead of its swelling
+  (`rise`), the content rides inside the lens magnified and out of focus (`focus`, its own spring) and clears after the
+  body has its size, and the content keeps its final position while the box moves, so it is revealed rather than
+  sliding in. Closing is the same path back, the body running a few dp past the trigger and settling onto it.
 - **Placement is under the finger.** The menu pins to the trigger's corner that points to the nearest corner of its
   region and grows into the open space (S: the button morphs into the menu so the grip does not change). The region is
   the trigger's segment of the window, so on a folding screen the menu stays in its half, and every frame of the growth,
@@ -310,12 +316,16 @@ while it stays open.
     velocity and never closes the sheet (`cancelSheetDrag`).
 - **Growth and closing.** A surface with a trigger grows out of it and runs back into it, and the trigger hands its
   body over while the surface is out (`setCarried`), as with the menu:
-  - A popover takes the menu's growth (`growthFrame`, the drop included, `DEFAULT_GROWTH_TIMING`).
-  - A sheet grows straight from the trigger's body into its box with no drop, on the growth's springs slowed by a
-    quarter, because the path is longer.
+  - A popover takes the menu's growth (`growthFrame`, the drop included, `DEFAULT_GROWTH_TIMING`): the drop is bright and
+    rises ahead of its swelling and the content comes into focus on its own spring after the body has its size, but at
+    the pace the menu had before it was fitted to M 5:11 (`POPOVER_GROWTH_TIMING`: a longer closing ran the lens over
+    33 ms on mid-size maps). It does not take the clip path of the union, so it hands the lens the second shape, and its
+    content is not magnified (its layout is the author's, there is no row to scale about).
+  - A sheet grows straight from the trigger's body into its box with no drop, on that pace slowed by a quarter,
+    because the path is longer.
   - A sheet without a trigger rises from the bottom edge on the detent spring; a centred one without a trigger comes in
     from 96 % scale.
-  - Content comes into focus near size, as in the menu.
+  - Content comes into focus once the body has its size, as in the menu; a sheet's follows its single spring.
 - **Changes of form** reshape the one body on `FORM_MORPH_TIMING` (`formMorphFrame`): popover ↔ bottom sheet at 600,
   bottom ↔ side sheet at 840, side sheet ↔ third pane at 1600, sheet ↔ full screen on a compact height. The content,
   its scroll, the focus, the selection and the detent survive; a sheet that left its detent for full screen comes back

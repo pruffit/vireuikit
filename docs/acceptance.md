@@ -131,14 +131,14 @@ button or a bare `<button>`; it grows only because it opens a menu (B5). Behavio
 | N5 | A choice closes the menu, returns focus to the trigger and fires the item's own click exactly once, even when the item's own handler stops the click; neither kind of disabled item can be chosen, by pointer or key, and choosing one closes nothing. | unit; behaviour "a choice closes the menu…", "…even when the item's own handler stops the click", "an aria-disabled item can be reached but not chosen…" |
 | N6 | Escape closes and returns focus to the trigger; a press outside closes without taking focus back, in the document or inside a closed shadow root; Tab closes, and focus moves on from the trigger as if the menu were not there. | unit; behaviour "Escape…", "a press outside…", "Tab…", "inside a closed shadow root" |
 | N7 | There is no way to choose and stay open. | by construction (no such option); unit (`choose` always closes) |
-| N8 | The glass grows out of the trigger: the surface's first frame is the trigger's body (box and radius), it contracts into a drop smaller than the trigger, the drop grows into the menu with a small overshoot, and the content comes into focus only near size (M 5:11, frame by frame; M 5:05 "the bubble simply pops open to reveal the content"). | unit (frames at the boundaries, the drop, the overshoot, the ink); behaviour "the surface starts on the trigger, passes a drop and lands on the menu", canary "a menu that pops open without growing fails it" |
-| N9 | The timing is the reference's: the drop forms in about 0.10 s, the menu is at size at about 0.3 s and overshoots by about 3.5 % at about 0.37 s; closing reaches the drop at about 0.25 s and is back in the trigger at about 0.42 s (M 5:11, "Against the reference"). | unit `DEFAULT_GROWTH_TIMING` against these numbers |
+| N8 | The glass grows out of the trigger: the surface's first frame is the trigger's body (box and radius), it contracts into a drop smaller than the trigger while a bud rises out of its top, the drop rises toward the menu's centre as it swells (round on both axes, then the rounded rectangle), overshoots a little, and the content, magnified and out of focus inside the lens, clears after the body has its size (M 5:11, frame by frame; M 5:05 "the bubble simply pops open to reveal the content"). | unit (frames at the boundaries, the drop, the rise, the overshoot, the ink and its own focus); behaviour "the surface starts on the trigger, passes a drop and lands on the menu", canary "a menu that pops open without growing fails it"; N29 |
+| N9 | The timing is the reference's, tracked on the same frames as N29: the drop forms in about 0.11 s and the body is at 95 % of its size at about 0.33 s; the width overshoots by about 5 % at about 0.44 s and is settled at about 0.65 s; the content is sharp at about 0.59 s; closing reaches the drop at about 0.29 s and is back in the trigger at about 0.4 s (M 5:11, "Against the reference"). | unit `DEFAULT_GROWTH_TIMING` against these numbers; N29 |
 | N10 | It stays under the finger: the menu shares the trigger's corner that points to the nearest corner of its region (the trigger's segment of the window, AD23) and grows into the open space, covering the trigger; it flips or slides only to stay in that region, and `corner` fixes the corner (S: the button morphs into the menu so that the grip does not change). | unit `menuPlacement`; behaviour "the menu pins to the trigger's corner" |
-| N11 | Closing retraces the growth: the content defocuses first, the menu flows back into a drop and the drop into the trigger, ending on the trigger's body; reopening midway turns back from where it is. | unit (reverse path, turning back); behaviour "closing runs back through the drop into the trigger" |
-| N12 | One body: on every frame the menu is out (growing, open, retracting) the trigger draws no lens, no body and no rim of its own and takes no pointer events, and its glyph goes out of focus as the growth begins, so there is never glass on glass; it takes the body back when the menu has retracted into it, and a trigger whose lens appears only under the finger goes back to no lens (M 13:24; M 5:11, the toolbar's glyphs defocus as it gathers into the drop). Under forced colours the trigger fades with its glyph. | behaviour "while the menu grows, is out and retracts, the trigger draws no lens, body or rim" (sampled every frame, glass on and `touch`), "the trigger hands its body over and takes it back", "a trigger whose lens appears only under the finger…", "the carried trigger fades…"; snapshots `menu-*` |
+| N11 | Closing retraces the growth: the content defocuses first, the menu flows back into a drop that sits where it grew from, and the drop into the trigger, which the body passes by a few dp (M 5:11: the capsule sinks about 12 dp as the drop merges into it) and settles back onto, ending on the trigger's body; reopening midway turns back from where it is. | unit (reverse path, the path past the trigger, turning back); behaviour "closing runs back through the drop into the trigger"; N29 (the centroid at the three closing instants) |
+| N12 | One body: on every frame the menu is out (growing, open, retracting) the trigger draws no lens, no body and no rim of its own and takes no pointer events, so there is never glass on glass; its glyphs stay in focus under the surface, cut to the body as it contracts and seen through its veil, or through glass that scatters as the trigger's own does, until the drop has formed, and they come back with the capsule on the way in (M 13:24; M 5:11, the toolbar's glyphs are in focus as the bud rises and defocus as it gathers into the drop). It takes the body back when the menu has retracted into it, and a trigger whose lens appears only under the finger goes back to no lens. Under forced colours the trigger fades with its glyph. | behaviour "while the menu grows, is out and retracts, the trigger draws no lens, body or rim" (sampled every frame, glass on and `touch`), "the trigger hands its body over and takes it back", "a trigger whose lens appears only under the finger…", "the carried trigger fades…"; snapshots `menu-*`; unit `menuCapsule`, `growthInk` |
 | N13 | Glass only on the menu's surface: the items are content on it and carry no lens, and the active item's highlight is ink on the glass (the nearer half of a press), concentric with the menu. | unit `menuItemFill`; behaviour "the surface is the only lens"; snapshots |
-| N14 | The growth goes through the core's morph: while the drop and the menu are joined, the second shape is handed to the surface's lens through `setMorph`, offset from the surface's centre, and nothing is handed once they are one. | unit `menuSurfaceFrame`; behaviour "the lens is handed the second shape while they are joined" (a recording stand-in for `vireglass/dom`) |
-| N15 | The drop and the menu are one medium. As a drop it is the gathered medium lit by a concentrate of its surroundings: the reference drop is white over its light grey (L 0.97 to 1.00 over 0.79 to 0.82), and over a dark backdrop it can only brighten (§5). As a menu at rest it carries the control's resting body: the reference menu is 0.058 to 0.072 lighter than what it covers, with ΔC 0.000 (M 5:11, two text-free regions, the open frame minus the same pixels before it opened). | unit `menuActivity`, `menuBody`; behaviour "the resting menu on the mid grey lifts what it covers as the reference menu does" (within 0.05 of it, ours +0.043), "…stands off what it covers…" (dark +0.019, photo +0.026, light +0.017, ΔC within 0.02), "the drop … is lit well above its surround" (ΔL above 0.1, under 0.7 over dark); canaries "a clear menu fails it", "the resting body in the drop's place fails the drop's bound" |
+| N14 | While the drop and the capsule are joined, the surface is one body made of both: its box holds the two shapes and its silhouette is their smooth union (`unionOutline`, applied as a clip path), so a bud rises out of the capsule on the way in and a bump merges back into it on the way out; once there is one shape the box is that shape and nothing is clipped. Chromium draws the lens's displacement filter with yellow fringes under a clip path, so while the shapes are joined the surface shows its body alone (`data-joined` takes the backdrop filter off), which at that moment is the white drop or the capsule's veil over its glyphs. A popover, whose surface does not take a clip path, hands the second shape to its lens through `setMorph` instead, offset from the surface's centre. | unit `unionOutline`, `menuSurfaceFrame` (with and without the outline), behaviour "while the drop and the capsule are joined the surface is drawn as their union and the lens is handed no second shape" (a recording stand-in for `vireglass/dom`); N29 |
+| N15 | The drop and the menu are one medium. As a drop it is bright and nearly opaque white, through the menu's body and not an opacity on the surface: the reference drop is 0.97 to 0.98 inside its silhouette over a backdrop of 0.79 to 0.82, and over a dark backdrop it can only brighten (§5). The light falls away as the body takes its size and is gone when the content is in focus, and it lets go of the shape slowly on the way back, so the capsule that has re-formed is still lit. As a menu at rest it carries the control's resting body: the reference menu is 0.058 to 0.072 lighter than what it covers, with ΔC 0.000 (M 5:11, two text-free regions, the open frame minus the same pixels before it opened). | unit `menuActivity`, `menuBody`; behaviour "the resting menu on the mid grey lifts what it covers as the reference menu does" (within 0.05 of it, ours +0.043), "…stands off what it covers…" (dark +0.019, photo +0.026, light +0.017, ΔC within 0.02), "the drop … is lit well above its surround" (ΔL above 0.1, under 0.7 over dark); canaries "a clear menu fails it", "the resting body in the drop's place fails the drop's bound"; N29 (the lightness inside the silhouette) |
 | N16 | A large element does not flip between light and dark (M 15:29): the backdrop is read once as the menu opens and held while it is out. | behaviour "the ink holds while the menu is out" |
 | N17 | A larger piece is thicker glass, with a deeper shadow, more lensing and a softer scattering of light (M 7:02–7:25), and Regular turns text under it into soft spots (M 11:47). The menu's surface is the control material with the core's sheet scattering (roughness 0.85, a blur of about 10 dp where the control's is 2.2); the thickness and the shadow follow the geometry in the core. | unit `menuGlass`; behaviour "the surface scatters what lies under it far more softly…"; snapshot `menu-text-glass-on`; thickness and shadow owned by `vireglass`, not asserted |
 | N18 | Reduced motion: no growth; the menu is at its size in its first frame and gone in the first frame of closing, its content in focus at once (M 18:35). | unit; behaviour "reduced motion opens and closes in one frame" |
@@ -148,11 +148,12 @@ button or a bare `<button>`; it grows only because it opens a menu (B5). Behavio
 | N22 | Under forced colours the menu uses system colours: a Canvas surface with a border, the active item in Highlight, disabled items in GrayText. | behaviour "forced colours" (colours asserted, not the look) |
 | N23 | Upgrading while the page is parsed adopts the trigger and the list and synthesizes nothing; items added later get their role. | behaviour "upgrade while the page is parsed" |
 | N24 | `sample` on the menu reaches its surface, set before or after the lens attaches. | behaviour "a sample on the menu reaches its surface" |
-| N25 | The press that opened the menu chooses nothing. The menu grows in under the pointer, so its first item lands where the trigger was: the second click of a double click, a pointer click before the menu has arrived (its content in focus and the surface past its overshoot, about 0.37 s) or whose press began before it had, and a held Enter or Space all leave it as it is; a pointer click once it has arrived chooses. A deliberate key is not under the pointer, so Enter or Space on an item chooses as soon as the content is in focus (about 0.31 s), before the surface settles; only a key before the content shows is dropped. The platform's own popover never puts an item under the pointer, so it needs none of this. | behaviour "input that began on the trigger" (a double click, second clicks 40 to 250 ms later, Enter and Space held on the trigger and on an item, a second Enter before the content, a key that chooses in the first frame the content shows while a pointer click there is still dropped, and a later click that does choose) |
+| N25 | The press that opened the menu chooses nothing. The menu grows in under the pointer, so its first item lands where the trigger was: the second click of a double click, a pointer click before the menu has arrived (its content in focus and the surface past its overshoot, about 0.59 s) or whose press began before it had, and a held Enter or Space all leave it as it is; a pointer click once it has arrived chooses. A deliberate key is not under the pointer, so Enter or Space on an item chooses as soon as the content is in focus (about 0.59 s), before the surface settles; only a key before the content shows is dropped. The platform's own popover never puts an item under the pointer, so it needs none of this. | behaviour "input that began on the trigger" (a double click, second clicks 40 to 250 ms later, Enter and Space held on the trigger and on an item, a second Enter before the content, a key that chooses in the first frame the content shows while a pointer click there is still dropped, and a later click that does choose) |
 | N26 | A scroll or a resize while the menu is out puts it back over its trigger once a frame, measures nothing and hands the lens nothing when the surface's shape has not changed; the lens is handed a morph only when it changes. | behaviour "a scroll or a resize while the menu is out costs the lens nothing…" (a recording stand-in for `vireglass/dom`) |
 | N27 | `glass` parses as on the buttons: empty, `present` or `touch` is a lens, anything else none. Taking a forced state away closes the menu and resets `aria-expanded`. | behaviour "glass is parsed as on the buttons…", "taking a forced state away…" |
 | N28 | The list's own `toggle` event fires once the growth has run back, when the list leaves the top layer; `aria-expanded` turns false as the closing begins. | behaviour "the list's own toggle event fires once the growth has run back…" |
 | N29 | The menu's rendering follows the reference's frame by frame at the ten instants of the lab's `view=menu-reference` stage (M 5:11, opening +0.051 to +0.852 s, closing +0.084 to +0.284 s). Per instant, ours and the reference are measured against the frame before the menu opened: (a) the glass silhouette (pixels more than 6/255 away from it, despeckled, holes filled) and its intersection over union with the reference's; (b) the mean lightness inside it; (c) the edge energy inside it, pulled in 8 px from the rim (the mean distance of the luma from its 7 × 7 average) relative to the settled menu's, so a drop reads 0, content magnified and blurred reads between, sharp content reads 1; (d) its centroid. The tolerance is what the reference varies by: one frame of its own (1/30 s) either way, so ours may lead or lag by a frame, plus what the settled instant leaves open and the kit does not model (the menu's offset and size, the resting body, a JPEG against a PNG): IoU at least the smallest IoU of the reference with its two neighbouring frames minus 0.15, lightness and relative edge energy within the reference's largest change to a neighbour plus 0.06 and 0.05, centroid within its largest move to a neighbour plus 4 dp. | local gate `npm run check:lab:reference` (needs the frames in `VIREUIKIT_REFERENCE_DIR`; prints the table and skips with a message without them; not in CI) |
+| N30 | The popover takes the menu's shape, light and content (the drop, its rise, the lit glass and the content's own focus) but not its silhouette, which it hands to its lens as the second shape, and keeps the pace the menu's growth had before it was fitted to M 5:11 (`POPOVER_GROWTH_TIMING`), which sheets keep slowed by a quarter (`SHEET_GROWTH_TIMING`): a panel is not the reference's menu, and the longer closing held the lens on mid-size maps for frames that ran over 33 ms. | unit `POPOVER_GROWTH_TIMING`, `SHEET_GROWTH_TIMING`; behaviour "a popover grows out of its trigger"; perf `popover growth`, `popover retraction` |
 
 ### Against the reference
 
@@ -168,33 +169,80 @@ M 5:11 against ours at the touch tier, with the same label width:
 | height, four rows | 206 dp | 202 |
 | corner | ≈ 37 dp | 35 |
 | body over what it covers, ΔL / ΔC | +0.058 to +0.072 / 0.000, over a grey of L 0.66 to 0.80 | +0.043 / 0.000 over the mid grey (L 0.62); +0.019 dark, +0.026 photo, +0.017 light |
-| the drop's lightness | 0.97 to 1.00 over 0.79 to 0.82 (ΔL ≈ +0.2) | +0.220 over the mid grey; 0.99 over light; 0.46 over dark (+0.146) |
+| the drop's lightness | 0.97 to 1.00 over 0.79 to 0.82 (ΔL ≈ +0.2), 0.97 mean inside the silhouette | bright, nearly opaque white (alpha 1, 0.2 of white and 0.3 of lightness over what it covers): 0.99 over light, 0.97 mean inside the silhouette on the stage; over a dark backdrop it brightens to about 0.6 |
 | the drop's size | ≈ 63 dp, from a 172 × 44 dp toolbar | 48 dp (1.1 × the source's smaller side) |
-| the drop's shape | a flat-bottomed drop with a ridge, then a bulb on a neck while closing | a circle; the neck is in the lens (N14), not in the silhouette |
-| the content | none until 95 % of the height (0.30 s), heavily blurred, sharp by about 0.40 s | none until 90 % of the growth, sharp at size (0.31 s) |
+| the drop's shape | a bud on the capsule, a drop that swells round on both axes, a bowl, the rounded rectangle; closing, a drop with a tail, then the capsule with a bump on top | the same, in the silhouette: the union of the capsule and the drop (N14); the bowl's glow at the bottom and the tail are not drawn |
+| the content | none until the body is 80 % grown (0.25 s), then magnified about 1.3 times and heavily blurred inside the lens, sharp by about 0.58 s | the same: from the body's 70 % growth, 1.35 times and 8 px of blur at first, sharp at 0.59 s |
 | where it sits | the toolbar's bottom-leading corner, 6 dp further out and 9.5 dp lower | flush on the trigger's corner |
 
-Timing. The reference is tracked frame by frame (the box of everything lighter than the frame before the menu opened,
-so ±0.033 s), from the first frame that changes (311.578 s opening, 313.447 s closing); the model is the growth
-springs, with the drop "formed" when growth begins and "reached" on closing when growth is below 0.12 (a 66 dp body
-for this menu, where the reference drop measures 67 to 77 dp):
+Timing. The reference is tracked frame by frame (the box of everything that differs from the frame before the menu
+opened by more than 6 of 255, so ±0.033 s), from the first frame that changes (311.578 s opening, 313.447 s closing);
+the model is five springs: the capsule into the drop (`shrink`), the drop's swelling (`grow`, the width and height
+of the body), its rise toward the menu's centre (`rise`, which overshoots it by 15 % and, closing, goes past the drop
+by about 12 dp and back), the content's focus (`focus`) and the glass's light (`glow`). The drop is "formed" when
+growth begins and "reached" on closing when growth is below 0.12:
 
 | | reference | `DEFAULT_GROWTH_TIMING` before | after |
 |---|---|---|---|
-| the drop has formed and rises out of the source | 0.10 s | 0.18 | 0.10 |
-| at size (95 % of the height) | 0.30 to 0.33 s | 0.40 | 0.28 |
-| overshoot | 3.5 % of the height at 0.37 s (the top edge, 46 px past its rest) | 3.3 % at 0.51 | 3.2 % at 0.37 |
-| settled | 0.83 s, sliding 13 dp down into its window-concentric place after reaching size | 0.69 | 0.52 |
-| closing reaches the drop | 0.25 s | 0.23 | 0.23 |
-| closing is back in the source, its ridge gone | 0.42 s | 0.57 | 0.44 |
+| the drop has formed and rises out of the source | 0.12 s | 0.10 | 0.11 |
+| at size (95 % of the width) | 0.34 s | 0.28 | 0.33 |
+| overshoot | 5.4 % of the width at 0.45 s | 3.2 % at 0.37 | 4.9 % at 0.44 |
+| settled | 0.65 s in size, then sliding 13 dp down into its window-concentric place | 0.52 | 0.64 |
+| the content is sharp | 0.58 s | 0.31 | 0.59 |
+| the body's centre at 0.18, 0.25, 0.32, 0.38 s | 144, 107, 92, 94 (the box's top edge 6 dp past its rest at 0.38 s) | 131, 112, 110, 108 | 144, 105, 92, 103 |
+| closing reaches the drop | 0.25 s | 0.23 | 0.29 |
+| closing is back in the source, its ridge gone | 0.42 s | 0.44 | 0.38 |
 
-The rows and their spacing, the timing up to the overshoot and the closing, the resting body and the drop's lightness
-are held (unit tests and N15). The drop's size, the menu's offset from the toolbar and the slide that settles it there
-are layout of the reference (a wide toolbar gathers more glass; the menu sits concentric with the window, which the kit
-does not know), so they are reported, not held. The silhouette is one element's box, so the neck between the drop and
-the menu shapes the refraction but not the outline. The lab's `view=menu-reference` puts ten of the frames (opening
-and closing) next to ours at the same time since the start, over the frame before the menu opened with the toolbar
-filled in from its surround.
+The rows and their spacing, the timing, the silhouette, the lightness inside it, the content's edge energy and the
+centroid are held (unit tests, N15 and N29). The drop's size, the menu's offset from the toolbar and the slide that
+settles it there are layout of the reference (a wide toolbar gathers more glass; the menu sits concentric with the
+window, which the kit does not know), and the reference's height trails its width (95 % at 0.45 s against 0.34 s),
+which one spring for both does not follow; they are reported, not held. The lab's `view=menu-reference` puts ten of the
+frames (opening and closing) next to ours at the same time since the start, over the frame before the menu opened with
+the toolbar filled in from its surround; `npm run check:lab:reference` measures it.
+
+### The parity gate on that stage
+
+`check:lab:reference` measures both columns of the stage against the frame before the menu opened, the reference's
+JPEG crop and our screenshot of one tile at a time (a menu's shadow reaches into the next tile). Before the growth was
+fitted, on `feat/legibility` with vireglass 3.4.0, it failed at eight of the ten instants:
+
+```
+instant      IoU  min IoU     L ref    L ours     L tol  edge ref edge ours     e tol   ref x,y  ours x,y       off   off tol  result
+o+0.051         0.44      0.48     0.861     0.826     0.131      0.35      0.05      1.32   107,185   106,171      14.2       5.9  FAIL IoU+centroid
+o+0.117         0.33      0.35     0.971     0.852     0.099      0.00      0.03      0.13   106,180   105,157      22.6      18.9  FAIL IoU+lightness+centroid
+o+0.184         0.47      0.33     0.965     0.790     0.081      0.02      0.21      0.06   104,144   103,131      12.8      24.8  FAIL lightness+edge
+o+0.251         0.51      0.52     0.881     0.737     0.124      0.05      0.16      0.10   102,107   101,112       5.7      21.7  FAIL IoU+lightness+edge
+o+0.318         0.64      0.70     0.809     0.710     0.082      0.17      1.00      0.19    100,92   101,108      16.5       8.5  FAIL IoU+lightness+edge+centroid
+o+0.384         0.75      0.77     0.780     0.711     0.066      0.45      1.01      0.18    100,94   102,108      13.6       8.3  FAIL IoU+lightness+edge+centroid
+o+0.852         0.88      0.84     0.761     0.709     0.062      1.00      1.00      0.05    99,111   101,108       3.4       4.9        ok
+c+0.084         0.76      0.55     0.877     0.782     0.122      0.13      0.21      0.23   103,117   102,129      11.9      17.3        ok
+c+0.184         0.55      0.50     0.982     0.848     0.073      0.01      0.11      0.09   106,174   104,150      24.1      22.8  FAIL lightness+edge+centroid
+c+0.284         0.47      0.64     0.923     0.795     0.089      0.21      0.05      0.29   108,190   107,176      13.9       6.2  FAIL IoU+lightness+centroid
+```
+
+After:
+
+```
+instant      IoU  min IoU     L ref    L ours     L tol  edge ref edge ours     e tol   ref x,y  ours x,y       off   off tol  result
+o+0.051         0.63      0.48     0.861     0.833     0.131      0.35      0.79      1.32   107,185   107,180       5.0       5.9        ok
+o+0.117         0.86      0.35     0.971     0.901     0.099      0.00      0.01      0.13   106,180   107,178       1.4      18.9        ok
+o+0.184         0.92      0.33     0.965     0.974     0.081      0.02      0.00      0.06   104,144   103,144       0.7      24.8        ok
+o+0.251         0.87      0.52     0.881     0.943     0.124      0.05      0.02      0.10   102,107    99,105       2.8      21.7        ok
+o+0.318         0.85      0.70     0.809     0.792     0.082      0.17      0.08      0.19    100,92     98,92       2.4       8.5        ok
+o+0.384         0.78      0.77     0.780     0.733     0.066      0.45      0.35      0.18    100,94   101,103       8.3       8.3        ok
+o+0.852         0.89      0.84     0.761     0.708     0.062      1.00      1.00      0.05    99,111   100,108       3.2       4.9        ok
+c+0.084         0.80      0.55     0.877     0.932     0.122      0.13      0.05      0.23   103,117   101,127      10.3      17.3        ok
+c+0.184         0.77      0.50     0.982     0.989     0.073      0.01      0.00      0.09   106,174   106,170       3.2      22.8        ok
+c+0.284         0.82      0.64     0.923     0.961     0.089      0.21      0.28      0.29   108,190   108,195       4.4       6.2        ok
+```
+
+The tolerance columns are what the reference itself varies by within one of its own frames (1/30 s) of that instant,
+plus what the settled instant leaves open and the kit does not model: IoU 0.15, lightness 0.06, relative edge energy
+0.05, centroid 4 dp (our menu's offset and size, our resting body, JPEG against PNG: at the settled instant ours reads
+IoU 0.89, lightness 0.054 under, centroid 3.7 dp away). The stage must be wider than the window's region: a menu is held
+inside the viewport, so the gate runs in a 2400 px window; in a narrower one the right-hand tiles are pushed to its
+edge and read as a closing into the corner.
 
 ## Resting body
 
