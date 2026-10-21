@@ -56,7 +56,7 @@ export function createScrollEdge(host: HTMLElement, mode: Mount, mount: (el: HTM
   el.setAttribute('aria-hidden', 'true');
   if (mode === 'sticky') el.setAttribute('data-sticky', '');
   let spec: EdgeSpec | null = null;
-  let live: { scroller: Element; side: string; hard: boolean; bar: Element; beside: Element | null | undefined; handle: ScrollEdgeHandle; observer: ResizeObserver | null } | null = null;
+  let live: { scroller: Element; side: string; hard: boolean; bar: Element; beside: Element | null | undefined; handle: ScrollEdgeHandle; observer: ResizeObserver | null; frame: number } | null = null;
   let written = '';
   let loading = false;
 
@@ -103,6 +103,7 @@ export function createScrollEdge(host: HTMLElement, mode: Mount, mount: (el: HTM
     if (!live) return;
     live.handle.destroy();
     live.observer?.disconnect();
+    if (live.frame) doc.defaultView?.cancelAnimationFrame(live.frame);
     el.remove();
     write({});
     written = '';
@@ -139,12 +140,20 @@ export function createScrollEdge(host: HTMLElement, mode: Mount, mount: (el: HTM
     if (!handle) return;
     mount(el);
     let observer: ResizeObserver | null = null;
+    let frame = 0;
     if (typeof ResizeObserver !== 'undefined') {
       observer = new ResizeObserver(place);
       const targets = mode === 'band' ? [host, spec.bar, spec.beside, isPage(spec.scroller) ? doc.documentElement : spec.scroller] : [spec.bar];
-      for (const target of targets) if (target) observer.observe(target);
+      const watch = () => {
+        if (live) live.frame = 0;
+        for (const target of targets) if (target) observer!.observe(target);
+      };
+      // Observing from inside another observer's delivery leaves the new first notifications undeliverable in that frame.
+      const win = doc.defaultView;
+      if (win) frame = win.requestAnimationFrame(watch);
+      else watch();
     }
-    live = { scroller: spec.scroller, side: spec.side, hard: spec.hard, bar: spec.bar, beside: spec.beside, handle, observer };
+    live = { scroller: spec.scroller, side: spec.side, hard: spec.hard, bar: spec.bar, beside: spec.beside, handle, observer, frame };
     place();
   };
 
