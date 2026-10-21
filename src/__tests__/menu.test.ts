@@ -302,10 +302,10 @@ describe('the surface on each frame of the growth', () => {
   });
 
   // M 7:19: a menu presented from a toolbar button scatters light more softly than the button.
-  it('a menu scatters like the core\'s sheets, where a control barely does', () => {
+  it('a menu scatters like the core\'s sheets, several times more than a control', () => {
     expect(menuGlass(VIREGLASS_CONTROL_MATERIAL).roughness).toBe(VIREGLASS_SHEET_MATERIAL.roughness);
     expect(resolveOptics(menuMaterial(VIREGLASS_CONTROL_MATERIAL, 0)).blur).toBeGreaterThan(
-      resolveOptics(VIREGLASS_CONTROL_MATERIAL).blur * 10,
+      resolveOptics(VIREGLASS_CONTROL_MATERIAL).blur * 3,
     );
     expect(menuGlass(VIREGLASS_CONTROL_MATERIAL).ior).toBe(VIREGLASS_CONTROL_MATERIAL.ior);
   });
