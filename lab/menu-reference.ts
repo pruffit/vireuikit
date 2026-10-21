@@ -143,7 +143,7 @@ export async function menuReference(stage: HTMLElement, rows: HTMLElement): Prom
         { label: 'Three', glyph: 'square' },
         { label: 'Four', glyph: 'hexagon' },
       ],
-      force: `${Math.max(phase.shrink, 0).toFixed(3)} ${Math.max(phase.grow, 0).toFixed(3)}`,
+      force: `${Math.max(phase.shrink, 0).toFixed(3)} ${Math.max(phase.grow, 0).toFixed(3)} ${Math.max(phase.focus ?? 0, 0).toFixed(3)} ${(phase.rise ?? 0).toFixed(3)} ${(phase.glow ?? 0).toFixed(3)}`,
       corner: 'bottom-left',
     });
     menu.style.cssText = `position:absolute;left:${((TOOLBAR.x - CROP.x) / PX_PER_DP).toFixed(1)}px;top:${((TOOLBAR.y - CROP.y) / PX_PER_DP).toFixed(1)}px`;

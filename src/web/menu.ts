@@ -17,7 +17,7 @@ import {
   type MenuState,
   type RoundedRect,
 } from '../kit/menu';
-import { createGrowthState, growthPhase, stepGrowth, type GrowthPhase, type GrowthPoint } from '../kit/morph';
+import { createGrowthState, growthPhase, smoothstep, stepGrowth, type GrowthPhase, type GrowthPoint } from '../kit/morph';
 import { segmentOf } from '../kit/adaptive/context';
 import { sizeTier } from '../kit/adaptive/input';
 import type { Rect, Size } from '../kit/geometry';
@@ -35,10 +35,12 @@ const FORCED: Record<string, GrowthPhase | null> = {
   open: { shrink: 1, grow: 1 },
   retracting: { shrink: 0.55, grow: 0 },
 };
-// A phase given as "<shrink> <grow>", for putting a frame next to a reference frame.
-const FORCED_PHASE = /^\d*\.?\d+ \d*\.?\d+$/;
+// A phase given as "<shrink> <grow> [<focus> [<rise> [<glow>]]]", for putting a frame next to a reference frame.
+const FORCED_PHASE = /^-?\d*\.?\d+( -?\d*\.?\d+){1,4}$/;
 const GLASS_ON = new Set(['', 'present', 'touch']);
 const MATERIAL_STEPS = 10;
+// M 5:11: the rows are about 1.3 times their size while the lens still holds them out of focus.
+const CONTENT_MAGNIFY = 0.35;
 const VIEWPORT_MARGIN = 8;
 const TRIGGER = ':scope > button, :scope > vire-button > button, :scope > vire-icon-button > button';
 const ACTIVATION_KEYS = new Set(['Enter', ' ']);
@@ -105,6 +107,8 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #sample: BackdropSample | null = null;
     #held: BackdropSample | null = null;
     #anchorEl: Element | null = null;
+    #buttonRect: Rect | null = null;
+    #clip: { el: HTMLElement; had: string } | null = null;
 
     get a11y(): A11yOverride {
       return this.#own;
@@ -188,6 +192,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         for (const name of Array.from(list.style)) if (name.startsWith('--vk-')) list.style.removeProperty(name);
         for (const item of this.#items()) item.removeAttribute('data-pressed');
       }
+      this.#unclipTrigger();
       this.#liveCarrier()?.setCarried?.(null);
       this.#anchorEl = null;
       for (const restore of this.#itemRestore.values()) restore();
@@ -205,7 +210,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#held = null;
       this.#readySince = null;
       this.#inSince = null;
-      for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-contrast', 'data-size', 'data-phase', 'data-measure']) {
+      for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-contrast', 'data-size', 'data-phase', 'data-joined', 'data-measure']) {
         this.removeAttribute(name);
       }
       for (const name of Array.from(this.style)) if (name.startsWith('--vk-')) this.style.removeProperty(name);
@@ -296,9 +301,15 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     }
 
     #adoptItems(): void {
-      for (const item of this.#items()) {
-        if (this.#itemRestore.has(item)) continue;
-        const restore: (() => void)[] = [];
+      this.#items().forEach((item, index) => {
+        const known = this.#itemRestore.has(item);
+        const had = item.hasAttribute('style');
+        item.style.setProperty('--vk-i', String(index));
+        if (known) return;
+        const restore: (() => void)[] = [() => {
+          item.style.removeProperty('--vk-i');
+          dropEmptyStyle(item, had);
+        }];
         this.#keep(item, 'popovertarget', null, restore);
         this.#keep(item, 'popovertargetaction', null, restore);
         this.#keep(item, 'role', 'menuitem', restore);
@@ -306,7 +317,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         this.#itemRestore.set(item, () => {
           for (const undo of restore.reverse()) undo();
         });
-      }
+      });
     }
 
     /** A focused item that turns natively disabled loses focus to the page; the menu keeps it instead. */
@@ -583,6 +594,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#region = region;
       const placement = menuPlacement(trigger, natural, region, { corner: this.#corner(), margin: VIEWPORT_MARGIN });
       this.#from = trigger;
+      this.#buttonRect = this.#anchorButton()?.getBoundingClientRect() ?? trigger;
       this.#to = { ...placement.rect, radius: spec.radius };
       this.#anchor = placement.anchor;
       list.style.setProperty('--vk-content-w', `${placement.rect.width - 2 * spec.padding}px`);
@@ -652,12 +664,46 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       list.removeAttribute('data-scroll');
       for (const name of Array.from(list.style)) if (name.startsWith('--vk-')) list.style.removeProperty(name);
       this.removeAttribute('data-phase');
+      this.removeAttribute('data-joined');
       this.#out = false;
       this.#held = null;
       this.#from = this.#to = this.#anchor = this.#region = null;
+      this.#unclipTrigger();
       this.#glass?.setSample(this.#sample);
       this.#liveCarrier()?.setCarried?.(null);
       this.#anchorEl = null;
+    }
+
+    /** The trigger's glyphs stay inside the body while it contracts: they are drawn under the surface, and would show beside it. */
+    #clipTrigger(box: RoundedRect): void {
+      const rect = this.#buttonRect;
+      const el = this.#anchorButton();
+      if (!rect || !el) return;
+      if (this.#clip && this.#clip.el !== el) this.#unclipTrigger();
+      const cut = {
+        top: Math.max(box.y - rect.y, 0),
+        left: Math.max(box.x - rect.x, 0),
+        bottom: Math.max(rect.y + rect.height - (box.y + box.height), 0),
+        right: Math.max(rect.x + rect.width - (box.x + box.width), 0),
+      };
+      if (cut.top + cut.left + cut.bottom + cut.right === 0) {
+        this.#unclipTrigger();
+        return;
+      }
+      this.#clip ??= { el, had: el.style.clipPath };
+      const px = (v: number) => `${v.toFixed(1)}px`;
+      el.style.clipPath = `inset(${px(cut.top)} ${px(cut.right)} ${px(cut.bottom)} ${px(cut.left)} round ${px(box.radius)})`;
+    }
+
+    #unclipTrigger(): void {
+      if (!this.#clip) return;
+      const { el, had } = this.#clip;
+      this.#clip = null;
+      if (had) el.style.clipPath = had;
+      else {
+        el.style.removeProperty('clip-path');
+        if (el.getAttribute('style') === '') el.removeAttribute('style');
+      }
     }
 
     /** What carries the menu's body while it is out: the anchor if it can, else the trigger's control. */
@@ -691,8 +737,8 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const list = this.#list;
       if (!list || !this.#out || !this.#from || !this.#to || !this.#anchor) return;
       const phase = growthPhase(this.#growth);
-      const f = menuSurfaceFrame(this.#from, this.#to, this.#anchor, phase, this.#region ?? undefined);
-      const settled = phase.shrink === 1 && phase.grow === 1;
+      const f = menuSurfaceFrame(this.#from, this.#to, this.#anchor, phase, this.#region ?? undefined, { outline: true });
+      const settled = phase.shrink === 1 && phase.grow === 1 && (phase.focus ?? 1) === 1 && (phase.rise ?? 1) === 1;
       // The ink as drawn decides it, so what shows in focus is what can be chosen.
       const inkIn = Math.round(f.ink.incoming * 1000) / 1000;
       // Arrived: the content in focus and the surface no longer growing (past its overshoot).
@@ -703,19 +749,27 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.setAttribute('data-phase', settled ? 'open' : 'moving');
       this.#setBox(f.box);
       const s = list.style;
-      s.setProperty('--vk-cx', `${f.content.x.toFixed(2)}px`);
-      s.setProperty('--vk-cy', `${f.content.y.toFixed(2)}px`);
+      // The content rides inside the lens, magnified about the box's centre while it is out of focus.
+      const scale = 1 + CONTENT_MAGNIFY * (1 - inkIn);
+      const pad = menuSize(this.#size()).padding;
+      s.setProperty('--vk-tx', `${(f.box.width / 2 + scale * (f.content.x + pad - f.box.width / 2)).toFixed(2)}px`);
+      s.setProperty('--vk-ty', `${(f.box.height / 2 + scale * (f.content.y + pad - f.box.height / 2)).toFixed(2)}px`);
+      s.setProperty('--vk-s', scale.toFixed(3));
+      this.toggleAttribute('data-joined', f.outline !== undefined);
+      if (f.outline) s.setProperty('--vk-outline', `polygon(${f.outline.map((p) => `${p.x.toFixed(1)}px ${p.y.toFixed(1)}px`).join(',')})`);
+      else s.removeProperty('--vk-outline');
       s.setProperty('--vk-ink-in', inkIn.toFixed(3));
       const body = menuBody(VIREGLASS_CONTROL_MATERIAL, f.activity, this.#presentation?.frost ?? false);
       s.setProperty('--vk-body-alpha', body.alpha.toFixed(3));
       s.setProperty('--vk-body-white', body.white.toFixed(3));
       s.setProperty('--vk-body-lift', body.lift.toFixed(3));
       this.#liveCarrier()?.setCarried?.(f.ink.outgoing);
-      this.#pushGlass(f.box, f.morph, f.activity, !settled && this.#forced() === null);
+      this.#clipTrigger(f.box);
+      this.#pushGlass(f.box, f.morph, f.activity, f.capsule, !settled && this.#forced() === null);
     }
 
     /** Hands the lens only what changed: a new morph or material rebuilds its filter, a moved box needs nothing. */
-    #pushGlass(box: RoundedRect, morph: VireGlassMorph | undefined, activity: number, moving: boolean): void {
+    #pushGlass(box: RoundedRect, morph: VireGlassMorph | undefined, activity: number, capsule: number, moving: boolean): void {
       const glass = this.#glass;
       if (!glass) return;
       // Whole pixels, so a repeated open finds its displacement maps in the core's cache.
@@ -724,7 +778,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const geometry = { width: round(box.width), height: round(box.height), cornerRadius: round(box.radius) };
       const lens = glassMorph(morph, moving);
       const key = {
-        material: String(step),
+        material: `${step}/${round(capsule * MATERIAL_STEPS)}`,
         morph: lens ? JSON.stringify(lens) : 'none',
         geometry: `${geometry.width}x${geometry.height}r${geometry.cornerRadius}`,
       };
@@ -733,7 +787,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         if (key.material === last.material && key.morph === last.morph && key.geometry === last.geometry) return;
         const next: GlassFrame = {};
         if (key.geometry !== last.geometry) next.geometry = geometry;
-        if (key.material !== last.material) next.material = menuMaterial(VIREGLASS_CONTROL_MATERIAL, step);
+        if (key.material !== last.material) next.material = menuMaterial(VIREGLASS_CONTROL_MATERIAL, step, round(capsule * MATERIAL_STEPS) / MATERIAL_STEPS);
         if (key.morph !== last.morph) next.morph = lens;
         this.#lastLens = key;
         glass.frame(next);
@@ -747,8 +801,12 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
 
     #applyForced(): void {
       const forced = this.#forced();
-      const [shrink, grow] = (forced ?? '').split(' ').map(Number);
-      const phase = !forced ? null : Object.hasOwn(FORCED, forced) ? FORCED[forced]! : { shrink: shrink!, grow: grow! };
+      const [shrink, grow, focus, rise, glow] = (forced ?? '').split(' ').map(Number);
+      const phase: GrowthPhase | null = !forced
+        ? null
+        : Object.hasOwn(FORCED, forced)
+          ? FORCED[forced]!
+          : { shrink: shrink!, grow: grow!, ...(focus === undefined ? {} : { focus }), ...(rise === undefined ? {} : { rise }), ...(glow === undefined ? {} : { glow }) };
       cancelAnimationFrame(this.#frame);
       this.#frame = 0;
       if (!phase) {
@@ -759,9 +817,14 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         return;
       }
       this.#state = { ...MENU_CLOSED, open: forced !== 'retracting' };
+      const focus1 = phase.focus ?? smoothstep(0.9, 1, phase.grow);
+      const rise1 = phase.rise ?? Math.min(Math.max(phase.grow, 0), 1);
       this.#growth = {
         shrink: { x: phase.shrink, v: 0, target: phase.shrink },
         grow: { x: phase.grow, v: 0, target: phase.grow },
+        focus: { x: focus1, v: 0, target: focus1 },
+        rise: { x: rise1, v: 0, target: rise1 },
+        glow: { x: phase.glow ?? phase.shrink, v: 0, target: phase.glow ?? phase.shrink },
       };
       this.#trigger!.setAttribute('aria-expanded', String(this.#state.open));
       this.#list!.inert = true;

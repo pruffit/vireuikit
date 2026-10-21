@@ -13,8 +13,9 @@ import {
 import { presentationForm, type PresentationForm, type SurfaceKind } from '../kit/adaptive/presentation';
 import type { Rect, Size } from '../kit/geometry';
 import { menuBody, menuMaterial, type RoundedRect } from '../kit/menu';
-import { createGrowthState, growthPhase, stepGrowth, type GrowthPoint } from '../kit/morph';
+import { createGrowthState, growthPhase, heldGrowthState, smoothstep, stepGrowth, type GrowthPoint } from '../kit/morph';
 import {
+  POPOVER_GROWTH_TIMING,
   SHEET_SIZES,
   createSheetDrag,
   createSheetGrowth,
@@ -797,7 +798,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#open = true;
       this.#comeOut();
       if (instant) {
-        this.#pg = { shrink: { x: 1, v: 0, target: 1 }, grow: { x: 1, v: 0, target: 1 } };
+        this.#pg = heldGrowthState(1);
         this.#sg = { x: 1, v: 0, target: 1 };
       }
       this.#syncTriggers();
@@ -1158,12 +1159,12 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       let moving: boolean;
       // Only the growth being drawn runs; the other is held where this one will be, so a change of form finds it there.
       if (this.#popoverGrowth()) {
-        moving = stepGrowth(this.#pg, dt, open, instant);
+        moving = stepGrowth(this.#pg, dt, open, instant, POPOVER_GROWTH_TIMING);
         this.#sg = { x: open ? 1 : 0, v: 0, target: open ? 1 : 0 };
       } else {
         moving = stepSheetGrowth(this.#sg, dt, open, instant);
         const held = open ? 1 : 0;
-        this.#pg = { shrink: { x: held, v: 0, target: held }, grow: { x: held, v: 0, target: held } };
+        this.#pg = heldGrowthState(held);
       }
       const morph = this.#morph;
       if (morph) {
@@ -1254,7 +1255,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         ({ box, ink } = f);
         scrimT = f.scrim;
       }
-      const settled = this.#sg.x === 1 && this.#pg.shrink.x === 1 && this.#pg.grow.x === 1;
+      const settled = this.#sg.x === 1 && this.#pg.shrink.x === 1 && this.#pg.grow.x === 1 && this.#pg.focus.x === 1 && this.#pg.rise.x === 1;
       return {
         box,
         morph,
@@ -1686,7 +1687,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         this.#present();
       }
       if (forced.kind === 'open') {
-        this.#pg = { shrink: { x: 1, v: 0, target: 1 }, grow: { x: 1, v: 0, target: 1 } };
+        this.#pg = heldGrowthState(1);
         this.#sg = { x: 1, v: 0, target: 1 };
         if (forced.detent) {
           const picked = this.#detents.find((d) => d.names.includes(forced.detent!));
@@ -1700,6 +1701,9 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         this.#pg = {
           shrink: { x: clamp01(forced.t * 2), v: 0, target: 1 },
           grow: { x: clamp01(forced.t * 2 - 1), v: 0, target: 1 },
+          focus: { x: smoothstep(0.9, 1, clamp01(forced.t * 2 - 1)), v: 0, target: 1 },
+          rise: { x: clamp01(forced.t * 2 - 1), v: 0, target: 1 },
+          glow: { x: clamp01(forced.t * 2), v: 0, target: 1 },
         };
       }
       this.#morph = null;

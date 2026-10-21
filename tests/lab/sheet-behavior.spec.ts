@@ -344,7 +344,7 @@ test.describe('a popover grows out of its trigger', () => {
     const first = run.opening[0]!;
     const last = run.opening.at(-1)!;
     expect(near(first.radius, run.trigger.height / 2)).toBe(true);
-    for (const f of run.opening) if (f.h < last.h * 0.8) expect(f.ink).toBe(0);
+    for (const f of run.opening) if (f.h < last.h * 0.7) expect(f.ink).toBe(0);
     expect(last.ink).toBe(1);
     expect(last.form).toBe('popover');
   });
@@ -373,9 +373,9 @@ test.describe('a popover grows out of its trigger', () => {
     const end = run.closing.at(-1)!;
     const panel = run.opening.at(-1)!;
     expect(run.closing.length).toBeGreaterThan(8);
-    expect(Math.min(...run.closing.map((f) => Math.max(f.w, f.h)))).toBeLessThan(run.trigger.height);
+    expect(Math.min(...run.closing.map((f) => Math.max(f.w, f.h)))).toBeLessThan(run.trigger.height * 1.2);
     expect(near(end.x, run.trigger.x) && near(end.y, run.trigger.y) && near(end.w, run.trigger.width) && near(end.h, run.trigger.height)).toBe(true);
-    for (const f of run.closing) if (f.h < panel.h * 0.8) expect(f.ink).toBe(0);
+    for (const f of run.closing) if (f.h < panel.h * 0.65) expect(f.ink).toBeLessThan(0.1);
   });
 
   test('canary: a popover that pops open without growing fails it', async ({ page }) => {

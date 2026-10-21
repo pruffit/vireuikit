@@ -61,7 +61,7 @@ ${HOST}[data-surface=frosted]>button{
  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
  box-shadow:0 1px 3px color-mix(in srgb,currentColor 22%,transparent)}
 
-${MENU}{position:relative;--vk-ink-in:1;--vk-cx:0px;--vk-cy:0px}
+${MENU}{position:relative;--vk-ink-in:1;--vk-tx:0px;--vk-ty:0px;--vk-s:1}
 ${SURFACE}{position:fixed;inset:auto;left:var(--vk-x,0);top:var(--vk-y,0);width:var(--vk-w,auto);height:var(--vk-h,auto);
  margin:0;padding:var(--vk-menu-pad);border:0;border-radius:var(--vk-r,var(--vk-menu-radius));box-sizing:border-box;
  overflow:clip;color:inherit;font:inherit;background:transparent;outline:none;
@@ -82,9 +82,12 @@ ${ITEM}:is([data-pressed],[data-vire-force-state=pressed]){--vk-fill:var(--vk-fi
 ${ITEM}:focus-visible{outline:2px solid currentColor;outline-offset:-2px}
 ${ITEM}:is(:disabled,[aria-disabled=true]){cursor:default;--vk-fill:0;-webkit-text-fill-color:color-mix(in srgb,currentColor 40%,transparent)}
 ${ITEM}:is(:disabled,[aria-disabled=true])>svg{opacity:.4}
-${MENU}[data-phase=moving]>[popover]{padding:0}
-${MENU}[data-phase=moving]>[popover]>*{transform:translate(calc(var(--vk-cx) + var(--vk-menu-pad)),calc(var(--vk-cy) + var(--vk-menu-pad)));
- opacity:min(1,calc(var(--vk-ink-in)*2));filter:blur(calc((1 - var(--vk-ink-in))*8px))}
+${MENU}[data-phase=moving]>[popover]{padding:0;clip-path:var(--vk-outline,none)}
+/* Chromium draws the lens's displacement filter with yellow fringes under a clip path; the body is what shows here. */
+${MENU}[data-joined]>[popover]{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+${MENU}[data-phase=moving]>[popover]>*{transform-origin:0 0;
+ transform:translate(var(--vk-tx),calc(var(--vk-ty) - var(--vk-i,0)*var(--vk-menu-row)*(1 - var(--vk-s))))scale(var(--vk-s));
+ opacity:min(1,calc(var(--vk-ink-in)*4));filter:blur(calc((1 - var(--vk-ink-in))*8px))}
 ${MENU}[data-measure]>[popover]{width:max-content!important;height:auto!important;left:0!important;top:0!important;padding:var(--vk-menu-pad)!important;visibility:hidden}
 ${MENU}[data-measure]>[popover]>*{width:auto!important;transform:none!important}
 

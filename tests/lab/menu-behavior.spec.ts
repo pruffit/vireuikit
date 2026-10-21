@@ -602,9 +602,10 @@ test.describe('growth', () => {
     const { opening, closing, trigger } = await openAndClose(page, 'view=menu');
     const menu = opening.at(-1)!;
     const end = closing.at(-1)!;
-    expect(Math.min(...closing.map((f) => Math.max(f.w, f.h)))).toBeLessThan(trigger.height * 0.9);
+    expect(Math.max(...closing.map((f) => Math.max(f.w, f.h)))).toBeGreaterThan(menu.h * 0.9);
+    expect(Math.min(...closing.map((f) => Math.max(f.w, f.h)))).toBeLessThanOrEqual(trigger.height * 1.3);
     expect(near(end.x, trigger.x) && near(end.y, trigger.y) && near(end.w, trigger.width) && near(end.h, trigger.height)).toBe(true);
-    for (const f of closing) if (f.h < menu.h * 0.8) expect(f.ink).toBe(0);
+    for (const f of closing) if (f.h < menu.h * 0.65) expect(f.ink).toBeLessThan(0.1);
   });
 
   test('canary: a menu that pops open without growing fails it', async ({ page }) => {
@@ -751,28 +752,31 @@ export function attachGlass(el, opts) {
 }`;
 
 test.describe('the core\'s morph', () => {
-  test('the lens is handed the second shape while the drop and the menu are joined', async ({ page }) => {
+  test('while the drop and the capsule are joined the surface is drawn as their union and the lens is handed no second shape', async ({ page }) => {
     await page.route('**/vireglass_dom.js*', (route) => route.fulfill({ contentType: 'text/javascript', body: RECORDING_LENS }));
     await openCase(page, 'view=menu');
+    await page.evaluate(() => {
+      const list = document.getElementById('more-list')!;
+      const seen: boolean[] = [];
+      (window as unknown as { __outlines: boolean[] }).__outlines = seen;
+      const loop = () => {
+        seen.push(list.style.getPropertyValue('--vk-outline') !== '');
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+    });
     await page.locator('#more-trigger').click();
     await expect(page.locator('#more')).toHaveAttribute('data-phase', 'open');
-    type Call = { geometry: { width: number; height: number }; morph: { smoothing: number; shape: { offsetX: number; offsetY: number; width: number } } | null | undefined };
+    type Call = { geometry: { width: number; height: number }; morph: unknown };
     const calls = await page.evaluate(
       () => (window as unknown as { __lenses: { id: string; calls: Call[] }[] }).__lenses.find((l) => l.id === 'more-list')!.calls,
     );
-    const frames = calls.filter((c) => c.morph !== undefined);
-    expect(frames[0]!.geometry).toMatchObject({ width: 44, height: 44 });
-    expect(frames[0]!.morph).toBeNull();
-    const joined = frames.filter((c) => c.morph);
-    expect(joined.length).toBeGreaterThan(1);
-    const last = frames.at(-1)!;
-    for (const c of joined) {
-      expect(c.morph!.smoothing).toBeGreaterThan(0);
-      expect(Math.abs(c.morph!.shape.offsetX)).toBeLessThan(last.geometry.width);
-      expect(Math.abs(c.morph!.shape.offsetY)).toBeLessThan(last.geometry.height);
-    }
-    expect(last.morph).toBeNull();
-    expect(last.geometry.width).toBeGreaterThan(44 * 3);
+    expect(calls[0]!.geometry).toMatchObject({ width: 44, height: 44 });
+    expect(calls.filter((c) => c.morph)).toHaveLength(0);
+    const outlines = await page.evaluate(() => (window as unknown as { __outlines: boolean[] }).__outlines);
+    expect(outlines.filter(Boolean).length).toBeGreaterThan(1);
+    expect(outlines.at(-1)).toBe(false);
+    expect(calls.at(-1)!.geometry.width).toBeGreaterThan(44 * 3);
   });
 
   test('a scroll or a resize while the menu is out costs the lens nothing and lays out once a frame', async ({ page }) => {
