@@ -30,8 +30,7 @@ export function formMorph(change: FormChange, ctx: Pick<AdaptiveContext, 'reduce
   return { ...change, mode, staysOpen: mode !== 'disappear', instant };
 }
 
-/** A class change moves at the pace the menu's growth had before it was fitted to M 5:11; critically damped, because a
- *  layout that overshoots would bounce off the window's edge. */
+/** A class change moves at the popover's opening pace, critically damped: a layout that overshoots would bounce off the window's edge. */
 export const FORM_MORPH_TIMING = { response: POPOVER_GROWTH_TIMING.growOpen, damping: 1 } as const;
 
 /** 0 is the form it comes from, 1 the form it goes to. */

@@ -39,7 +39,7 @@ const FORCED: Record<string, GrowthPhase | null> = {
 const FORCED_PHASE = /^-?\d*\.?\d+( -?\d*\.?\d+){1,5}$/;
 const GLASS_ON = new Set(['', 'present', 'touch']);
 const MATERIAL_STEPS = 10;
-// M 5:11: the rows are about 1.3 times their size while the lens still holds them out of focus.
+// The rows are this much larger while the lens still holds them out of focus.
 const CONTENT_MAGNIFY = 0.35;
 // The content is fully opaque from here (styles: opacity is the ink four times over).
 const CONTENT_DRAWN = 0.25;

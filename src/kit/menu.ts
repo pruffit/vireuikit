@@ -221,15 +221,14 @@ const center = (r: Rect): GrowthPoint => ({ x: r.x + r.width / 2, y: r.y + r.hei
 /** The lens's smoothing is a fusion margin; the outline's neck is the distance over which two shapes blend. */
 const OUTLINE_NECK = 2;
 
-// M 5:11: the drop is at its brightest from the moment it forms and has lost its lift by the time the menu has
-// reached size; the lightness inside the silhouette falls from 0.97 to 0.78 between 0.18 and 0.38 s.
+// The drop is brightest as it forms and has lost its lift by the time the menu has reached size.
 const ACTIVITY_FALLS_FROM = 0.45;
 const ACTIVITY_FALLS_TO = 1;
 
 // What is left of the lift once the body has its size, until the content is in focus.
 const ACTIVITY_TAIL = 0.5;
 
-// The glyphs of the capsule are seen through the lens until the drop has formed (M 5:11, +0.051 s).
+// The capsule's glyphs are seen through the lens until the drop has formed.
 const CAPSULE_FROM = 0.45;
 const CAPSULE_TO = 0.9;
 
@@ -317,8 +316,7 @@ export function menuMaterial(base: VireGlassMaterial, activity: number, capsule 
   return atomMaterial({ ...sheet, roughness }, 'menu', { ...ATOM_AT_REST, pressed: activity });
 }
 
-/** The gathered medium lit by a concentrate of its surroundings: 0.2 lighter than what it covers at M 5:11 and nearly
- *  opaque, so white over a light backdrop (0.97 inside the silhouette), and only brighter over a dark one. */
+/** The drop: opaque, a fifth white and lifted over what it covers, so white over a light backdrop and only brighter over a dark one. */
 export const MENU_DROP_BODY: AtomBody = { alpha: 1, white: 0.2, lift: 0.3 };
 
 export function menuBody(base: VireGlassMaterial, activity: number, frost = false): AtomBody {

@@ -1,7 +1,4 @@
-// Two-phase "capsule → drop → target" growth: atom behavior, not layout. The body contracts into
-// a drop that rises toward the target, swells into it with a slight overshoot, and the content
-// clears as it settles; closing retraces the same path in reverse, because the model holds no
-// direction, only the current phase. Source and target sizes are layout, supplied as parameters.
+// Capsule → drop → target growth: behaviour, not layout; source and target sizes are passed in.
 import { halfMinDp, type VireGlassGeometry, type VireGlassMorph } from 'vireglass';
 
 /** A spring with `response`-second settle time; `damping` < 1 overshoots. `instant` skips
@@ -53,13 +50,8 @@ export type GrowthPoint = { x: number; y: number };
  *  what the body is merging into). */
 export type GrowthShape = { geometry: VireGlassGeometry; center: GrowthPoint };
 
-/** `shrink` — capsule → drop, no overshoot. `grow` — drop → target; may exceed 1 for the
- *  overshoot. `rise` — where the body is on its way from the drop to the target's centre; it has its own spring
- *  because the body rises ahead of its swelling and overshoots the centre, and closing lets it go back later than
- *  it shrinks. `focus` — how far the target's content has come into focus; the content clears after the body has
- *  reached its size. `glow` — how lit the glass is: it follows `shrink` quickly and lets go of it slowly, so the
- *  capsule that has re-formed is still bright. Without `rise` and `focus` they follow `grow`, without `glow` it is
- *  `shrink`. All are read as-is; `stepGrowth` owns the bounds and the handoff. */
+/** The springs of a growth, 0…1 (`grow` and `rise` overshoot). Without `height`, `rise` and `focus` they follow `grow`, without
+ *  `glow` it follows `shrink`; what each does is in docs/acceptance.md, "Against the reference". */
 export type GrowthPhase = { shrink: number; grow: number; height?: number; focus?: number; rise?: number; glow?: number };
 
 export type GrowthInk = {
@@ -82,30 +74,25 @@ export type GrowthFrame = {
   ink: GrowthInk;
 };
 
-/** The drop's diameter as a fraction of the geometric mean of the source's sides, so a wide toolbar gathers more glass than a round button. */
+/** The drop's diameter, as a fraction of the geometric mean of the source's sides. */
 const DROP_SIZE = 0.62;
-/** How far the body sinks past the drop's place on closing, per unit of its dip, in source sizes: about 12 dp for a 44 dp
- *  capsule at the dip's peak, however far the menu's centre is. */
-/** How far past its size the capsule may swell as it re-forms, as a fraction of its way to the drop. */
-const MAX_SWELL = 0.3;
+/** The capsule contracts to this fraction of the drop before it is the drop. */
 const DROP_CORE = 0.6;
+/** How far the body sinks past the drop on closing, per unit of its dip, in source sizes: independent of the menu's distance. */
 const SINK_REACH = 1;
-/** How far the drop sits above the source's centre when it has formed (M 5:11: 5 dp of a 44 dp toolbar), as a
- *  fraction of the source's diameter; it rises toward the target as it swells, not before. */
+/** How far the drop sits above the source's centre once formed, in source sizes. */
 const DROP_LIFT = 0.07;
-/** Without a `rise`, the drop rises ahead of its swelling (M 5:11: it is at the menu's centre when 60 % grown). */
+/** Without a `rise`, the drop is at the target's centre when 60 % grown. */
 const RISE_AHEAD = 0.9;
-/** The bud starts smaller than a square root would make it (M 5:11: the bump on the capsule is a few dp high at first). */
+/** The bud starts smaller than a square root would make it. */
 const SEED_GROWTH = 0.8;
 const KEEP_UNTIL = 0.3;
 const NECK_GAIN = 0.3;
 const NECK_RAMP = 4;
 const CORNER_EASE_START = 0.55;
-// M 5:11: the toolbar's glyphs begin to soften a quarter of the way into the drop and are gone by the time it has formed.
 const INK_OUT_START = 0.25;
 const INK_OUT_END = 0.85;
-// Without a `focus` the content comes into focus as the body reaches size; with one, what counts as in focus,
-// since a spring never quite arrives.
+// What counts as in focus: a spring never quite arrives.
 const INK_IN_START = 0.9;
 const INK_IN_END = 1;
 const FOCUS_DONE = 0.97;
@@ -149,12 +136,11 @@ export function growthFrame(
     y: source.center.y + (dy / len) * lift,
   };
 
-  const a = Math.min(Math.max(phase.shrink, -MAX_SWELL), 1);
+  const a = Math.min(Math.max(phase.shrink, 0), 1);
   const b = Math.max(phase.grow, 0);
   const reached = Math.min(b, 1);
   const rise = phase.rise ?? reached * (1 + RISE_AHEAD * (1 - reached));
-  // Closing, the body runs on past the drop's place (M 5:11: the capsule sinks about 12 dp as the drop merges into it)
-  // and settles back; the whole body goes with it.
+  // Closing, the whole body runs on past the drop's place and settles back.
   const dip = Math.min(rise, 0);
   const reach = Math.hypot(target.center.x - drop.x, target.center.y - drop.y) || 1;
   const sinkLength = -dip * SINK_REACH * sourceSize;
@@ -265,14 +251,10 @@ export const growthPhase = (state: GrowthState): GrowthPhase => ({
   glow: state.glow.x,
 });
 
-/** Durations are client-specific: the default is fitted to the menu growing out of its toolbar at
- *  M 5:11 (docs/acceptance.md, N9), and an atom at a different scale (an icon opening into a sheet)
- *  isn't obligated to match it. The shape of the transition is shared regardless. */
+/** Durations belong to the client: the default is the menu's (docs/acceptance.md, N9). */
 export type GrowthTiming = {
   shrinkOpen: number;
   shrinkClose: number;
-  /** < 1 lets the capsule that has re-formed swell a little past its size before it settles. */
-  shrinkDampingClose: number;
   growOpen: number;
   growClose: number;
   /** < 1 gives the target a slight overshoot on open; closing never overshoots. */
@@ -281,8 +263,7 @@ export type GrowthTiming = {
   heightOpen: number;
   heightDampingOpen: number;
   heightClose: number;
-  /** The body's rise toward the target's centre: it overshoots it on open (`riseDampingOpen` < 1), and goes back on close
-   *  without. */
+  /** The body's rise toward the target's centre: it overshoots it on open and, closing, runs on past the drop (damping < 1). */
   riseOpen: number;
   riseDampingOpen: number;
   riseClose: number;
@@ -298,7 +279,6 @@ export type GrowthTiming = {
 export const DEFAULT_GROWTH_TIMING: GrowthTiming = {
   shrinkOpen: 0.24,
   shrinkClose: 0.145,
-  shrinkDampingClose: 1,
   growOpen: 0.47,
   growClose: 0.45,
   growDampingOpen: 0.68,
@@ -323,7 +303,6 @@ const POPOVER_CLOSE = 0.4;
 export const POPOVER_GROWTH_TIMING: GrowthTiming = {
   shrinkOpen: 0.21,
   shrinkClose: 0.14,
-  shrinkDampingClose: 1,
   growOpen: POPOVER_OPEN,
   growClose: POPOVER_CLOSE,
   growDampingOpen: 0.72,
@@ -341,7 +320,7 @@ export const POPOVER_GROWTH_TIMING: GrowthTiming = {
 };
 
 const GROW_DAMPING_CLOSE = 1;
-const SHRINK_DAMPING_OPEN = 1;
+const SHRINK_DAMPING = 1;
 const GROW_STARTS_AT = 0.8;
 const SHRINK_RETURNS_AT = 0.3;
 const FOCUS_STARTS_AT = 0.7;
@@ -385,7 +364,7 @@ export function stepGrowth(
     shrink,
     dt,
     open ? timing.shrinkOpen : timing.shrinkClose,
-    open ? SHRINK_DAMPING_OPEN : timing.shrinkDampingClose,
+    SHRINK_DAMPING,
     reduceMotion,
   );
   const movedGrow = stepSpring(
