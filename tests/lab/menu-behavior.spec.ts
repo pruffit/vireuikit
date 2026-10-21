@@ -408,7 +408,7 @@ test.describe('input that began on the trigger', () => {
           const list = document.getElementById('more-list')!;
           const read = () => document.getElementById('log')!.textContent!.trim();
           const step = () => {
-            if (Number(list.style.getPropertyValue('--vk-ink-in')) < 0.1) return requestAnimationFrame(step);
+            if (Number(list.style.getPropertyValue('--vk-ink-in')) < 0.34) return requestAnimationFrame(step);
             const item = document.activeElement as HTMLElement;
             const phase = document.getElementById('more')!.getAttribute('data-phase');
             item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));

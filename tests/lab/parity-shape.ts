@@ -101,82 +101,122 @@ export function rimSoftness(img: Rgba, m: Mask): number | null {
   return steepest > 0 ? Math.abs(deep - far) / steepest : null;
 }
 
-const BAND = 3;
+const SMALL = 2;
+const LARGE = 12;
 
-/** The rows' edge energy: for every row, the mean distance of the luma from its 7 x 7 average over the silhouette pulled in by `inset`. */
-export function rowProfile(img: Rgba, m: Mask, inset: number): { top: number; rows: number[] } | null {
-  const b = bounds(m);
-  if (!b) return null;
-  const { width: w, height: h } = img;
-  const inner = erode(m, inset);
-  const rows: number[] = [];
-  for (let y = b.y0; y <= b.y1; y += 1) {
-    let sum = 0;
-    let n = 0;
-    if (y >= BAND && y < h - BAND) {
-      for (let x = BAND; x < w - BAND; x += 1) {
-        if (!inner.on[y * w + x]) continue;
-        let mean = 0;
-        for (let dy = -BAND; dy <= BAND; dy += 1) for (let dx = -BAND; dx <= BAND; dx += 1) mean += luma(img, (y + dy) * w + x + dx);
-        sum += Math.abs(luma(img, y * w + x) - mean / (2 * BAND + 1) ** 2);
-        n += 1;
-      }
+/** Box blur of a plane, by integral image. */
+function boxBlur(plane: Float32Array, w: number, h: number, r: number): Float32Array {
+  const sum = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y += 1) {
+    let row = 0;
+    for (let x = 0; x < w; x += 1) {
+      row += plane[y * w + x]!;
+      sum[(y + 1) * (w + 1) + x + 1] = sum[y * (w + 1) + x + 1]! + row;
     }
-    rows.push(n ? sum / n : 0);
   }
-  return { top: b.y0, rows };
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const x0 = Math.max(x - r, 0);
+      const y0 = Math.max(y - r, 0);
+      const x1 = Math.min(x + r + 1, w);
+      const y1 = Math.min(y + r + 1, h);
+      const total = sum[y1 * (w + 1) + x1]! - sum[y0 * (w + 1) + x1]! - sum[y1 * (w + 1) + x0]! + sum[y0 * (w + 1) + x0]!;
+      out[y * w + x] = total / ((x1 - x0) * (y1 - y0));
+    }
+  }
+  return out;
 }
 
-export type ContentFit = { scale: number; shift: number };
-
-// How near the best fit another has to be to count as the same one shifted by a row.
-const ALIAS = 0.93;
-const SCALES = Array.from({ length: 41 }, (_, i) => 0.8 + i * 0.04);
-
-function pearson(a: number[], b: number[]): number {
-  const n = a.length;
-  const ma = a.reduce((s, v) => s + v, 0) / n;
-  const mb = b.reduce((s, v) => s + v, 0) / n;
-  let ab = 0;
-  let aa = 0;
-  let bb = 0;
-  for (let i = 0; i < n; i += 1) {
-    ab += (a[i]! - ma) * (b[i]! - mb);
-    aa += (a[i]! - ma) ** 2;
-    bb += (b[i]! - mb) ** 2;
-  }
-  return aa > 0 && bb > 0 ? ab / Math.sqrt(aa * bb) : 0;
+/** The luma with its slow variation taken off (a backdrop, a body's tint, a defocus's wash): what is left is structure. */
+export function structure(img: Rgba): Float32Array {
+  const { width: w, height: h } = img;
+  const plane = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i += 1) plane[i] = luma(img, i);
+  const fine = boxBlur(plane, w, h, SMALL);
+  const coarse = boxBlur(plane, w, h, LARGE);
+  for (let i = 0; i < w * h; i += 1) plane[i] = fine[i]! - coarse[i]!;
+  return plane;
 }
+
+export type Template = { points: { u: number; v: number; t: number }[] };
+
+const STEP = 3;
+
+function centreOf(m: Mask): { x: number; y: number } | null {
+  const b = bounds(m);
+  return b ? { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 } : null;
+}
+
+/** The settled menu's content as a template: its structure inside the silhouette pulled in by `inset`, in dp from the silhouette's centre. */
+export function contentTemplate(img: Rgba, m: Mask, inset: number): Template | null {
+  const c = centreOf(m);
+  if (!c) return null;
+  const plane = structure(img);
+  const inner = erode(m, inset);
+  const points: Template['points'] = [];
+  for (let y = 0; y < img.height; y += STEP) {
+    for (let x = 0; x < img.width; x += STEP) if (inner.on[y * img.width + x]) points.push({ u: x - c.x, v: y - c.y, t: plane[y * img.width + x]! });
+  }
+  return points.length ? { points } : null;
+}
+
+export type ContentFit = { scale: number; shift: number; score: number };
+
+const SCALES = Array.from({ length: 11 }, (_, i) => 0.9 + i * 0.1);
+const SHIFTS_Y = Array.from({ length: 61 }, (_, i) => -130 + i * 3);
+const SHIFTS_X = [-9, 0, 9];
+/** A fit with less of the template on the frame than this, or a worse correlation, is not a match. */
+const MIN_OVERLAP = 0.3;
+const MIN_SCORE = 0.25;
 
 /**
- * Where the content is, against where it rests: the scale and the shift of the settled menu's row profile that best matches this
- * one, the shift being the content's centre against the body's centre (0 at rest, negative when the content sits high).
- * Null where the content is not told from its surround.
+ * Where the settled content is on this frame: the scale and the vertical shift (the content's centre against the body's centre; 0 at rest,
+ * negative when it sits high) of the template that correlate best with the frame's structure inside its silhouette. The rows differ in their
+ * words and icons, so a row's worth of shift does not fit; null where nothing correlates.
  */
-export function contentFit(now: { top: number; rows: number[] }, settled: { top: number; rows: number[] }): ContentFit | null {
-  const height = now.rows.length;
-  const rest = settled.rows;
-  if (Math.max(...now.rows) < 1e-4) return null;
-  const fits: { score: number; scale: number; shift: number }[] = [];
-  for (const scale of SCALES) {
-    for (let dy = -height; dy <= height; dy += 1) {
-      const predicted = new Array<number>(height).fill(0);
-      let overlap = 0;
-      for (let u = 0; u < height; u += 1) {
-        const v = Math.round((u - dy) / scale);
-        if (v >= 0 && v < rest.length) {
-          predicted[u] = rest[v]!;
-          overlap += 1;
-        }
-      }
-      if (overlap < height / 4) continue;
-      fits.push({ score: pearson(now.rows, predicted), scale, shift: dy + (scale * rest.length) / 2 - height / 2 });
+export function matchContent(img: Rgba, m: Mask, template: Template, inset: number): ContentFit | null {
+  const c = centreOf(m);
+  if (!c) return null;
+  const { width: w, height: h } = img;
+  const plane = structure(img);
+  const inner = erode(m, inset);
+  const n = template.points.length;
+  const score = (scale: number, dy: number, dx: number): number => {
+    let count = 0;
+    let sa = 0;
+    let sb = 0;
+    let saa = 0;
+    let sbb = 0;
+    let sab = 0;
+    for (const p of template.points) {
+      const x = Math.round(c.x + dx + scale * p.u);
+      const y = Math.round(c.y + dy + scale * p.v);
+      if (x < 0 || y < 0 || x >= w || y >= h || !inner.on[y * w + x]) continue;
+      const b = plane[y * w + x]!;
+      count += 1;
+      sa += p.t;
+      sb += b;
+      saa += p.t * p.t;
+      sbb += b * b;
+      sab += p.t * b;
     }
+    if (count < MIN_OVERLAP * n) return -1;
+    const va = saa - (sa * sa) / count;
+    const vb = sbb - (sb * sb) / count;
+    return va > 0 && vb > 0 ? (sab - (sa * sb) / count) / Math.sqrt(va * vb) : -1;
+  };
+  let best = { score: -1, scale: 1, dy: 0, dx: 0 };
+  for (const scale of SCALES) for (const dy of SHIFTS_Y) for (const dx of SHIFTS_X) {
+    const got = score(scale, dy, dx);
+    if (got > best.score) best = { score: got, scale, dy, dx };
   }
-  const top = Math.max(...fits.map((f) => f.score));
-  // Rows repeat, so a shift of a whole row or two fits about as well: of the fits that are nearly the best, the one nearest to rest.
-  const near = fits.filter((f) => f.score >= top * ALIAS && f.score > 0.3).sort((p, q) => Math.abs(p.shift) - Math.abs(q.shift))[0];
-  return near ? { scale: near.scale, shift: near.shift } : null;
+  const coarse = best;
+  for (const scale of [coarse.scale - 0.05, coarse.scale, coarse.scale + 0.05]) for (let dy = coarse.dy - 2; dy <= coarse.dy + 2; dy += 1) for (const dx of [coarse.dx - 4, coarse.dx, coarse.dx + 4]) {
+    const got = score(scale, dy, dx);
+    if (got > best.score) best = { score: got, scale, dy, dx };
+  }
+  return best.score >= MIN_SCORE ? { scale: best.scale, shift: best.dy, score: best.score } : null;
 }
 
 export type Look = {

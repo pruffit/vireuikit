@@ -41,12 +41,12 @@ const GLASS_ON = new Set(['', 'present', 'touch']);
 const MATERIAL_STEPS = 10;
 // The rows are this much larger while the lens still holds them out of focus.
 const CONTENT_MAGNIFY = 0.6;
-// The content is fully opaque from here (styles: opacity is the ink ten times over).
-const CONTENT_DRAWN = 0.1;
+// The content is fully opaque from here (styles: opacity is the ink three times over).
+const CONTENT_DRAWN = 0.34;
 // How much of the light of the lit body goes to the halo, besides the drop's own.
 const HALO_LIT = 0.15;
 // The content comes in this many rows high and slides down into place as it comes into focus.
-const CONTENT_RISE = 0.9;
+const CONTENT_RISE = 2.2;
 const VIEWPORT_MARGIN = 8;
 const TRIGGER = ':scope > button, :scope > vire-button > button, :scope > vire-icon-button > button';
 const ACTIVATION_KEYS = new Set(['Enter', ' ']);

@@ -79,13 +79,15 @@ const DROP_SIZE = 0.62;
 /** The capsule contracts to this fraction of the drop before it is the drop. */
 const DROP_CORE = 0.6;
 /** How far the body sinks past the drop on closing, per unit of its dip, in source sizes: independent of the menu's distance. */
-const SINK_REACH = 1;
+const SINK_REACH = 2.5;
 /** How far the drop sits above the source's centre once formed, in source sizes. */
 const DROP_LIFT = 0.07;
 /** Without a `rise`, the drop is at the target's centre when 60 % grown. */
 const RISE_AHEAD = 0.9;
 /** The bud starts smaller than a square root would make it. */
 const SEED_GROWTH = 0.8;
+/** Up to this much of the swelling, and while the capsule is re-forming, the drop is held inside the capsule's far side. */
+const HOLD_UNTIL = 0.4;
 const KEEP_UNTIL = 0.3;
 const NECK_GAIN = 0.3;
 const NECK_RAMP = 4;
@@ -186,6 +188,13 @@ export function growthFrame(
       y: mix(drop.y, target.center.y, rise) - cornerY * overY,
     },
   };
+
+  // The drop merges into the capsule's side towards the menu; it does not hang out of the other side.
+  const away = { x: -dx / len, y: -dy / len };
+  const farSide = (shape: GrowthShape) =>
+    shape.center.x * away.x + shape.center.y * away.y + (Math.abs(away.x) * shape.geometry.width + Math.abs(away.y) * shape.geometry.height) / 2;
+  const hanging = (farSide(grown) - farSide(shrunk)) * (1 - smoothstep(0, HOLD_UNTIL, b)) * (1 - smoothstep(0.2, 0.6, a));
+  if (hanging > 0) grown.center = { x: grown.center.x - away.x * hanging, y: grown.center.y - away.y * hanging };
 
   const { main, other } = largerOf(grown, shrunk);
   const neck = NECK_GAIN * sourceSize * Math.min(a * NECK_RAMP, 1) * keep;
@@ -289,7 +298,7 @@ export const DEFAULT_GROWTH_TIMING: GrowthTiming = {
   riseDampingOpen: 0.42,
   riseClose: 0.55,
   riseDampingClose: 0.55,
-  focusOpen: 0.28,
+  focusOpen: 0.38,
   focusClose: 0.15,
   glowOpen: 0.08,
   glowClose: 0.6,

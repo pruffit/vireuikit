@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Mask, Rgba } from '../../tests/lab/parity-measures';
-import { aspect, contentFit, rimSoftness, rowProfile, taper, verticalLight } from '../../tests/lab/parity-shape';
+import { aspect, contentTemplate, matchContent, rimSoftness, taper, verticalLight } from '../../tests/lab/parity-shape';
 
 const W = 160;
 const H = 160;
@@ -67,26 +67,65 @@ describe('the rim', () => {
 });
 
 describe('the content', () => {
-  // Rows of text: bright lines of two pixels, every `pitch` pixels from `first`, on a grey field.
-  const rows = (pitch: number, first: number) => image((_, y) => ((y - first) % pitch + pitch) % pitch < 3 && y >= first ? 230 : 90);
-  const settledBody = box(20, 20, 140, 100);
-  const settled = rowProfile(rows(20, 30), settledBody, 2)!;
+  // Four rows that differ: a bar of its own width and a dot of its own place, on a grey field, drawn at a scale and a shift about the centre of the body.
+  const WIDTHS = [22, 46, 31, 58];
+  const DOTS = [4, 26, 12, 40];
+  const body = box(20, 20, 140, 140);
+  const draw = (scale: number, shift: number, blur = 0) => {
+    const dark = new Float32Array(W * H);
+    const bar = (x0: number, y0: number, x1: number, y1: number) => {
+      for (let y = Math.round(y0); y < Math.round(y1); y += 1) for (let x = Math.round(x0); x < Math.round(x1); x += 1) if (x >= 0 && y >= 0 && x < W && y < H) dark[y * W + x] = 1;
+    };
+    WIDTHS.forEach((width, k) => {
+      const y = 80 + shift + scale * (-37 + k * 25);
+      bar(30 + scale * 6 + (80 - 30) * (scale - 1) * -0.5 + 0, y - scale * 3, 30 + scale * (6 + width), y + scale * 3);
+      bar(30 + scale * (70 + DOTS[k]!), y - scale * 5, 30 + scale * (76 + DOTS[k]!), y + scale * 5);
+    });
+    const out = new Float32Array(W * H);
+    for (let y = 0; y < H; y += 1) for (let x = 0; x < W; x += 1) {
+      let sum = 0;
+      let n = 0;
+      for (let dy = -blur; dy <= blur; dy += 1) for (let dx = -blur; dx <= blur; dx += 1) {
+        const xx = Math.min(Math.max(x + dx, 0), W - 1);
+        const yy = Math.min(Math.max(y + dy, 0), H - 1);
+        sum += dark[yy * W + xx]!;
+        n += 1;
+      }
+      out[y * W + x] = sum / n;
+    }
+    return image((x, y) => 215 - 150 * out[y * W + x]!);
+  };
+  const template = contentTemplate(draw(1, 0), body, 4)!;
 
   it('finds the rest as scale 1 and no shift', () => {
-    const fit = contentFit(settled, settled)!;
+    const fit = matchContent(draw(1, 0), body, template, 4)!;
     expect(fit.scale).toBeCloseTo(1, 1);
-    expect(Math.abs(fit.shift)).toBeLessThan(1);
+    expect(Math.abs(fit.shift)).toBeLessThanOrEqual(3);
   });
 
-  it('reads magnified rows as a larger scale and rows that sit high as a negative shift', () => {
-    const now = rowProfile(rows(28, 14), box(20, 5, 140, 125), 2)!;
-    const fit = contentFit(now, settled)!;
-    expect(fit.scale).toBeGreaterThan(1.2);
-    expect(fit.scale).toBeLessThan(1.6);
-    expect(fit.shift).toBeLessThan(0);
+  it('reads magnified rows that sit high as a larger scale and a negative shift, blurred or not', () => {
+    for (const blur of [0, 3]) {
+      const fit = matchContent(draw(1.4, -30, blur), body, template, 4)!;
+      expect(fit.scale).toBeGreaterThan(1.25);
+      expect(fit.scale).toBeLessThan(1.55);
+      expect(fit.shift).toBeLessThan(-18);
+      expect(fit.shift).toBeGreaterThan(-42);
+    }
+  });
+
+  it('is not fooled by a shift of one row: the rows differ, so it reads the shift it is', () => {
+    const fit = matchContent(draw(1, -25), body, template, 4)!;
+    expect(fit.shift).toBeLessThan(-18);
+    expect(fit.shift).toBeGreaterThan(-32);
+  });
+
+  it('canary: rows that sit at rest do not read as shifted, and shifted ones do not read as rest', () => {
+    const rest = matchContent(draw(1, 0, 2), body, template, 4)!;
+    const high = matchContent(draw(1, -40, 2), body, template, 4)!;
+    expect(high.shift).toBeLessThan(rest.shift - 25);
   });
 
   it('is null without any structure', () => {
-    expect(contentFit(rowProfile(image(() => 128), settledBody, 2)!, settled)).toBeNull();
+    expect(matchContent(image(() => 128), body, template, 4)).toBeNull();
   });
 });

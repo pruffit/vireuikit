@@ -87,7 +87,7 @@ ${MENU}[data-phase=moving]>[popover]{padding:0;clip-path:var(--vk-outline,none)}
 ${MENU}[data-joined]>[popover]{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 ${MENU}[data-phase=moving]>[popover]>*{transform-origin:0 0;
  transform:translate(var(--vk-tx),calc(var(--vk-ty) - var(--vk-i,0)*var(--vk-menu-row)*(1 - var(--vk-s))))scale(var(--vk-s));
- opacity:min(1,calc(var(--vk-ink-in)*10));filter:blur(calc((1 - var(--vk-ink-in))*5px))}
+ opacity:min(1,calc(var(--vk-ink-in)*2));filter:blur(calc((1 - var(--vk-ink-in))*5px))}
 ${MENU}:not([data-arrived])>[popover]>*{pointer-events:none}
 /* The light that bleeds past a drop's edge is a blurred copy of its outline under it, and the top of the body is dimmed against the bottom. */
 ${MENU}>[data-vk-halo]{display:none;position:fixed;left:var(--vk-halo-x,0);top:var(--vk-halo-y,0);width:var(--vk-halo-w,0);height:var(--vk-halo-h,0);pointer-events:none;opacity:var(--vk-halo-amount,0);filter:blur(6px)}

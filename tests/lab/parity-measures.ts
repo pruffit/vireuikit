@@ -263,6 +263,11 @@ export function compareToReference(ours: Measured, around: readonly Measured[], 
     judge('taper', ours.look.taper, seen((l) => l.taper));
     judge('vertical', ours.look.vertical, seen((l) => l.vertical));
     judge('rim', ours.look.rim, seen((l) => l.rim));
+    const theirs = seen((l) => l.content?.shift);
+    if (!ours.look.content && theirs.length > 0) {
+      margin.scale = Number.NEGATIVE_INFINITY;
+      margin.shift = Number.NEGATIVE_INFINITY;
+    }
     judge('scale', ours.look.content?.scale, seen((l) => l.content?.scale));
     judge('shift', ours.look.content?.shift, seen((l) => l.content?.shift));
   }

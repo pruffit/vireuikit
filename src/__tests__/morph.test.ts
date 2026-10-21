@@ -248,7 +248,17 @@ describe('the drop and the sink', () => {
       return Math.hypot(frame.body.center.x - source.center.x, frame.body.center.y - source.center.y);
     };
     expect(sunk(600)).toBeCloseTo(sunk(120), 6);
-    expect(sunk(600)).toBeLessThan(0.3 * 44);
+    expect(sunk(600)).toBeLessThan(0.5 * 44);
+  });
+
+  it('merges into the side of the capsule towards the menu while it re-forms, and does not hang out of the other', () => {
+    const source = at(toolbar, 222);
+    const bottom = (shrink: number) => {
+      const frame = growthFrame(source, menu(200), { x: 20, y: 222 }, { shrink, grow: 0.09, height: 0.13, rise: -0.11 });
+      return frame.grown.center.y + frame.grown.geometry.height / 2;
+    };
+    expect(bottom(1)).toBeGreaterThan(bottom(0.05) + 5);
+    expect(bottom(0.05)).toBeLessThanOrEqual(source.center.y + 22 + 0.15 * 2.5 * 44);
   });
 
   it('turns back from the dip without a jump when the menu is opened again', () => {

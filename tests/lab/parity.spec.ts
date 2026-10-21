@@ -17,7 +17,7 @@ import {
   type Slack,
   type Verdict,
 } from './parity-measures';
-import { aspect, contentFit, rimSoftness, rowProfile, taper, verticalLight, type Look } from './parity-shape';
+import { aspect, contentTemplate, matchContent, rimSoftness, taper, verticalLight, type Look, type Template } from './parity-shape';
 
 // Needs the uncommitted reference frames: `npm run check:lab:reference` (VIREUIKIT_REFERENCE_DIR).
 test.skip(!process.env.VIREUIKIT_REFERENCE_DIR, 'VIREUIKIT_REFERENCE_DIR is not set: the reference frames are local-only');
@@ -41,7 +41,6 @@ const KNOWN: { instant: string; measure: Measure; reason: string }[] = [
   { instant: 'c+0.084', measure: 'iou', reason: 'the reference drop has a tail toward the capsule; the union outline draws a round body' },
   { instant: 'c+0.084', measure: 'taper', reason: 'the reference drop is wider at the top than at the bottom (its tail), ours is a rounded pear' },
   { instant: 'c+0.084', measure: 'rim', reason: 'ours bleeds 5.6 px of light past its edge against the reference at 3.2: the halo does not know the direction of travel' },
-  { instant: 'c+0.284', measure: 'taper', reason: 'the reference ridge on the capsule is a narrow bump, ours a broad swell' },
 ];
 // A reference frame fed in 0.1 s late or early is told from a match at 9 of the 9 moving instants; the gate holds 8.
 const CANARY_CAUGHT = 8;
@@ -136,22 +135,21 @@ test('the menu grows and retracts as the reference does', async ({ page }) => {
     return { img: real, mask, closing: info.frames[i]! > info.closes - 0.05, lightness: meanLightness(real, mask), edgeRaw: edgeEnergy(real, mask, INSET), centroid: centroid(mask) };
   };
   const oursSettled = await rawOurs(SETTLED);
-  const profiles = new Map<Raw, { top: number; rows: number[] } | null>();
-  const profileOf = (settled: Raw) => {
-    if (!profiles.has(settled)) profiles.set(settled, rowProfile(settled.img, settled.mask, INSET));
-    return profiles.get(settled)!;
+  const templates = new Map<Raw, Template | null>();
+  const templateOf = (settled: Raw) => {
+    if (!templates.has(settled)) templates.set(settled, contentTemplate(settled.img, settled.mask, INSET));
+    return templates.get(settled)!;
   };
   const rel = (m: Raw, settled: Raw): Measured => {
     const edge = settled.edgeRaw > 0 ? m.edgeRaw / settled.edgeRaw : 0;
     const grown = (bounds(m.mask)?.y1 ?? 0) - (bounds(m.mask)?.y0 ?? 0) >= 0.6 * settledHeight;
-    const now = edge >= CONTENT_SHOWS && !m.closing && grown ? rowProfile(m.img, m.mask, INSET) : null;
-    const rest = profileOf(settled);
+    const rest = edge >= CONTENT_SHOWS && !m.closing && grown ? templateOf(settled) : null;
     const look: Look = {
       aspect: aspect(m.mask),
       taper: taper(m.mask),
       vertical: verticalLight(m.img, m.mask),
       rim: rimSoftness(m.img, m.mask),
-      content: now && rest ? contentFit(now, rest) : null,
+      content: rest ? matchContent(m.img, m.mask, rest, INSET) : null,
     };
     return { mask: m.mask, lightness: m.lightness, edge, centroid: m.centroid, look };
   };

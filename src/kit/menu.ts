@@ -241,7 +241,7 @@ export function menuCapsule(phase: GrowthPhase): number {
 }
 
 // A drop is a pear for a moment, wider at the bottom, then a bowl, wider at the top, and the bowl fills out into the menu.
-const PEAR = 0.32;
+const PEAR = 0.5;
 const BOWL = -0.17;
 
 /** The sideways stretch of the body from its top to its bottom: positive narrows the top (a pear), negative widens it (a bowl). */
