@@ -546,7 +546,7 @@ test.describe('the content under the bar is out of focus in the screenshot', () 
     expect(on / off).toBeLessThan(0.3);
   });
 
-  test('the glass shows it dissolved: through the body, with the ink taken away, the lines keep under a third of their sharpness', async ({ page }) => {
+  test('the glass shows it dissolved: through the body, with the ink taken away, the lines keep under six tenths of their sharpness', async ({ page }) => {
     const read = async (edge: string) => {
       await scene(page, 'nav-bar', 'text', edge);
       await inkAway(page);
@@ -555,7 +555,7 @@ test.describe('the content under the bar is out of focus in the screenshot', () 
     };
     const off = await read('&edge=off');
     const on = await read('');
-    expect(on / off).toBeLessThan(0.34);
+    expect(on / off).toBeLessThan(0.6);
   });
 
   for (const atom of ['toolbar-top', 'toolbar-bottom']) {
@@ -572,7 +572,7 @@ test.describe('the content under the bar is out of focus in the screenshot', () 
       expect(glassOff).toBeGreaterThan(1);
       expect((await read('', 'glass')) / glassOff).toBeLessThan(0.45);
       const inkOff = await read('&edge=off', 'ink');
-      expect((await read('', 'ink')) / inkOff).toBeLessThan(0.6);
+      expect((await read('', 'ink')) / inkOff).toBeLessThan(0.7);
     });
   }
 

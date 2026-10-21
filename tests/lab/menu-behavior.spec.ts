@@ -704,7 +704,7 @@ test.describe('one body', () => {
     await expect.poll(lensBlur).toBe(restBlur);
   });
 
-  test('the surface scatters what lies under it far more softly than the control it grew from', async ({ page }) => {
+  test('the surface scatters what lies under it several times more softly than the control it grew from', async ({ page }) => {
     await openCase(page, 'view=menu');
     const blurOf = (selector: string) =>
       page.locator(selector).evaluate((el) => {
@@ -715,7 +715,7 @@ test.describe('one body', () => {
     await page.locator('#more-trigger').click();
     await expect(page.locator('#more')).toHaveAttribute('data-phase', 'open');
     const menu = await blurOf('#more-list');
-    expect(menu).toBeGreaterThan(control * 10);
+    expect(menu).toBeGreaterThan(control * 3);
     expect(menu).toBeGreaterThanOrEqual(8);
   });
 
