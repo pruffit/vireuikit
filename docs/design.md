@@ -488,14 +488,7 @@ readings of the contrast of the ink with that: the median (the sheet gate's), an
 where a line of text showing through the glass lands. Text needs 4.5:1 and glyphs 3:1 on both. A median alone cannot see a
 line of text under a label: the strokes are a small part of the box.
 
-What fails today is listed in the spec as expected failures, each with its cause (LG4), and turns red when it starts to pass:
-the rail over body text (4.0:1 on the text page, 3.1:1 on the photo, with no scroll edge by decision), a floating button over
-body text (4.0 and 3.1), and the plain button and icon button of glass off (1.4 to 2.3 on the text page, 1.8 to 2.0 on the
-photo), which are a 10 % tint of the page's ink with no body. Over these the body is not denser by how busy the backdrop is:
-the lab's sample reports a busy of 0 for the text page (a probe reads declared colours, not the strokes of text) and 0.088 for the
-photo, the kit hands the core `body: false` and paints one constant body (alpha 0.25, white 0.15, lift 0.1), and the
-core's `resolveBody` itself gives the photo no more than the material's own density at that busy (0.026; it asks for 0.23 to
-0.44 at a busy of 0.3). Raising the body by busy is a core decision, not a kit tint, and is not done here.
+Everything passes with glass on and off (LG1, LG4). Until vireglass 3.4.0 the rail and a floating button over body text fell short for the text's hardest tenth (4.0:1 on the text page, 3.1:1 on the photo): the control material's roughness of 0.035 rendered no blur in Chromium, so the text under a control read through almost untouched. At 0.18 (σ 2.16 pt) it is out of focus, and the kit adds nothing of its own over it: it paints its own body (`body: false`) and takes the frost from the material.
 
 ## Acceptance of an atom
 

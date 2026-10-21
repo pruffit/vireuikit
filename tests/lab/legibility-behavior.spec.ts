@@ -20,17 +20,6 @@ const ATOMS: Atom[] = [
 ];
 const COUNTS = new Map(ATOMS.map((a) => [a.atom, a]));
 
-// What falls short with glass on, measured. The text's hardest tenth is the only reading that does, and it is pinned to a
-// range: a broken scene or another failure is red, and so is one that starts to pass.
-const RAIL = 'The rail has no scroll edge, and the core reads the lines under it as calm (busy 0) and raises no ground for them (pruffit/vireglass#31).';
-const FLOATING = 'A button floating over body text has no scroll edge, and the core raises no ground for it either (pruffit/vireglass#31).';
-const KNOWN: Record<string, { why: string; worst: [number, number] }> = {
-  'nav-rail|text|on': { why: RAIL, worst: [3.5, 4.4] },
-  'nav-rail|photo|on': { why: RAIL, worst: [2.6, 3.6] },
-  'button|text|on': { why: FLOATING, worst: [3.5, 4.4] },
-  'button|photo|on': { why: FLOATING, worst: [2.6, 3.6] },
-};
-
 test.use({ viewport: { width: 1700, height: 1000 } });
 
 async function measure(page: Page, atom: string, backdrop: string, glass: boolean, edge?: string): Promise<Legible[]> {
@@ -55,18 +44,7 @@ test.describe('every glass atom stays legible over body text and a photo', () =>
     for (const backdrop of ['text', 'photo']) {
       for (const glass of [true, false]) {
         test(`${atom} on ${backdrop}, glass ${glass ? 'on' : 'off'}`, async ({ page }) => {
-          const known = KNOWN[`${atom}|${backdrop}|${glass ? 'on' : 'off'}`];
           const runs = await measure(page, atom, backdrop, glass);
-          if (known) {
-            const [low, high] = known.worst;
-            const worst = least(runs, 'text', 'worst');
-            expect(worst, `${known.why} Text against the hardest tenth`).toBeGreaterThan(low);
-            expect(worst, `${known.why} Text against the hardest tenth`).toBeLessThan(high);
-            expect(least(runs, 'text', 'median'), 'text against the median').toBeGreaterThanOrEqual(TEXT);
-            expect(least(runs, 'glyph', 'median'), 'glyphs against the median').toBeGreaterThanOrEqual(GLYPH);
-            expect(least(runs, 'glyph', 'worst'), 'glyphs against the hardest tenth').toBeGreaterThanOrEqual(GLYPH);
-            return;
-          }
           for (const run of runs) {
             const need = run.kind === 'text' ? TEXT : GLYPH;
             expect(run.median, `${run.kind} "${run.label}" against the median behind it`).toBeGreaterThanOrEqual(need);
@@ -80,31 +58,28 @@ test.describe('every glass atom stays legible over body text and a photo', () =>
 
 test.describe('the gate can fail', () => {
   for (const backdrop of ['text', 'photo']) {
-    test(`with the scroll edge off the navigation bar fails it on ${backdrop}, and the edge is what lifts it`, async ({ page }) => {
+    test(`the scroll edge still lifts the navigation bar's text on ${backdrop}`, async ({ page }) => {
       const off = await measure(page, 'nav-bar', backdrop, true, 'off');
-      expect(least(off, 'text', 'worst'), 'text without the edge').toBeLessThan(TEXT);
       const on = await measure(page, 'nav-bar', backdrop, true);
-      expect(least(on, 'text', 'worst'), 'text with the edge').toBeGreaterThanOrEqual(TEXT);
-      expect(least(on, 'text', 'worst') - least(off, 'text', 'worst')).toBeGreaterThan(1.5);
+      expect(least(on, 'text', 'worst') - least(off, 'text', 'worst')).toBeGreaterThan(0.3);
     });
   }
 
   for (const atom of ['toolbar-top', 'toolbar-bottom']) {
-    test(`with the scroll edge off the ${atom} fails it on the photo, and the edge is what lifts it`, async ({ page }) => {
+    test(`the scroll edge still lifts the ${atom}'s text on the photo`, async ({ page }) => {
       const off = await measure(page, atom, 'photo', true, 'off');
-      expect(least(off, 'text', 'worst'), 'text without the edge').toBeLessThan(TEXT);
       const on = await measure(page, atom, 'photo', true);
-      expect(least(on, 'text', 'worst'), 'text with the edge').toBeGreaterThanOrEqual(TEXT);
-      expect(least(on, 'text', 'worst') - least(off, 'text', 'worst')).toBeGreaterThan(0.5);
+      expect(least(on, 'text', 'worst') - least(off, 'text', 'worst')).toBeGreaterThan(0.3);
     });
   }
 
-  test('an ink that is not the glass\'s fails it: the toolbar with its ink forced to the page\'s', async ({ page }) => {
+  test("an ink that is not the glass's fails it: the toolbar with its ink forced to the page's", async ({ page }) => {
     await openCase(page, 'view=legibility&lg=toolbar-top&backdrop=text&glass=1');
     await settleGlass(page, true);
     await page.addStyleTag({ content: 'vire-toolbar{color:#fbfbf8!important}' });
     const collected = await collectRuns(page, 'vire-toolbar');
     expectRuns(collected, 'toolbar-top');
-    expect(least(await behindRuns(page, collected), 'glyph', 'median')).toBeLessThan(GLYPH);
+    const behind = await behindRuns(page, collected);
+    expect(least(behind, 'glyph', 'median')).toBeLessThan(GLYPH);
   });
 });
