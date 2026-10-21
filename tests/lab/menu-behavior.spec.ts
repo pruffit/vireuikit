@@ -397,7 +397,7 @@ test.describe('input that began on the trigger', () => {
     expect(await isOpen(page)).toBe(true);
   });
 
-  // Judged inside the first frame the content shows, while the surface still grows towards its overshoot.
+  // Judged inside the first frame the content is drawn (opaque, still out of focus), while the surface still grows.
   test('a key chooses as soon as the content shows, where a pointer click there still waits for the menu', async ({ page }) => {
     await openCase(page, 'view=menu');
     await page.locator('#more-trigger').focus();
@@ -408,7 +408,7 @@ test.describe('input that began on the trigger', () => {
           const list = document.getElementById('more-list')!;
           const read = () => document.getElementById('log')!.textContent!.trim();
           const step = () => {
-            if (list.style.getPropertyValue('--vk-ink-in') !== '1.000') return requestAnimationFrame(step);
+            if (Number(list.style.getPropertyValue('--vk-ink-in')) < 0.25) return requestAnimationFrame(step);
             const item = document.activeElement as HTMLElement;
             const phase = document.getElementById('more')!.getAttribute('data-phase');
             item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
@@ -421,6 +421,24 @@ test.describe('input that began on the trigger', () => {
         }),
     );
     expect(seen).toEqual({ phase: 'moving', afterPointer: '', afterKey: 'click:copy' });
+  });
+
+  test('the items take no pointer until the menu has arrived: no hover, no press, no hit on a row that is drawn elsewhere', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').click();
+    const first = page.locator('#more-list button').first();
+    await expect.poll(() => page.locator('#more').getAttribute('data-phase')).toBe('moving');
+    expect(await first.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none');
+    const hit = await page.evaluate(() => {
+      const box = document.getElementById('more-list')!.getBoundingClientRect();
+      return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.id ?? 'item';
+    });
+    expect(hit).toBe('more-list');
+    await openNow(page);
+    await expect(page.locator('#more')).toHaveAttribute('data-arrived', '');
+    expect(await first.evaluate((el) => getComputedStyle(el).pointerEvents)).not.toBe('none');
+    await page.keyboard.press('Escape');
+    await expect.poll(() => page.locator('#more').getAttribute('data-arrived')).toBeNull();
   });
 
   test('a click after the content has arrived still chooses', async ({ page }) => {
@@ -808,6 +826,80 @@ test.describe('the core\'s morph', () => {
     );
     expect(measured).toBe(0);
     expect(await calls()).toBe(before);
+  });
+});
+
+test.describe('while the surface is one body of the capsule and the drop', () => {
+  const clipOf = (page: Page) => page.locator('#more-trigger').evaluate((el) => (el as HTMLElement).style.clipPath);
+  const joined = (page: Page) => page.locator('#more').evaluate((el) => el.hasAttribute('data-joined'));
+  const gone = async (page: Page) => {
+    expect(await joined(page)).toBe(false);
+    expect(await clipOf(page)).toBe('');
+  };
+
+  test('the trigger is cut to the body from where the trigger is now, after the page moves under a growing menu', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').click();
+    await page.waitForTimeout(120);
+    await page.evaluate(() => {
+      document.getElementById('more')!.style.position = 'relative';
+      document.getElementById('more')!.style.top = '30px';
+      window.dispatchEvent(new Event('resize'));
+    });
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const read = () =>
+      page.evaluate(() => {
+        const button = document.getElementById('more-trigger')!.getBoundingClientRect();
+        const list = document.getElementById('more-list')!.getBoundingClientRect();
+        const inset = document.getElementById('more-trigger')!.style.clipPath.split(' round')[0]!.match(/[0-9.]+/g);
+        return {
+          moving: document.getElementById('more')!.getAttribute('data-phase') === 'moving',
+          inset: inset ? inset.slice(0, 4).map(Number) : null,
+          want: [Math.max(list.y - button.y, 0), Math.max(button.x + button.width - (list.x + list.width), 0), Math.max(button.y + button.height - (list.y + list.height), 0), Math.max(list.x - button.x, 0)],
+        };
+      });
+    const seen = await read();
+    expect(seen.moving).toBe(true);
+    expect(seen.inset).not.toBeNull();
+    seen.inset!.forEach((v, i) => expect(Math.abs(v - seen.want[i]!)).toBeLessThan(2));
+  });
+
+  test('closing midway and opening again leaves neither the joined window nor the clip behind', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').click();
+    await page.waitForTimeout(120);
+    expect(await joined(page)).toBe(true);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(60);
+    await page.locator('#more-trigger').click({ force: true });
+    await openNow(page);
+    await gone(page);
+    await page.keyboard.press('Escape');
+    await expect.poll(() => isOpen(page)).toBe(false);
+    await gone(page);
+  });
+
+  test('removing the menu mid-growth takes both away', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').click();
+    await page.waitForTimeout(120);
+    const left = await page.evaluate(() => {
+      const menu = document.getElementById('more')!;
+      const trigger = document.getElementById('more-trigger')!;
+      menu.remove();
+      return { joined: menu.hasAttribute('data-joined'), clip: trigger.style.clipPath };
+    });
+    expect(left).toEqual({ joined: false, clip: '' });
+  });
+
+  test('reduced motion turned on mid-growth lands the menu and takes both away', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').click();
+    await page.waitForTimeout(120);
+    expect(await joined(page)).toBe(true);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openNow(page);
+    await gone(page);
   });
 });
 

@@ -41,6 +41,8 @@ const GLASS_ON = new Set(['', 'present', 'touch']);
 const MATERIAL_STEPS = 10;
 // M 5:11: the rows are about 1.3 times their size while the lens still holds them out of focus.
 const CONTENT_MAGNIFY = 0.35;
+// The content is fully opaque from here (styles: opacity is the ink four times over).
+const CONTENT_DRAWN = 0.25;
 const VIEWPORT_MARGIN = 8;
 const TRIGGER = ':scope > button, :scope > vire-button > button, :scope > vire-icon-button > button';
 const ACTIVATION_KEYS = new Set(['Enter', ' ']);
@@ -210,7 +212,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#held = null;
       this.#readySince = null;
       this.#inSince = null;
-      for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-contrast', 'data-size', 'data-phase', 'data-joined', 'data-measure']) {
+      for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-contrast', 'data-size', 'data-phase', 'data-joined', 'data-arrived', 'data-measure']) {
         this.removeAttribute(name);
       }
       for (const name of Array.from(this.style)) if (name.startsWith('--vk-')) this.style.removeProperty(name);
@@ -665,6 +667,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       for (const name of Array.from(list.style)) if (name.startsWith('--vk-')) list.style.removeProperty(name);
       this.removeAttribute('data-phase');
       this.removeAttribute('data-joined');
+      this.removeAttribute('data-arrived');
       this.#out = false;
       this.#held = null;
       this.#from = this.#to = this.#anchor = this.#region = null;
@@ -741,11 +744,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const settled = phase.shrink === 1 && phase.grow === 1 && (phase.focus ?? 1) === 1 && (phase.rise ?? 1) === 1;
       // The ink as drawn decides it, so what shows in focus is what can be chosen.
       const inkIn = Math.round(f.ink.incoming * 1000) / 1000;
-      // Arrived: the content in focus and the surface no longer growing (past its overshoot).
-      if (this.#state.open && inkIn >= 1) {
-        this.#inSince ??= performance.now();
-        if (this.#growth.grow.v <= 0) this.#readySince ??= performance.now();
-      }
+      // A key may choose once the content is drawn; a pointer waits until it is in focus and the surface past its overshoot.
+      if (this.#state.open && inkIn >= CONTENT_DRAWN) this.#inSince ??= performance.now();
+      if (this.#state.open && inkIn >= 1 && this.#growth.grow.v <= 0) this.#readySince ??= performance.now();
+      this.toggleAttribute('data-arrived', this.#readySince !== null);
       this.setAttribute('data-phase', settled ? 'open' : 'moving');
       this.#setBox(f.box);
       const s = list.style;
