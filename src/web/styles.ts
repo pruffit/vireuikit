@@ -61,7 +61,7 @@ ${HOST}[data-surface=frosted]>button{
  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
  box-shadow:0 1px 3px color-mix(in srgb,currentColor 22%,transparent)}
 
-${MENU}{position:relative;--vk-ink-in:1;--vk-tx:0px;--vk-ty:0px;--vk-s:1}
+${MENU}{position:relative;--vk-ink-in:1;--vk-tx:0px;--vk-ty:0px;--vk-s:1;--vk-lit:0;--vk-halo:0}
 ${SURFACE}{position:fixed;inset:auto;left:var(--vk-x,0);top:var(--vk-y,0);width:var(--vk-w,auto);height:var(--vk-h,auto);
  margin:0;padding:var(--vk-menu-pad);border:0;border-radius:var(--vk-r,var(--vk-menu-radius));box-sizing:border-box;
  overflow:clip;color:inherit;font:inherit;background:transparent;outline:none;
@@ -89,6 +89,11 @@ ${MENU}[data-phase=moving]>[popover]>*{transform-origin:0 0;
  transform:translate(var(--vk-tx),calc(var(--vk-ty) - var(--vk-i,0)*var(--vk-menu-row)*(1 - var(--vk-s))))scale(var(--vk-s));
  opacity:min(1,calc(var(--vk-ink-in)*10));filter:blur(calc((1 - var(--vk-ink-in))*5px))}
 ${MENU}:not([data-arrived])>[popover]>*{pointer-events:none}
+/* The light that bleeds past a drop's edge is a blurred copy of its outline under it, and the top of the body is dimmed against the bottom. */
+${MENU}>[data-vk-halo]{display:none;position:fixed;left:var(--vk-halo-x,0);top:var(--vk-halo-y,0);width:var(--vk-halo-w,0);height:var(--vk-halo-h,0);pointer-events:none;opacity:var(--vk-halo-amount,0);filter:blur(6px)}
+${MENU}[data-joined]>[data-vk-halo]{display:block}
+${MENU}>[data-vk-halo]>i{display:block;width:100%;height:100%;background:#fff;clip-path:var(--vk-halo-clip,none)}
+${MENU}[data-phase=moving]>[popover]{background-image:linear-gradient(180deg,color-mix(in srgb,var(--vireglass-tint-color,#888) calc(var(--vk-lit)*100%),transparent),transparent 75%),linear-gradient(0deg,color-mix(in srgb,#fff calc(var(--vk-lit)*100%),transparent),transparent 60%)!important}
 ${MENU}[data-measure]>[popover]{width:max-content!important;height:auto!important;left:0!important;top:0!important;padding:var(--vk-menu-pad)!important;visibility:hidden}
 ${MENU}[data-measure]>[popover]>*{width:auto!important;transform:none!important}
 

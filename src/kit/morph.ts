@@ -282,7 +282,7 @@ export const DEFAULT_GROWTH_TIMING: GrowthTiming = {
   growOpen: 0.47,
   growClose: 0.45,
   growDampingOpen: 0.68,
-  heightOpen: 0.46,
+  heightOpen: 0.43,
   heightDampingOpen: 1,
   heightClose: 0.51,
   riseOpen: 0.445,

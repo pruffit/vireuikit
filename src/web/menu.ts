@@ -43,6 +43,10 @@ const MATERIAL_STEPS = 10;
 const CONTENT_MAGNIFY = 0.6;
 // The content is fully opaque from here (styles: opacity is the ink ten times over).
 const CONTENT_DRAWN = 0.1;
+// How much of the light of the lit body goes to the halo, besides the drop's own.
+const HALO_LIT = 0.15;
+// The content comes in this many rows high and slides down into place as it comes into focus.
+const CONTENT_RISE = 0.9;
 const VIEWPORT_MARGIN = 8;
 const TRIGGER = ':scope > button, :scope > vire-button > button, :scope > vire-icon-button > button';
 const ACTIVATION_KEYS = new Set(['Enter', ' ']);
@@ -111,6 +115,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #anchorEl: Element | null = null;
     #buttonRect: Rect | null = null;
     #clip: { el: HTMLElement; had: string } | null = null;
+    #halo: HTMLElement | null = null;
 
     get a11y(): A11yOverride {
       return this.#own;
@@ -195,6 +200,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         for (const item of this.#items()) item.removeAttribute('data-pressed');
       }
       this.#unclipTrigger();
+      this.#unshine();
       this.#liveCarrier()?.setCarried?.(null);
       this.#anchorEl = null;
       for (const restore of this.#itemRestore.values()) restore();
@@ -668,6 +674,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.removeAttribute('data-phase');
       this.removeAttribute('data-joined');
       this.removeAttribute('data-arrived');
+      this.#unshine();
       this.#out = false;
       this.#held = null;
       this.#from = this.#to = this.#anchor = this.#region = null;
@@ -675,6 +682,36 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#glass?.setSample(this.#sample);
       this.#liveCarrier()?.setCarried?.(null);
       this.#anchorEl = null;
+    }
+
+    /** The light that bleeds past a drop's edge: a blurred copy of its outline under the surface, which the surface's own clip path cannot draw. */
+    #shine(box: RoundedRect, clip: string | null, amount: number): void {
+      if (!clip) {
+        if (this.#halo) this.#unshine();
+        return;
+      }
+      if (!this.#halo) {
+        const halo = document.createElement('span');
+        halo.setAttribute('data-vk-halo', '');
+        halo.setAttribute('aria-hidden', 'true');
+        halo.append(document.createElement('i'));
+        this.append(halo);
+        this.#halo = halo;
+      }
+      const s = this.style;
+      const px = (v: number) => `${v.toFixed(2)}px`;
+      s.setProperty('--vk-halo-x', px(box.x));
+      s.setProperty('--vk-halo-y', px(box.y));
+      s.setProperty('--vk-halo-w', px(box.width));
+      s.setProperty('--vk-halo-h', px(box.height));
+      s.setProperty('--vk-halo-clip', clip);
+      s.setProperty('--vk-halo-amount', amount.toFixed(3));
+    }
+
+    #unshine(): void {
+      this.#halo?.remove();
+      this.#halo = null;
+      for (const name of Array.from(this.style)) if (name.startsWith('--vk-halo')) this.style.removeProperty(name);
     }
 
     /** The trigger's glyphs stay inside the body while it contracts: they are drawn under the surface, and would show beside it. */
@@ -753,14 +790,19 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const s = list.style;
       // The content rides inside the lens, magnified about the box's centre while it is out of focus.
       const scale = 1 + CONTENT_MAGNIFY * (1 - inkIn);
-      const pad = menuSize(this.#size()).padding;
+      const { padding: pad, row } = menuSize(this.#size());
       s.setProperty('--vk-tx', `${(f.box.width / 2 + scale * (f.content.x + pad - f.box.width / 2)).toFixed(2)}px`);
-      s.setProperty('--vk-ty', `${(f.box.height / 2 + scale * (f.content.y + pad - f.box.height / 2)).toFixed(2)}px`);
+      s.setProperty('--vk-ty', `${(f.box.height / 2 + scale * (f.content.y + pad - f.box.height / 2) - CONTENT_RISE * row * (1 - inkIn)).toFixed(2)}px`);
       s.setProperty('--vk-s', scale.toFixed(3));
       this.toggleAttribute('data-joined', f.outline !== undefined);
-      if (f.outline) s.setProperty('--vk-outline', `polygon(${f.outline.map((p) => `${p.x.toFixed(1)}px ${p.y.toFixed(1)}px`).join(',')})`);
+      const clip = f.outline ? `polygon(${f.outline.map((p) => `${p.x.toFixed(1)}px ${p.y.toFixed(1)}px`).join(',')})` : null;
+      if (clip) s.setProperty('--vk-outline', clip);
       else s.removeProperty('--vk-outline');
       s.setProperty('--vk-ink-in', inkIn.toFixed(3));
+      s.setProperty('--vk-lit', f.lit.toFixed(3));
+      const halo = Math.min(f.activity + HALO_LIT * f.lit, 1) * (1 - f.capsule);
+      s.setProperty('--vk-halo', halo.toFixed(3));
+      this.#shine(f.box, clip, halo);
       const body = menuBody(VIREGLASS_CONTROL_MATERIAL, f.activity, this.#presentation?.frost ?? false);
       s.setProperty('--vk-body-alpha', body.alpha.toFixed(3));
       s.setProperty('--vk-body-white', body.white.toFixed(3));

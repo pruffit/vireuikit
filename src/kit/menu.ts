@@ -214,12 +214,16 @@ export type MenuSurfaceFrame = {
   activity: number;
   /** 1 while the surface is still the trigger's capsule, whose glyphs show through its glass: 0 once the drop has formed. */
   capsule: number;
+  /** 0…1: how much the top of the body is dimmed against its bottom while it is lit from below. */
+  lit: number;
 };
 
 const center = (r: Rect): GrowthPoint => ({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
 
 /** The lens's smoothing is a fusion margin; the outline's neck is the distance over which two shapes blend. */
 const OUTLINE_NECK = 2;
+/** A taper under this is not seen, and costs no outline. */
+const TAPER_SEEN = 0.01;
 
 // The drop is brightest as it forms and has lost its lift by the time the menu has reached size.
 const ACTIVITY_FALLS_FROM = 0.45;
@@ -234,6 +238,26 @@ const CAPSULE_TO = 0.9;
 
 export function menuCapsule(phase: GrowthPhase): number {
   return 1 - smoothstep(CAPSULE_FROM, CAPSULE_TO, Math.min(Math.max(phase.shrink, 0), 1));
+}
+
+// A drop is a pear for a moment, wider at the bottom, then a bowl, wider at the top, and the bowl fills out into the menu.
+const PEAR = 0.32;
+const BOWL = -0.17;
+
+/** The sideways stretch of the body from its top to its bottom: positive narrows the top (a pear), negative widens it (a bowl). */
+export function menuTaper(phase: GrowthPhase): number {
+  const formed = smoothstep(0.55, 1, Math.min(Math.max(phase.shrink, 0), 1));
+  const grown = Math.min(Math.max(phase.height ?? phase.grow, 0), Math.max(phase.grow, 0));
+  const pear = PEAR * formed * (1 - smoothstep(0, 0.12, grown));
+  const bowl = BOWL * smoothstep(0.02, 0.2, grown) * (1 - smoothstep(0.2, 1, grown));
+  return pear + bowl;
+}
+
+/** The drop is lit from below until its content is in focus: the top of the body is dimmer than the bottom. */
+export function menuLit(phase: GrowthPhase): number {
+  const tall = Math.min(Math.max(phase.height ?? phase.grow, 0), Math.max(phase.grow, 0));
+  const focus = Math.min(Math.max(phase.focus ?? 1, 0), 1);
+  return smoothstep(0.2, 0.55, tall) * (1 - focus * focus * focus);
 }
 
 export function menuActivity(phase: GrowthPhase): number {
@@ -282,6 +306,12 @@ export function menuSurfaceFrame(
     box = { ...both, radius: box.radius };
     morph = undefined;
   }
+  const taper = menuTaper(phase);
+  if (options.outline && Math.abs(taper) > TAPER_SEEN) {
+    outline ??= unionOutline(box, box, 0, box);
+    const half = box.width / 2;
+    outline = outline.map((p) => ({ x: half + (p.x - half) * (1 + taper * ((2 * p.y) / box.height - 1)), y: p.y }));
+  }
   const held = bounds ? intersectRect(box, bounds) : null;
   if (held && (held.width < box.width || held.height < box.height)) {
     const was = center(box);
@@ -299,6 +329,7 @@ export function menuSurfaceFrame(
     ink: frame.ink,
     activity: menuActivity(phase),
     capsule: menuCapsule(phase),
+    lit: menuLit(phase),
   };
 }
 

@@ -59,7 +59,7 @@ export function verticalLight(img: Rgba, m: Mask): number {
 
 const RIM_REACH = 6;
 
-/** How many pixels the lightness takes to go from 10 % to 90 % of its way between what lies outside the silhouette and what lies inside it,
+/** How many pixels it takes the lightness to go between what lies outside the silhouette and what lies inside it at its steepest rate,
  *  read on rings of one pixel around the boundary; null where the two are too alike to have a rim. */
 export function rimSoftness(img: Rgba, m: Mask): number | null {
   const ring = (a: Mask, b: Mask) => {
@@ -92,21 +92,13 @@ export function rimSoftness(img: Rgba, m: Mask): number | null {
   const far = mean(outside.slice(-2));
   const deep = mean(inside.slice(-2));
   if (far === null || deep === null || Math.abs(deep - far) < 0.03) return null;
-  // Position along the normal: outside d is -d, inside d is +d; walk from outside to inside.
-  const line: { at: number; v: number }[] = [];
-  for (let d = RIM_REACH; d >= 1; d -= 1) if (outside[d - 1] !== null) line.push({ at: -d, v: (outside[d - 1]! - far) / (deep - far) });
-  for (let d = 1; d <= RIM_REACH; d += 1) if (inside[d - 1] !== null) line.push({ at: d, v: (inside[d - 1]! - far) / (deep - far) });
-  const cross = (level: number) => {
-    for (let i = 1; i < line.length; i += 1) {
-      const a = line[i - 1]!;
-      const b = line[i]!;
-      if ((a.v - level) * (b.v - level) <= 0 && a.v !== b.v) return a.at + ((level - a.v) / (b.v - a.v)) * (b.at - a.at);
-    }
-    return null;
-  };
-  const lo = cross(0.1);
-  const hi = cross(0.9);
-  return lo === null || hi === null ? null : Math.abs(hi - lo);
+  // Outside to inside along the normal: the contrast over the steepest step, in pixels. A hard edge puts it all in one step.
+  const line: number[] = [];
+  for (let d = RIM_REACH; d >= 1; d -= 1) if (outside[d - 1] !== null) line.push(outside[d - 1]!);
+  for (let d = 1; d <= RIM_REACH; d += 1) if (inside[d - 1] !== null) line.push(inside[d - 1]!);
+  let steepest = 0;
+  for (let i = 1; i < line.length; i += 1) steepest = Math.max(steepest, Math.abs(line[i]! - line[i - 1]!));
+  return steepest > 0 ? Math.abs(deep - far) / steepest : null;
 }
 
 const BAND = 3;

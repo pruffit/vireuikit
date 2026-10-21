@@ -9,6 +9,8 @@ import {
   createGrowthState,
   growthPhase,
   menuActivity,
+  menuLit,
+  menuTaper,
   menuCapsule,
   menuBody,
   menuCorner,
@@ -497,5 +499,37 @@ describe('timing against the reference', () => {
     expect(heightAt).toBeGreaterThan(0.38);
     expect(heightAt).toBeLessThan(0.5);
     expect(tallest).toBeLessThanOrEqual(1 + 1e-6);
+  });
+});
+
+describe('the drop is a pear, then a bowl, and lit from below', () => {
+  const trigger = { x: 100, y: 400, width: 172, height: 44, radius: 22 };
+  const menu = { x: 100, y: 240, width: 167, height: 204, radius: 35 };
+  const anchor = { x: 100, y: 444 };
+  const widthAt = (outline: { x: number; y: number }[], at: number, height: number) => {
+    const row = outline.filter((p) => Math.abs(p.y - at * height) < height * 0.06).map((p) => p.x);
+    return Math.max(...row) - Math.min(...row);
+  };
+
+  it('narrows the top of the drop as it forms and widens it as it swells, and is square once the menu is out', () => {
+    expect(menuTaper({ shrink: 1, grow: 0.02, height: 0.02 })).toBeGreaterThan(0.2);
+    expect(menuTaper({ shrink: 1, grow: 0.5, height: 0.3 })).toBeLessThan(-0.08);
+    expect(menuTaper({ shrink: 1, grow: 1, height: 1 })).toBeCloseTo(0, 9);
+    expect(menuTaper({ shrink: 0, grow: 0 })).toBeCloseTo(0, 9);
+  });
+
+  it('draws the taper in the outline even where there is one shape only', () => {
+    const pear = menuSurfaceFrame(trigger, menu, anchor, { shrink: 1, grow: 0.02, height: 0.02 }, undefined, { outline: true });
+    expect(pear.outline).toBeDefined();
+    expect(widthAt(pear.outline!, 0.25, pear.box.height)).toBeLessThan(widthAt(pear.outline!, 0.75, pear.box.height));
+    const bowl = menuSurfaceFrame(trigger, menu, anchor, { shrink: 1, grow: 0.5, height: 0.3 }, undefined, { outline: true });
+    expect(widthAt(bowl.outline!, 0.25, bowl.box.height)).toBeGreaterThan(widthAt(bowl.outline!, 0.75, bowl.box.height));
+    expect(menuSurfaceFrame(trigger, menu, anchor, { shrink: 1, grow: 1, height: 1 }, undefined, { outline: true }).outline).toBeUndefined();
+  });
+
+  it('is lit from below while the body swells and the content is out of focus, and not otherwise', () => {
+    expect(menuLit({ shrink: 1, grow: 0, height: 0 })).toBe(0);
+    expect(menuLit({ shrink: 1, grow: 0.7, height: 0.6, focus: 0 })).toBeGreaterThan(0.8);
+    expect(menuLit({ shrink: 1, grow: 1, height: 1, focus: 1 })).toBe(0);
   });
 });

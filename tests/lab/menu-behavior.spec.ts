@@ -864,6 +864,21 @@ test.describe('while the surface is one body of the capsule and the drop', () =>
     seen.inset!.forEach((v, i) => expect(Math.abs(v - seen.want[i]!)).toBeLessThan(2));
   });
 
+  test('the light that bleeds past the drop is a hidden element while the menu grows, and is gone once it has settled and when it closes', async ({ page }) => {
+    await openCase(page, 'view=menu');
+    const halos = () => page.locator('#more').evaluate((el) => ({ n: el.querySelectorAll(':scope > [data-vk-halo]').length, hidden: el.querySelector(':scope > [data-vk-halo]')?.getAttribute('aria-hidden') ?? null, vars: [...el.style].filter((k) => k.startsWith('--vk-halo')).length }));
+    await page.locator('#more-trigger').click();
+    await page.waitForTimeout(150);
+    expect(await halos()).toMatchObject({ n: 1, hidden: 'true' });
+    await openNow(page);
+    expect(await halos()).toEqual({ n: 0, hidden: null, vars: 0 });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(120);
+    expect((await halos()).n).toBeLessThanOrEqual(1);
+    await expect.poll(() => isOpen(page)).toBe(false);
+    expect(await halos()).toEqual({ n: 0, hidden: null, vars: 0 });
+  });
+
   test('closing midway and opening again leaves neither the joined window nor the clip behind', async ({ page }) => {
     await openCase(page, 'view=menu');
     await page.locator('#more-trigger').click();
