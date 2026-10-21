@@ -1701,6 +1701,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         this.#pg = {
           shrink: { x: clamp01(forced.t * 2), v: 0, target: 1 },
           grow: { x: clamp01(forced.t * 2 - 1), v: 0, target: 1 },
+          height: { x: clamp01(forced.t * 2 - 1), v: 0, target: 1 },
           focus: { x: smoothstep(0.9, 1, clamp01(forced.t * 2 - 1)), v: 0, target: 1 },
           rise: { x: clamp01(forced.t * 2 - 1), v: 0, target: 1 },
           glow: { x: clamp01(forced.t * 2), v: 0, target: 1 },

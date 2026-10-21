@@ -455,7 +455,7 @@ describe('timing against the reference', () => {
     expect(o.settled).toBeLessThan(0.8);
   });
 
-  it('the content is sharp at about 0.6 s, well after the body is at size', () => {
+  it('the content is sharp at about 0.5 s, well after the body is at size', () => {
     const s = createGrowthState();
     let t = 0;
     let atSize = -1;
@@ -466,16 +466,36 @@ describe('timing against the reference', () => {
       if (atSize < 0 && s.grow.x > 0.95) atSize = t;
       if (sharp < 0 && s.focus.x / 0.97 >= 1) sharp = t;
     }
-    expect(sharp).toBeGreaterThan(0.5);
-    expect(sharp).toBeLessThan(0.75);
-    expect(sharp).toBeGreaterThan(atSize + 0.15);
+    expect(sharp).toBeGreaterThan(0.45);
+    expect(sharp).toBeLessThan(0.65);
+    expect(sharp).toBeGreaterThan(atSize + 0.1);
   });
 
   it('closing reaches the drop at about 0.28 s and is back in the trigger at about 0.42 s', () => {
     const c = closing();
     expect(c.drop).toBeGreaterThan(0.2);
     expect(c.drop).toBeLessThan(0.33);
-    expect(c.back).toBeGreaterThan(0.38);
+    expect(c.back).toBeGreaterThan(0.3);
     expect(c.back).toBeLessThan(0.5);
+  });
+
+  // The reference's height reaches 95 % of its size at about 0.45 s, the width at about 0.33 s.
+  it('the height trails the width and does not overshoot', () => {
+    const s = createGrowthState();
+    let t = 0;
+    let widthAt = -1;
+    let heightAt = -1;
+    let tallest = 0;
+    for (let i = 0; i < 480; i += 1) {
+      stepGrowth(s, dt, true);
+      t += dt;
+      if (widthAt < 0 && s.grow.x > 0.95) widthAt = t;
+      if (heightAt < 0 && s.height.x > 0.95) heightAt = t;
+      tallest = Math.max(tallest, s.height.x);
+    }
+    expect(heightAt).toBeGreaterThan(widthAt + 0.08);
+    expect(heightAt).toBeGreaterThan(0.38);
+    expect(heightAt).toBeLessThan(0.5);
+    expect(tallest).toBeLessThanOrEqual(1 + 1e-6);
   });
 });

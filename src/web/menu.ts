@@ -35,8 +35,8 @@ const FORCED: Record<string, GrowthPhase | null> = {
   open: { shrink: 1, grow: 1 },
   retracting: { shrink: 0.55, grow: 0 },
 };
-// A phase given as "<shrink> <grow> [<focus> [<rise> [<glow>]]]", for putting a frame next to a reference frame.
-const FORCED_PHASE = /^-?\d*\.?\d+( -?\d*\.?\d+){1,4}$/;
+// A phase given as "<shrink> <grow> [<focus> [<rise> [<glow> [<height>]]]]", for putting a frame next to a reference frame.
+const FORCED_PHASE = /^-?\d*\.?\d+( -?\d*\.?\d+){1,5}$/;
 const GLASS_ON = new Set(['', 'present', 'touch']);
 const MATERIAL_STEPS = 10;
 // M 5:11: the rows are about 1.3 times their size while the lens still holds them out of focus.
@@ -801,12 +801,19 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
 
     #applyForced(): void {
       const forced = this.#forced();
-      const [shrink, grow, focus, rise, glow] = (forced ?? '').split(' ').map(Number);
+      const [shrink, grow, focus, rise, glow, tall] = (forced ?? '').split(' ').map(Number);
       const phase: GrowthPhase | null = !forced
         ? null
         : Object.hasOwn(FORCED, forced)
           ? FORCED[forced]!
-          : { shrink: shrink!, grow: grow!, ...(focus === undefined ? {} : { focus }), ...(rise === undefined ? {} : { rise }), ...(glow === undefined ? {} : { glow }) };
+          : {
+            shrink: shrink!,
+            grow: grow!,
+            ...(focus === undefined ? {} : { focus }),
+            ...(rise === undefined ? {} : { rise }),
+            ...(glow === undefined ? {} : { glow }),
+            ...(tall === undefined ? {} : { height: tall }),
+          };
       cancelAnimationFrame(this.#frame);
       this.#frame = 0;
       if (!phase) {
@@ -822,6 +829,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#growth = {
         shrink: { x: phase.shrink, v: 0, target: phase.shrink },
         grow: { x: phase.grow, v: 0, target: phase.grow },
+        height: { x: phase.height ?? phase.grow, v: 0, target: phase.height ?? phase.grow },
         focus: { x: focus1, v: 0, target: focus1 },
         rise: { x: rise1, v: 0, target: rise1 },
         glow: { x: phase.glow ?? phase.shrink, v: 0, target: phase.glow ?? phase.shrink },

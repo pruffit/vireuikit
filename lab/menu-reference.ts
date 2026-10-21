@@ -8,6 +8,8 @@ const PX_PER_DP = 6.41;
 const CROP = { x: 800, y: 380, width: 1300, height: 1420 };
 const TOOLBAR = { x: 938, y: 1411, width: 1102, height: 282 };
 const REST_FRAME = 311.478;
+// The reference menu's width (167 dp): a label's width depends on the font, which the stage does not hold.
+const MENU_WIDTH = 167;
 // Halfway between the last unchanged frame and the first changed one.
 const OPENS = 311.561;
 const CLOSES = 313.43;
@@ -71,6 +73,11 @@ function withoutToolbar(canvas: HTMLCanvasElement): { url: string; rgba: string;
   return { url: canvas.toDataURL('image/png'), rgba: base64(px.data), pixels };
 }
 
+function forceAt(t: number): string {
+  const phase = phaseAt(t);
+  return `${Math.max(phase.shrink, 0).toFixed(3)} ${Math.max(phase.grow, 0).toFixed(3)} ${Math.max(phase.focus ?? 0, 0).toFixed(3)} ${(phase.rise ?? 0).toFixed(3)} ${(phase.glow ?? 0).toFixed(3)} ${Math.max(phase.height ?? phase.grow, 0).toFixed(3)}`;
+}
+
 function phaseAt(t: number): GrowthPhase {
   const closing = t > CLOSES - 0.05;
   const state = createGrowthState();
@@ -98,6 +105,8 @@ declare global {
       /** RGBA of a reference frame's crop, base64: the parity gate reads the neighbours of each instant from here. */
       frame(t: number): Promise<string>;
       rest(): string;
+      /** The force-state attribute that puts a menu where our growth is `t` seconds on the stage's timeline. */
+      force(t: number): string;
     };
   }
 }
@@ -117,6 +126,7 @@ export async function menuReference(stage: HTMLElement, rows: HTMLElement): Prom
     frames: MENU_REFERENCE_FRAMES,
     frame: async (t) => base64(crop(await loadImage(frameFile(t))).getContext('2d')!.getImageData(0, 0, W, H).data),
     rest: () => rest.rgba,
+    force: forceAt,
   };
   const frames = await Promise.all(MENU_REFERENCE_FRAMES.map((t) => loadImage(frameFile(t))));
   frames.forEach((img, i) => {
@@ -130,7 +140,6 @@ export async function menuReference(stage: HTMLElement, rows: HTMLElement): Prom
     const ours = document.createElement('div');
     ours.dataset.tile = `ours-${i}`;
     ours.style.cssText = `grid-row:3;position:relative;width:${W}px;height:${H}px;background:url(${rest.url}) 0 0/100% 100%;color:#1b1c20;color-scheme:light;font-size:17px`;
-    const phase = phaseAt(t);
     const menu = makeMenu({
       id: `ref-${i}`,
       size: 'touch',
@@ -143,10 +152,12 @@ export async function menuReference(stage: HTMLElement, rows: HTMLElement): Prom
         { label: 'Three', glyph: 'square' },
         { label: 'Four', glyph: 'hexagon' },
       ],
-      force: `${Math.max(phase.shrink, 0).toFixed(3)} ${Math.max(phase.grow, 0).toFixed(3)} ${Math.max(phase.focus ?? 0, 0).toFixed(3)} ${(phase.rise ?? 0).toFixed(3)} ${(phase.glow ?? 0).toFixed(3)}`,
+      force: forceAt(t),
       corner: 'bottom-left',
     });
     menu.style.cssText = `position:absolute;left:${((TOOLBAR.x - CROP.x) / PX_PER_DP).toFixed(1)}px;top:${((TOOLBAR.y - CROP.y) / PX_PER_DP).toFixed(1)}px`;
+    const list = menu.querySelector<HTMLElement>('[popover]')!;
+    list.style.minWidth = `${MENU_WIDTH}px`;
     const trigger = menu.querySelector<HTMLButtonElement>('vire-button > button')!;
     trigger.setAttribute('aria-label', 'Toolbar');
     trigger.innerHTML = [GLYPHS.triangle, GLYPHS.circle, GLYPHS.square, GLYPHS.hexagon].join('');

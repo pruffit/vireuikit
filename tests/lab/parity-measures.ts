@@ -169,3 +169,89 @@ export function centroid(m: Mask): { x: number; y: number } | null {
   }
   return n ? { x: sx / n, y: sy / n } : null;
 }
+
+export type Point = { x: number; y: number };
+
+export function shiftMask(m: Mask, dx: number, dy: number): Mask {
+  const { width: w, height: h } = m;
+  const on = new Uint8Array(w * h);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const sx = x - dx;
+      const sy = y - dy;
+      if (sx >= 0 && sy >= 0 && sx < w && sy < h) on[y * w + x] = m.on[sy * w + sx]!;
+    }
+  }
+  return { width: w, height: h, on };
+}
+
+/** How far `v` is outside [min, max] of `values`; 0 inside. */
+export function distanceToRange(v: number, values: readonly number[]): number {
+  return Math.max(Math.min(...values) - v, v - Math.max(...values), 0);
+}
+
+function distanceToSegment(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.min(Math.max(((p.x - a.x) * dx + (p.y - a.y) * dy) / len2, 0), 1);
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/** The distance from `p` to the path through `path`; one point is a disc, none is infinitely far. */
+export function distanceToPolyline(p: Point, path: readonly Point[]): number {
+  if (path.length === 0) return Number.POSITIVE_INFINITY;
+  if (path.length === 1) return Math.hypot(p.x - path[0]!.x, p.y - path[0]!.y);
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 1; i < path.length; i += 1) best = Math.min(best, distanceToSegment(p, path[i - 1]!, path[i]!));
+  return best;
+}
+
+export type Measured = { mask: Mask; lightness: number; edge: number; centroid: Point | null };
+export type Slack = { iou: number; lightness: number; edge: number; centroid: number };
+
+export type Verdict = {
+  /** The best overlap of ours (registered) with any of the reference's frames around the instant. */
+  iou: number;
+  lightness: number;
+  edge: number;
+  centroid: number;
+  /** Tolerance minus value (the IoU's: value minus floor); negative fails. */
+  margin: Slack;
+  failed: (keyof Slack)[];
+};
+
+/**
+ * Ours against the reference's frames at t - 1, t and t + 1 (1/30 s apart): ours may lead or lag by one reference frame, so
+ * lightness and relative edge energy must lie within the envelope of the three, the centroid (less `offset`, the layout the kit
+ * does not model) on the path through their centroids, and the silhouette (shifted by the same offset) overlap one of them
+ * best. `edge` of every measure is already relative to its own settled menu.
+ */
+export function compareToReference(ours: Measured, around: readonly Measured[], offset: Point, slack: Slack): Verdict {
+  const shifted = shiftMask(ours.mask, -Math.round(offset.x), -Math.round(offset.y));
+  const best = Math.max(...around.map((r) => iou(shifted, r.mask)));
+  const lightness = distanceToRange(ours.lightness, around.map((r) => r.lightness));
+  const edge = distanceToRange(ours.edge, around.map((r) => r.edge));
+  const path = around.map((r) => r.centroid).filter((c): c is Point => c !== null);
+  const centroid = ours.centroid ? distanceToPolyline({ x: ours.centroid.x - offset.x, y: ours.centroid.y - offset.y }, path) : Number.POSITIVE_INFINITY;
+  const margin = { iou: best - slack.iou, lightness: slack.lightness - lightness, edge: slack.edge - edge, centroid: slack.centroid - centroid };
+  const failed = (Object.keys(margin) as (keyof Slack)[]).filter((k) => !(margin[k] >= 0));
+  return { iou: best, lightness, edge, centroid, margin, failed };
+}
+
+export function bounds(m: Mask): { x0: number; y0: number; x1: number; y1: number } | null {
+  let x0 = m.width;
+  let y0 = m.height;
+  let x1 = -1;
+  let y1 = -1;
+  for (let i = 0; i < m.on.length; i += 1) {
+    if (!m.on[i]) continue;
+    const x = i % m.width;
+    const y = Math.floor(i / m.width);
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+    y0 = Math.min(y0, y);
+    y1 = Math.max(y1, y);
+  }
+  return x1 < 0 ? null : { x0, y0, x1, y1 };
+}

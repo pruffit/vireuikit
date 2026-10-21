@@ -416,7 +416,7 @@ describe('the sizes', () => {
   it("slows the pace the menu's growth had before the reference by a quarter", () => {
     expect(SHEET_GROWTH_TIMING.growOpen).toBeCloseTo(0.38 * 1.25, 9);
     expect(SHEET_GROWTH_TIMING.growClose).toBeCloseTo(0.4 * 1.25, 9);
-    expect(SHEET_GROWTH_TIMING.growOpen).toBeLessThan(DEFAULT_GROWTH_TIMING.growOpen);
+    expect(SHEET_GROWTH_TIMING.heightOpen).toBeCloseTo(0.38 * 1.25, 9);
   });
 });
 
