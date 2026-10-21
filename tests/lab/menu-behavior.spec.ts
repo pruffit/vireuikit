@@ -578,21 +578,21 @@ async function openAndClose(page: Page, query: string): Promise<Run> {
 
 const near = (a: number, b: number, tolerance = 1.5) => Math.abs(a - b) <= tolerance;
 
-/** The surface starts on the trigger, passes a drop smaller than it, and overshoots the menu before settling. */
+/** The surface starts on the trigger, passes a drop smaller than it, and overshoots the menu's width before settling. */
 function grows(run: Run): boolean {
   const { opening, trigger } = run;
   const first = opening[0]!;
   const last = opening.at(-1)!;
   const smallest = Math.min(...opening.map((f) => Math.max(f.w, f.h)));
-  const tallest = Math.max(...opening.map((f) => f.h));
+  const widest = Math.max(...opening.map((f) => f.w));
   return (
     near(first.x, trigger.x) &&
     near(first.y, trigger.y) &&
     near(first.w, trigger.width) &&
     near(first.h, trigger.height) &&
     smallest < trigger.height * 0.9 &&
-    tallest / last.h > 1.005 &&
-    tallest / last.h < 1.08
+    widest / last.w > 1.005 &&
+    widest / last.w < 1.08
   );
 }
 
@@ -603,7 +603,7 @@ test.describe('growth', () => {
     const first = run.opening[0]!;
     expect(near(first.radius, run.trigger.height / 2)).toBe(true);
     const last = run.opening.at(-1)!;
-    for (const f of run.opening) if (f.h < last.h * 0.8) expect(f.ink).toBe(0);
+    for (const f of run.opening) if (f.w < last.w * 0.7) expect(f.ink).toBe(0);
     expect(last.ink).toBe(1);
   });
 

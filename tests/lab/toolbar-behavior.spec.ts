@@ -674,6 +674,11 @@ async function openSurface(page: Page, s: SurfaceCase): Promise<void> {
     },
     s.surface,
   );
+  // A menu's body is still settling into its place for a while after its content is in focus.
+  await page.waitForFunction((host) => {
+    const el = document.querySelector(host);
+    return el?.tagName !== 'VIRE-MENU' || el.getAttribute('data-phase') === 'open';
+  }, s.host);
   await page.waitForTimeout(500);
 }
 
