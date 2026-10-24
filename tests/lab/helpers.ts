@@ -5,11 +5,18 @@ const nextFrame = (page: Page) =>
 
 export type PageLog = { lines: string[]; stop(): void };
 
-/** What a page says while it is watched: console messages, page errors, failed or refused requests and navigations. */
-export function watchPage(page: Page): PageLog {
+/** What a page says while it is watched: console messages, page errors, failed or refused requests and navigations; the last `cap` lines. */
+export function watchPage(page: Page, cap = 200): PageLog {
   const lines: string[] = [];
   const start = Date.now();
-  const add = (line: string) => lines.push(`+${String(Date.now() - start).padStart(5)} ms ${line}`);
+  let dropped = 0;
+  const add = (line: string) => {
+    lines.push(`+${String(Date.now() - start).padStart(5)} ms ${line}`);
+    if (lines.length <= cap) return;
+    lines.splice(0, lines.length - cap);
+    dropped += 1;
+    lines[0] = `(${dropped} earlier lines dropped)`;
+  };
   const onConsole = (m: ConsoleMessage) => add(`console.${m.type()}: ${m.text()}`);
   const onError = (e: Error) => add(`pageerror: ${e.stack ?? e.message}`);
   const onFailed = (r: Request) => add(`requestfailed: ${r.url()} ${r.failure()?.errorText ?? ''}`);
@@ -52,9 +59,12 @@ export async function openCase(page: Page, query: string, path = '/'): Promise<v
   }
 }
 
+/** How long a case may take to boot; a slow CI machine can raise it. */
+const BOOT_MS = Number(process.env.VIREUIKIT_LAB_BOOT_MS ?? 30_000);
+
 async function bootCase(page: Page, query: string, path: string): Promise<void> {
   await page.goto(`${path}?chrome=0&${query}`);
-  await page.waitForFunction(() => document.documentElement.dataset.ready === '1', undefined, { timeout: 30_000 });
+  await page.waitForFunction(() => document.documentElement.dataset.ready === '1', undefined, { timeout: BOOT_MS });
   await page.waitForFunction(() => {
     if (window.__lab && !window.__lab.upgraded) return true;
     return [...document.querySelectorAll<HTMLElement>('vire-button,vire-icon-button,vire-menu,vire-nav,vire-popover,vire-sheet')].every((host) => {
@@ -66,7 +76,7 @@ async function bootCase(page: Page, query: string, path: string): Promise<void> 
       );
       return /url\(|blur/.test(lens?.style.backdropFilter ?? '');
     });
-  }, undefined, { timeout: 30_000 });
+  }, undefined, { timeout: BOOT_MS });
   await nextFrame(page);
 }
 
