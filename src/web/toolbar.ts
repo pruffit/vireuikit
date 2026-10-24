@@ -12,7 +12,7 @@ import {
   type ToolbarPlacement,
 } from '../kit/adaptive/toolbar';
 import { ATOM_AT_REST, atomBody, atomMaterial } from '../kit/atom';
-import { stepSpring, type Spring } from '../kit/morph';
+import { createMotionClock, stepMotion, stepSpring, type Spring } from '../kit/morph';
 import { BUTTON_SIZES, hitSlop, iconButtonSize, type ControlSize } from '../kit/sizes';
 import {
   TOOLBAR_PLACE_TIMING,
@@ -183,7 +183,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
     #forcedFrame: ToolbarFrame | null = null;
     #widthWas: string | null = null;
     #frame = 0;
-    #lastFrame = 0;
+    #clock = createMotionClock();
     #remeasureFrame = 0;
     #wasMoving = false;
 
@@ -855,18 +855,19 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
         this.toggleAttribute('data-moving', false);
         return;
       }
-      this.#lastFrame = 0;
+      this.#clock = createMotionClock();
       this.#frame = requestAnimationFrame((t) => this.#tick(t));
     }
 
     #tick(now: number): void {
       this.#frame = 0;
       if (!this.isConnected || this.#forced) return;
-      const dt = this.#lastFrame ? Math.min((now - this.#lastFrame) / 1000, 0.05) : 1 / 60;
-      this.#lastFrame = now;
       const instant = this.#presentation?.instantSprings ?? false;
-      if (this.#morph) stepToolbarMorph(this.#morph, dt, instant);
-      this.#stepPlace(dt, instant);
+      stepMotion(this.#clock, now, (dt) => {
+        if (this.#morph) stepToolbarMorph(this.#morph, dt, instant);
+        this.#stepPlace(dt, instant);
+        return true;
+      });
       this.#paint();
       if (this.#moving()) this.#frame = requestAnimationFrame((t) => this.#tick(t));
       else this.toggleAttribute('data-moving', false);

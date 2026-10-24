@@ -14,6 +14,7 @@ import { hitTarget, sizeTier } from '../kit/adaptive/input';
 import { navigationForm, type NavigationForm, type NavigationFormKind } from '../kit/adaptive/navigation';
 import { ATOM_AT_REST, atomBody, atomMaterial } from '../kit/atom';
 import { menuMaterial } from '../kit/menu';
+import { createMotionClock, stepMotion } from '../kit/morph';
 import {
   aimNavMorph,
   cancelNavDrag,
@@ -203,7 +204,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       to: { box: MorphBox; placement: string } | null;
     } = { state: { ...createFormMorph(), t: { x: 1, v: 0, target: 1 } }, from: null, to: null };
     #frame = 0;
-    #lastFrame = 0;
+    #clock = createMotionClock();
     #lensFor: Element | null = null;
     #lastKey = '';
     #parent: HTMLElement | null = null;
@@ -332,7 +333,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#mode = null;
       this.#modeKey = '';
       this.#frame = 0;
-      this.#lastFrame = 0;
+      this.#clock = createMotionClock();
     }
 
     attributeChangedCallback(name: string): void {
@@ -1113,7 +1114,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       }
       this.#paint();
       if (this.#frame || this.#forced()) return;
-      this.#lastFrame = 0;
+      this.#clock = createMotionClock();
       this.#frame = requestAnimationFrame((t) => this.#tick(t));
     }
 
@@ -1121,14 +1122,14 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#frame = 0;
       const morph = this.#morph;
       if (!this.isConnected || !morph || this.#forced()) return;
-      const dt = this.#lastFrame ? Math.min((now - this.#lastFrame) / 1000, 0.05) : 1 / 60;
-      this.#lastFrame = now;
       const instant = this.#presentation?.instantSprings ?? false;
-      let moving = stepNavMorph(morph, dt, instant);
-      const layout = this.#restLayout();
-      if (layout && stepNavDrag(this.#drag, dt, instant)) moving = true;
-      if (stepFormMorph(this.#pillAnim.state, dt, 1, instant)) moving = true;
-      if (stepFormMorph(this.#accAnim.state, dt, 1, instant)) moving = true;
+      const moving = stepMotion(this.#clock, now, (dt) => {
+        let moved = stepNavMorph(morph, dt, instant);
+        if (this.#restLayout() && stepNavDrag(this.#drag, dt, instant)) moved = true;
+        if (stepFormMorph(this.#pillAnim.state, dt, 1, instant)) moved = true;
+        if (stepFormMorph(this.#accAnim.state, dt, 1, instant)) moved = true;
+        return moved;
+      });
       this.#paint();
       if (moving) this.#frame = requestAnimationFrame((t) => this.#tick(t));
     }

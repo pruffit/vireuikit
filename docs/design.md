@@ -18,6 +18,11 @@ spec) lives outside this repository; this document only covers the code.
 - **The form comes from the adaptive model.** What an atom or a pattern becomes on a window class, an input and a
   posture is decided once, in `src/kit/adaptive`, and every target asks it; no target keeps its own breakpoints or
   input flags. A change of form is a morph of one body, and the person's state survives it.
+- **A motion draws the same frames every time it runs.** Its springs advance in whole steps of 1/240 s counted from
+  its first frame (`stepMotion`), one step at a time, so a frame's state follows from how many frames have passed and
+  not from the jitter of their times; a late frame skips states and adds none. Chromium compiles a GPU program for each
+  blur size, texture fit and clip shape it meets, and a motion whose middle frames differed from run to run kept
+  meeting new ones (and stalling on them) long after its first use.
 
 ## Layout
 

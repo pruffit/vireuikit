@@ -16,6 +16,7 @@ import {
   stepControlVisual,
   visualAtomState,
 } from '../kit/behavior/visual';
+import { createMotionClock, stepMotion } from '../kit/morph';
 import { pressResponse } from '../kit/response';
 import { BUTTON_SIZES, CONTROL_SIZES, hitSlop, iconButtonSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
@@ -78,7 +79,7 @@ export function createControlElementClass(
     #glassBroken = false;
     #lastMaterialKey = '';
     #frame = 0;
-    #lastFrame = 0;
+    #clock = createMotionClock();
     #cleanups: (() => void)[] = [];
     #suppressClick = false;
     #suppressTimer = 0;
@@ -496,16 +497,15 @@ export function createControlElementClass(
       if (immediate && this.#forced()) settleControlVisual(this.#visual, this.#state);
       this.#paint();
       if (this.#frame || (immediate && this.#forced())) return;
-      this.#lastFrame = 0;
+      this.#clock = createMotionClock();
       this.#frame = requestAnimationFrame((t) => this.#tick(t));
     }
 
     #tick(now: number): void {
       this.#frame = 0;
       if (!this.isConnected) return;
-      const dt = this.#lastFrame ? Math.min((now - this.#lastFrame) / 1000, 0.05) : 1 / 60;
-      this.#lastFrame = now;
-      const moving = stepControlVisual(this.#visual, dt, this.#state, this.#presentation?.instantSprings ?? false);
+      const instant = this.#presentation?.instantSprings ?? false;
+      const moving = stepMotion(this.#clock, now, (dt) => stepControlVisual(this.#visual, dt, this.#state, instant));
       this.#paint();
       if (moving) this.#frame = requestAnimationFrame((t) => this.#tick(t));
     }

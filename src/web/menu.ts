@@ -17,7 +17,7 @@ import {
   type MenuState,
   type RoundedRect,
 } from '../kit/menu';
-import { createGrowthState, growthPhase, smoothstep, stepGrowth, type GrowthPhase, type GrowthPoint } from '../kit/morph';
+import { createGrowthState, createMotionClock, growthPhase, smoothstep, stepGrowth, stepMotion, type GrowthPhase, type GrowthPoint } from '../kit/morph';
 import { segmentOf } from '../kit/adaptive/context';
 import { sizeTier } from '../kit/adaptive/input';
 import type { Rect, Size } from '../kit/geometry';
@@ -102,7 +102,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #frame = 0;
     #placeFrame = 0;
     #inertTimer = 0;
-    #lastFrame = 0;
+    #clock = createMotionClock();
     /** When the content was last fully in focus; null while it is still arriving or leaving. */
     #readySince: number | null = null;
     /** When the content came into focus, which is when a deliberate key may choose. */
@@ -707,17 +707,15 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         return;
       }
       if (this.#frame) return;
-      this.#lastFrame = 0;
+      this.#clock = createMotionClock();
       this.#frame = requestAnimationFrame((t) => this.#tick(t));
     }
 
     #tick(now: number): void {
       this.#frame = 0;
       if (!this.isConnected || this.#forced()) return;
-      const dt = this.#lastFrame ? Math.min((now - this.#lastFrame) / 1000, 0.05) : 1 / 60;
-      this.#lastFrame = now;
       const instant = this.#presentation?.instantSprings ?? false;
-      const moving = stepGrowth(this.#growth, dt, this.#state.open, instant);
+      const moving = stepMotion(this.#clock, now, (dt) => stepGrowth(this.#growth, dt, this.#state.open, instant));
       this.#paint();
       if (moving) this.#frame = requestAnimationFrame((t) => this.#tick(t));
       else this.#settle();

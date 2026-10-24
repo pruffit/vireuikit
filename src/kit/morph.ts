@@ -5,6 +5,38 @@ import { halfMinDp, type VireGlassGeometry, type VireGlassMorph } from 'vireglas
  *  integration entirely, for reduced motion. `rest` scales how near it must be to stop. */
 export type Spring = { x: number; v: number; target: number };
 
+/** The step the springs integrate in, s; a motion's clock counts in it. */
+export const SPRING_STEP = 1 / 240;
+
+const FRAME_STEPS_MAX = Math.round(0.05 / SPRING_STEP);
+
+/** A motion's time in whole spring steps since its first frame. */
+export type MotionClock = { origin: number; steps: number };
+
+/** A clock that starts on the first frame it is handed. */
+export const createMotionClock = (): MotionClock => ({ origin: Number.NaN, steps: 0 });
+
+/**
+ * Runs `step` once per spring step due at the frame `now` (ms) and returns its last answer, or true when no step is due. The first
+ * frame is 1/60 s and time rounds to whole steps, so a frame's state depends on its count, not on the jitter of frame times.
+ */
+export function stepMotion(clock: MotionClock, now: number, step: (dt: number) => boolean): boolean {
+  const ms = SPRING_STEP * 1000;
+  if (Number.isNaN(clock.origin)) {
+    clock.origin = now - ms * Math.round(1 / 60 / SPRING_STEP);
+    clock.steps = 0;
+  }
+  let due = Math.round((now - clock.origin) / ms) - clock.steps;
+  if (due > FRAME_STEPS_MAX) {
+    clock.origin += (due - FRAME_STEPS_MAX) * ms;
+    due = FRAME_STEPS_MAX;
+  }
+  let moving = true;
+  for (let i = 0; i < due; i += 1) moving = step(SPRING_STEP);
+  clock.steps += Math.max(due, 0);
+  return moving;
+}
+
 export function stepSpring(
   s: Spring,
   dt: number,
@@ -21,7 +53,7 @@ export function stepSpring(
   }
   const stiffness = ((2 * Math.PI) / response) ** 2;
   const friction = (4 * Math.PI * damping) / response;
-  const h = 1 / 240;
+  const h = SPRING_STEP;
   // Fixed step, but not a fixed frame budget: without this, a rare slow frame hands the spring a
   // huge dt and it diverges.
   for (let left = Math.min(dt, 0.05); left > 0; left -= h) {

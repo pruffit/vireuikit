@@ -13,7 +13,7 @@ import {
 import { presentationForm, type PresentationForm, type SurfaceKind } from '../kit/adaptive/presentation';
 import type { Rect, Size } from '../kit/geometry';
 import { menuBody, menuMaterial, type RoundedRect } from '../kit/menu';
-import { POPOVER_GROWTH_TIMING, createGrowthState, growthPhase, growthStateAt, heldGrowthState, stepGrowth, type GrowthPoint } from '../kit/morph';
+import { POPOVER_GROWTH_TIMING, createGrowthState, createMotionClock, growthPhase, growthStateAt, heldGrowthState, stepGrowth, stepMotion, type GrowthPoint } from '../kit/morph';
 import {
   SHEET_SIZES,
   createSheetDrag,
@@ -219,7 +219,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #touch = '';
     #frame = 0;
     #followFrame = 0;
-    #lastFrame = 0;
+    #clock = createMotionClock();
     #forcedState: Forced | null = null;
 
     get a11y(): A11yOverride {
@@ -1236,16 +1236,14 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       }
       this.#paint(full);
       if (this.#frame) return;
-      this.#lastFrame = 0;
+      this.#clock = createMotionClock();
       this.#frame = requestAnimationFrame((t) => this.#tick(t));
     }
 
     #tick(now: number): void {
       this.#frame = 0;
       if (!this.isConnected || !this.#out || this.#forced()) return;
-      const dt = this.#lastFrame ? Math.min((now - this.#lastFrame) / 1000, 0.05) : 1 / 60;
-      this.#lastFrame = now;
-      const moving = this.#step(dt, false);
+      const moving = stepMotion(this.#clock, now, (dt) => this.#step(dt, false));
       this.#paint();
       if (moving) this.#frame = requestAnimationFrame((t) => this.#tick(t));
       else this.#afterStep();
