@@ -1,12 +1,60 @@
-import type { Locator, Page } from '@playwright/test';
+import type { ConsoleMessage, Frame, Locator, Page, Request, Response } from '@playwright/test';
 
 const nextFrame = (page: Page) =>
   page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 
+export type PageLog = { lines: string[]; stop(): void };
+
+/** What a page says while it is watched: console messages, page errors, failed or refused requests and navigations. */
+export function watchPage(page: Page): PageLog {
+  const lines: string[] = [];
+  const start = Date.now();
+  const add = (line: string) => lines.push(`+${String(Date.now() - start).padStart(5)} ms ${line}`);
+  const onConsole = (m: ConsoleMessage) => add(`console.${m.type()}: ${m.text()}`);
+  const onError = (e: Error) => add(`pageerror: ${e.stack ?? e.message}`);
+  const onFailed = (r: Request) => add(`requestfailed: ${r.url()} ${r.failure()?.errorText ?? ''}`);
+  const onResponse = (r: Response) => {
+    if (r.status() >= 400) add(`response ${r.status()}: ${r.url()}`);
+  };
+  const onNavigated = (f: Frame) => {
+    if (f === page.mainFrame()) add(`navigated: ${f.url()}`);
+  };
+  const onCrash = () => add('crash');
+  page.on('console', onConsole);
+  page.on('pageerror', onError);
+  page.on('requestfailed', onFailed);
+  page.on('response', onResponse);
+  page.on('framenavigated', onNavigated);
+  page.on('crash', onCrash);
+  return {
+    lines,
+    stop() {
+      page.off('console', onConsole);
+      page.off('pageerror', onError);
+      page.off('requestfailed', onFailed);
+      page.off('response', onResponse);
+      page.off('framenavigated', onNavigated);
+      page.off('crash', onCrash);
+    },
+  };
+}
+
 /** Opens one lab case and waits until every control is upgraded and every lens it asked for is attached. */
 export async function openCase(page: Page, query: string, path = '/'): Promise<void> {
+  const log = watchPage(page);
+  try {
+    await bootCase(page, query, path);
+  } catch (error) {
+    const said = log.lines.length > 0 ? log.lines.join('\n') : '(nothing)';
+    throw new Error(`openCase(${path}?${query}) failed: ${(error as Error).message}\nWhat the page said:\n${said}`, { cause: error });
+  } finally {
+    log.stop();
+  }
+}
+
+async function bootCase(page: Page, query: string, path: string): Promise<void> {
   await page.goto(`${path}?chrome=0&${query}`);
-  await page.waitForFunction(() => document.documentElement.dataset.ready === '1');
+  await page.waitForFunction(() => document.documentElement.dataset.ready === '1', undefined, { timeout: 30_000 });
   await page.waitForFunction(() => {
     if (window.__lab && !window.__lab.upgraded) return true;
     return [...document.querySelectorAll<HTMLElement>('vire-button,vire-icon-button,vire-menu,vire-nav,vire-popover,vire-sheet')].every((host) => {
@@ -18,7 +66,7 @@ export async function openCase(page: Page, query: string, path = '/'): Promise<v
       );
       return /url\(|blur/.test(lens?.style.backdropFilter ?? '');
     });
-  });
+  }, undefined, { timeout: 30_000 });
   await nextFrame(page);
 }
 
