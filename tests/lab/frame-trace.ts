@@ -11,18 +11,8 @@ export type TraceEvent = {
   args?: { name?: string; data?: { startTime?: number } };
 };
 
-const CATEGORIES = [
-  'devtools.timeline',
-  'disabled-by-default-devtools.timeline',
-  'disabled-by-default-devtools.timeline.frame',
-  'toplevel',
-  'gpu',
-  'viz',
-  'cc',
-  'benchmark',
-  'blink.user_timing',
-  'v8',
-];
+// Light on purpose: the gate traces every measured replay, and toplevel, v8 and cc would load the threads it times.
+const CATEGORIES = ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame', 'gpu', 'blink.user_timing'];
 
 /** Starts a trace of the whole browser, the GPU process included; the returned function ends it and hands back its events. */
 export async function startTrace(page: Page): Promise<() => Promise<TraceEvent[]>> {
