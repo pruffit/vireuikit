@@ -238,6 +238,16 @@ export const TRANSITIONS: Transition[] = [
   },
 ];
 
+/** A long animation frame as the page reported it (only frames over 50 ms are reported). */
+export type Loaf = {
+  startTime: number;
+  duration: number;
+  renderStart: number;
+  styleAndLayoutStart: number;
+  blockingDuration: number;
+  scripts: { invoker: string; invokerType: string; sourceURL: string; sourceFunctionName: string; startTime: number; duration: number; forcedStyleAndLayoutDuration: number }[];
+};
+
 export type Recording = {
   /** Frame times, whether the transition was running at each, and the core's counters at each. */
   t: number[];
@@ -248,7 +258,81 @@ export type Recording = {
   created: number;
   /** Lenses that entered interim during the recording, and lenses alive and still in interim when it ended. */
   interim: { entered: number; open: number };
+  loaf: Loaf[];
+  /** `performance.now()` of the `vk-rec` mark set as the recording started, which a trace carries on its own clock. */
+  sync: number;
 };
+
+/** In-page: a recorder's state, kept on `window.__rec`. */
+type PageRecorder = { t: number[]; active: boolean[]; stats: Stats[]; loaf: Loaf[]; sync: number; stop: boolean };
+
+/** Starts the per-frame recorder in the page. `busy` blocks the main thread for that many ms on one frame: the gate's canary. */
+const startRecorder = (page: Page, active: string, busy?: { frame: number; ms: number }) =>
+  page.evaluate(
+    ([expr, busy]) => {
+      const isActive = new Function(`return Boolean(${expr})`) as () => boolean;
+      const rec: PageRecorder = { t: [], active: [], stats: [], loaf: [], sync: 0, stop: false };
+      (window as unknown as { __rec: PageRecorder }).__rec = rec;
+      const observer = new PerformanceObserver((list) => {
+        for (const e of list.getEntries() as unknown as Loaf[]) {
+          const { startTime, duration, renderStart, styleAndLayoutStart, blockingDuration } = e;
+          const scripts = e.scripts.map((s) => ({ invoker: s.invoker, invokerType: s.invokerType, sourceURL: s.sourceURL, sourceFunctionName: s.sourceFunctionName, startTime: s.startTime, duration: s.duration, forcedStyleAndLayoutDuration: s.forcedStyleAndLayoutDuration }));
+          rec.loaf.push({ startTime, duration, renderStart, styleAndLayoutStart, blockingDuration, scripts });
+        }
+        if (rec.stop) observer.disconnect();
+      });
+      try {
+        observer.observe({ type: 'long-animation-frame' });
+      } catch {
+        // Not every engine has it; the recording stands without it.
+      }
+      window.__lab.resetRenderStats();
+      window.__labGlassMark?.();
+      rec.sync = performance.mark('vk-rec').startTime;
+      let since = -1;
+      const loop = (t: number) => {
+        rec.t.push(t);
+        const on = isActive();
+        rec.active.push(on);
+        rec.stats.push(window.__lab.renderStats());
+        if (on && since < 0) since = rec.t.length - 1;
+        if (busy && since >= 0 && rec.t.length - 1 - since === busy.frame) {
+          const end = performance.now() + busy.ms;
+          while (performance.now() < end);
+        }
+        if (!rec.stop) requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+    },
+    [active, busy] as const,
+  );
+
+const takeRecorder = (page: Page, selector: string) =>
+  page.evaluate((selector) => {
+    const rec = (window as unknown as { __rec: PageRecorder }).__rec;
+    rec.stop = true;
+    const surfaces = selector ? [...document.querySelectorAll<HTMLElement>(selector)].filter((el) => /url\(/.test(el.style.backdropFilter)).length : 0;
+    const lenses = window.__labGlass ?? [];
+    const interim = { entered: lenses.filter((l) => l.entered).length, open: lenses.filter((l) => l.alive && l.interim === true).length };
+    return { t: rec.t, active: rec.active, stats: rec.stats, loaf: rec.loaf, sync: rec.sync, surfaces, interim };
+  }, selector);
+
+/** The first frames of a recorder over a still page are its own start, not the page: they are left out of the control. */
+export const IDLE_LEAD_MS = 100;
+
+/** The control for a replay: the same recorder over a page that is still, for `ms` past its lead, with no transition run. */
+export async function recordIdle(page: Page, transition: Transition, ms: number): Promise<Recording> {
+  await startRecorder(page, transition.active);
+  await page.waitForFunction(
+    (ms) => {
+      const t = (window as unknown as { __rec: PageRecorder }).__rec.t;
+      return t.length > 1 && t.at(-1)! - t[0]! >= ms;
+    },
+    ms + IDLE_LEAD_MS,
+    { timeout: ms + 8000 },
+  );
+  return { ...(await takeRecorder(page, '')), created: 0 };
+}
 
 const attached = (page: Page) => page.evaluate(() => window.__labAttached ?? 0);
 
@@ -257,7 +341,7 @@ export async function recordTransition(
   page: Page,
   transition: Transition,
   glass: '1' | '0',
-  options: { query?: string; afterOpen?: (page: Page) => Promise<void> } = {},
+  options: { query?: string; afterOpen?: (page: Page) => Promise<void>; busy?: { frame: number; ms: number } } = {},
 ): Promise<Recording> {
   await page.setViewportSize(VIEW);
   await openCase(page, `${transition.query}&glass=${glass}${options.query ? `&${options.query}` : ''}`);
@@ -272,20 +356,7 @@ export async function recordTransition(
   await options.afterOpen?.(page);
   await transition.prepare?.(page);
   const before = await attached(page);
-  await page.evaluate((expr) => {
-    const active = new Function(`return Boolean(${expr})`) as () => boolean;
-    const rec = { t: [] as number[], active: [] as boolean[], stats: [] as Stats[], stop: false };
-    (window as unknown as { __rec: typeof rec }).__rec = rec;
-    window.__lab.resetRenderStats();
-    window.__labGlassMark?.();
-    const loop = (t: number) => {
-      rec.t.push(t);
-      rec.active.push(active());
-      rec.stats.push(window.__lab.renderStats());
-      if (!rec.stop) requestAnimationFrame(loop);
-    };
-    requestAnimationFrame(loop);
-  }, transition.active);
+  await startRecorder(page, transition.active, options.busy);
   await transition.run(page);
   await page.waitForFunction(
     () => {
@@ -297,15 +368,7 @@ export async function recordTransition(
     { timeout: 8000 },
   );
   const created = (await attached(page)) - before;
-  const rec = await page.evaluate((selector) => {
-    const rec = (window as unknown as { __rec: Omit<Recording, 'created' | 'interim'> & { stop: boolean } }).__rec;
-    rec.stop = true;
-    const surfaces = [...document.querySelectorAll<HTMLElement>(selector)].filter((el) => /url\(/.test(el.style.backdropFilter)).length;
-    const lenses = window.__labGlass ?? [];
-    const interim = { entered: lenses.filter((l) => l.entered).length, open: lenses.filter((l) => l.alive && l.interim === true).length };
-    return { t: rec.t, active: rec.active, stats: rec.stats, surfaces, interim };
-  }, transition.surfaces);
-  return { ...rec, created };
+  return { ...(await takeRecorder(page, transition.surfaces)), created };
 }
 
 export type FrameReport = { frames: number; p90: number; max: number; over: number };
