@@ -481,6 +481,30 @@ test.describe('the bottom sheet sits by its height', () => {
     await expect.poll(measures).toBeGreaterThan(dragged);
   });
 
+  for (const [what, padding] of [['grows', '80px'], ['shrinks', '0px']] as const) {
+    test(`content that ${what} while the sheet is dragged is what the released sheet fits`, async ({ page }) => {
+      await sandbox(page, 'rm=1', { w: 390, h: 1000 });
+      const title = () => surfaceOf(page, 'pop').locator('h2');
+      if (what === 'shrinks') await page.evaluate(() => (document.querySelector<HTMLElement>('#pop-surface h2')!.style.paddingBottom = '80px'));
+      await page.locator('#pop-trigger').click();
+      await resting(page, 'pop');
+      const before = await sheetHeight(page, 'pop');
+      const g = await grabberAt(page, 'pop');
+      await page.mouse.move(g.x, g.y);
+      await page.mouse.down();
+      for (const dy of [-8, -16, -24]) await page.mouse.move(g.x, g.y + dy);
+      await expect(page.locator('#pop')).toHaveAttribute('data-height', 'dragging');
+      // A style, not markup: only the content's resize reports it.
+      await title().evaluate((el, p) => ((el as HTMLElement).style.paddingBottom = p), padding);
+      await nextFrame(page);
+      await page.mouse.up();
+      await resting(page, 'pop');
+      const content = await surfaceOf(page, 'pop').evaluate((el) => el.scrollHeight);
+      expect(Math.abs(content + 12 - before)).toBeGreaterThan(40);
+      expect(near(await sheetHeight(page, 'pop'), content + 12, 2)).toBe(true);
+    });
+  }
+
   test('a detents attribute names the detents', async ({ page }) => {
     await sandbox(page, 'rm=1&detents=medium');
     await page.locator('#sup-trigger').click();

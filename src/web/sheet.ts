@@ -764,6 +764,15 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       else this.#remeasure();
     }
 
+    /** Measures the content now if a change waited for the drag, so a release aims at detents that fit what is there. */
+    #flushRemeasure(): void {
+      if (!this.#remeasureHeld) return;
+      this.#remeasureHeld = false;
+      this.#maxContent = null;
+      this.#contentKey = '';
+      this.#place();
+    }
+
     /** The sheet's own height is being dragged or is springing to a detent. */
     #heightMoving(): boolean {
       return this.#drag.active || (this.#form?.form === 'bottom-sheet' && this.#open && this.#drag.height.x !== this.#drag.height.target);
@@ -1517,6 +1526,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       } catch {
         // Nothing was captured.
       }
+      this.#flushRemeasure();
       if (e.type !== 'pointerup') {
         this.#land(cancelSheetDrag(this.#drag, this.#heights()).target);
         return;
