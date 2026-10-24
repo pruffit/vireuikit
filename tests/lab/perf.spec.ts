@@ -43,7 +43,7 @@ const test = FRESH
 
 type Window = { from: number; to: number };
 type Stall = { index: number; gap: number; phase: string; evidence: string | null; external: boolean };
-type Measured = { gaps: number[]; stalls: Stall[]; ms: number; traced: boolean; costs: FrameCost[]; longTasks: LongTask[] };
+type Measured = { gaps: number[]; stalls: Stall[]; ms: number; traced: boolean; costs: FrameCost[]; longTasks: LongTask[]; longest: number };
 
 function replayWindow(rec: Recording): Window {
   const first = rec.active.indexOf(true);
@@ -83,7 +83,7 @@ function measure(rec: Recording, idle: boolean, events: TraceEvent[] | null): Me
     const read = reading?.stalls.get(i - w.from);
     stalls.push({ index: i - w.from, gap, phase: phaseOf(rec, i, idle), evidence: read?.evidence ?? null, external: read?.external ?? false });
   }
-  return { gaps, stalls, ms: rec.t[w.to]! - rec.t[w.from - 1]!, traced: reading !== null, costs: reading?.costs ?? [], longTasks: idle ? [] : (reading?.longTasks ?? []) };
+  return { gaps, stalls, ms: rec.t[w.to]! - rec.t[w.from - 1]!, traced: reading !== null, costs: reading?.costs ?? [], longTasks: idle ? [] : (reading?.longTasks ?? []), longest: reading?.longest ?? 0 };
 }
 
 /** Blocks the page's main thread for 40 ms from a script of its own, neither the recorder's nor the kit's. */
@@ -157,8 +157,8 @@ function headroom(list: Measured[]): { main: string; gpu: string; task: string }
     const s = costs.map(pick).sort((a, b) => a - b);
     return `${pct(s, 0.9).toFixed(1).padStart(4)}/${s.at(-1)!.toFixed(1).padStart(4)}`;
   };
-  const tasks = list.flatMap((m) => m.longTasks.map((t) => t.ms));
-  return { main: of((c) => c.main), gpu: of((c) => c.gpu), task: list.some((m) => m.traced) ? (tasks.length ? Math.max(...tasks).toFixed(1) : 'none') : '-' };
+  const traced = list.filter((m) => m.traced);
+  return { main: of((c) => c.main), gpu: of((c) => c.gpu), task: traced.length ? Math.max(...traced.map((m) => m.longest)).toFixed(1) : '-' };
 }
 
 type Row = { name: string; cold: Cell; on: Cell; counted: number; excused: number; off: Cell; idleOn: Cell; idleOff: Cell; headroom: ReturnType<typeof headroom> };

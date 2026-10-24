@@ -44,7 +44,7 @@ export type FrameCost = { main: number; gpu: number; present: number; compiles: 
 export type LongTask = { at: number; ms: number; what: string };
 
 /** The trace's view of a recording: each interval's cost, the evidence for each stalled one, and the long tasks. */
-export type TraceReading = { costs: FrameCost[]; stalls: Map<number, { evidence: string; external: boolean }>; longTasks: LongTask[] };
+export type TraceReading = { costs: FrameCost[]; stalls: Map<number, { evidence: string; external: boolean }>; longTasks: LongTask[]; longest: number };
 
 export const VSYNC_MS = 16.7;
 
@@ -140,8 +140,9 @@ export function traceFrames(events: TraceEvent[], rec: { t: number[]; sync: numb
     stalls.set(i - window.from, { evidence, external });
   }
   const [from, to] = [at(rec.t[window.from - 1]!), at(rec.t[window.to]!)];
-  const longTasks = mainTasks
-    .filter((e) => (e.dur ?? 0) > VSYNC_MS * 1000 && e.ts < to && e.ts + (e.dur ?? 0) > from)
+  const inWindow = mainTasks.filter((e) => e.ts < to && e.ts + (e.dur ?? 0) > from);
+  const longTasks = inWindow
+    .filter((e) => (e.dur ?? 0) > VSYNC_MS * 1000)
     .map((e) => ({ at: (e.ts - from) / 1000, ms: (e.dur ?? 0) / 1000, what: describeTask(events, e) }));
-  return { costs, stalls, longTasks };
+  return { costs, stalls, longTasks, longest: Math.max(0, ...inWindow.map((e) => (e.dur ?? 0) / 1000)) };
 }
