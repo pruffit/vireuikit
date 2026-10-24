@@ -439,10 +439,12 @@ export function createControlElementClass(
       if (!want || !control) return;
       const token = this.#glassToken;
       const sample = this.#sample;
+      // Attached with the material it shows: a second material after the attach would bake every map again.
+      const atom = this.#atomMaterial();
       void attachControlGlass(
         control,
         {
-          material: VIREGLASS_CONTROL_MATERIAL,
+          material: atom.material,
           geometry: this.#geometry(control),
           accessibility: mode,
           onTouch: this.#glassMode() === 'touch',
@@ -456,7 +458,9 @@ export function createControlElementClass(
           if (this.#morph) session.setMorph(this.#morph);
           if (this.#carried !== null) session.setAppear(0);
           if (this.#sample !== sample) session.setSample(this.#sample);
-          this.#pushMaterial(true);
+          this.#lastMaterialKey = atom.key;
+          this.#pushMaterial();
+          if (this.#glassMode() === 'touch' && this.#forced()) session.setAppear(this.#atomMaterial().pressed);
           this.dispatchEvent(new CustomEvent('vire-glass-ready'));
         })
         .catch(() => {
@@ -467,18 +471,25 @@ export function createControlElementClass(
         });
     }
 
-    #pushMaterial(force = false): void {
-      const glass = this.#glass;
-      if (!glass) return;
+    #atomMaterial(): { material: VireGlassMaterial; key: string; pressed: number } {
       const atom = visualAtomState(this.#visual, this.#state);
       const snap = (v: number) => Math.round(Math.min(Math.max(v, 0), 1) * MATERIAL_STEPS) / MATERIAL_STEPS;
       const quantized = { ...atom, pressed: snap(atom.pressed), hovered: snap(atom.hovered) };
-      const key = `${quantized.pressed}|${quantized.hovered}|${quantized.disabled}`;
+      return {
+        material: atomMaterial(VIREGLASS_CONTROL_MATERIAL, kind, quantized),
+        key: `${quantized.pressed}|${quantized.hovered}|${quantized.disabled}`,
+        pressed: quantized.pressed,
+      };
+    }
+
+    #pushMaterial(force = false): void {
+      const glass = this.#glass;
+      if (!glass) return;
+      const { material, key, pressed } = this.#atomMaterial();
       if (!force && key === this.#lastMaterialKey) return;
       this.#lastMaterialKey = key;
-      const material: VireGlassMaterial = atomMaterial(VIREGLASS_CONTROL_MATERIAL, kind, quantized);
       glass.setMaterial(material);
-      if (this.#glassMode() === 'touch' && this.#forced()) glass.setAppear(quantized.pressed);
+      if (this.#glassMode() === 'touch' && this.#forced()) glass.setAppear(pressed);
     }
 
     #render(immediate = false): void {
