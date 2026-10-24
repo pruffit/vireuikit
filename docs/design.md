@@ -97,41 +97,39 @@ baseline to force a rewrite.
 ### The frame gate
 
 `check:lab:perf` (`tests/lab/perf.spec.ts`) starts its own lab, on port 5180 or `VIREUIKIT_LAB_PORT`, with reloading
-off (`VIREUIKIT_LAB_STILL`): a lab that reloads on a save loaded the page mid-replay, and a save that left the tree
-broken for a moment kept the page from booting until the next one, which was the 120 s wait for `data-ready`. Each
-transition is replayed three times to warm up (the cold first replay is printed, not judged), then three times with
-glass on and once with glass off, each after an idle control: the same recorder over the same page, still, for as long,
-less its first 100 ms, which are the recorder's own start. The frames are timed from the first active one to 400 ms
-past the last.
+off (`VIREUIKIT_LAB_STILL`): no HMR, no file watcher, `/__early.js` built once, and no dependency pre-bundled after
+start. A lab that reloads on a save loaded the page mid-replay, and a save that left the tree broken kept the page from
+booting until the next one. It measures the kit with the vireglass installed in `node_modules`, not a branch of it.
 
-A frame over 33 ms is a stall, and it is the transition's when it comes back at the same frame (within one) in another
-replay, or when a long animation frame shows the kit's or the core's script, 10 ms or more, in two replays. A
-transition with any other stall is replayed three more times, then judged; a stall that is still neither is printed
-as a one-off. The p90 with glass on, of the median replay, is at most 20 ms. `VIREUIKIT_PERF_CANARY="menu growth@5"`
-blocks the main thread for 40 ms on that frame of every replay with glass on, and must fail (7 of 7 runs, three
-transitions, in motion and in a landing).
+Each transition is replayed three times to warm up (the cold first replay is printed, not judged), then three times
+with glass on and once with glass off, each after an idle control: the same recorder over the same page, still, for as
+long, less its first 100 ms, which are the recorder's own start. The frames are timed from the first active one to
+400 ms past the last, so the deferred landing is in the window. Every measured replay is traced (light categories).
 
-Why the judgement changed, from six full runs before the fixes on a Ryzen 5 3500U with Vega 8, 1500 × 1000 at 60 Hz:
-10 of 324 measured replays with glass on stalled, 1 of 324 with glass off and none of 648 idle controls once their
-first 100 ms were left out. No stall came back at the same frame of its transition. Where the time went, from a trace
-or a long animation frame: the GPU process waiting in `Present` for 33 to 42 ms (twice, navigation rail to bar, frame
-4), a GPU program compiled after the warm-ups (toolbar overflowing, frame 7, once with glass on and once off), the
-core's landing bake (`land`, 37 ms), the menu's settle (51 ms) and the sheet's drag at 11 ms of main thread a frame
-(two replays; since fixed: about 4); three, in untraced runs and with no long animation frame, are not placed. On a
-quiet machine and untraced, three runs stalled 0, 0 and 2 of 54; under load (a heavy trace) 4 and 1 of 54; with a
-fresh browser for each transition 3 of 54, and its warm-ups 12 of 36, which compile GPU programs. Positions in the
-suite showed no trend: Playwright gives each transition a new page, so a page sees eight navigations, not 150. After
-the fixes three full runs passed: 4 of 174 measured replays with glass on stalled, each a one-off (a 48 ms raster flush
-in the GPU process at frame 7 of the toolbar overflowing, which glass off has shown too; the menu's settle, 42 ms; the
-popover's click, 27 ms; the GPU process busy at frame 4 of navigation expanding), and none of 228 idle controls or 54
-replays with glass off.
+With glass on, a transition fails on:
 
-The last columns are the headroom: busy ms per frame interval, p90 and max over the measured replays with glass on, of
-the page's main thread and of the GPU process's main thread, less its wait in `Present`, from a light trace
-(`VIREUIKIT_PERF_TRACE=0` turns it off; a trace with a stall is kept under the system temp directory). That is CPU time
-in the GPU process; the GPU itself is not the limit here: looping the navigation morph keeps its 3D engine 37 % busy
-with glass and 17 % without. An animation-frame interval misses a frame lost to a task shorter than two vsyncs: a
-20 ms click handler leaves no gap, a 40 ms one does.
+- a frame over 33 ms, unless its replay's trace shows the time was not the page's: the page's main thread busy for
+  less than a vsync in that interval, and the interval's missing time spent in the GPU process waiting in `Present` or
+  in a task that compiled a GPU program. Each excused frame is printed with that evidence. All main-thread work counts
+  as the page's, whatever script ran it;
+- a main-thread task over a vsync (16.7 ms) anywhere in the window, which an animation-frame gap does not show: a task
+  shorter than two vsyncs only delays the frame it falls in;
+- a p90 over 20 ms, of the median replay.
+
+A replay whose trace did not hold it is replayed once more for its trace; nothing is excused by not coming back. The
+table prints, per transition, glass on (stalled replays, counted and excused stalls), the idle controls, glass off, the
+cold replay, the busy ms per frame interval of the page's main thread and of the GPU process less its wait in `Present`
+(p90/max), and the longest main-thread task. A kept trace goes under the system temp directory, never the repository.
+
+Switches: `VIREUIKIT_PERF_TRACE=0` runs untraced (then nothing is excused and the task bound is not checked);
+`VIREUIKIT_PERF_OFF_REPLAYS` sets the replays with glass off (1); `VIREUIKIT_PERF_OUT=<file>` writes one JSON line per
+recording; `VIREUIKIT_PERF_FRESH=browser` launches a browser for each transition; `VIREUIKIT_LAB_BOOT_MS` is how long a
+lab case may take to boot (30 000, for `check:lab` too). `VIREUIKIT_PERF_CANARY=<kind>:<transition>[@frame]` puts a cost
+into the measured replays with glass on, and every kind must fail every run: `fixed` blocks 40 ms on that frame of
+each, `random` 40 ms on a random frame of one, `foreign` 40 ms from an init script of its own rather than the kit's,
+and `short` a 20 ms task that leaves no frame gap.
+
+The runs behind these choices, on a Ryzen 5 3500U with Vega 8, are in issue #39.
 
 ## The menu
 
@@ -555,8 +553,8 @@ An atom is done when:
    `tests/lab/transitions.ts`. `check:lab` counts the core's work over it (`renderStats`): no backdrop probe, no
    full bake and no filter swap on any frame of the change, one landing after it. `check:lab:perf` replays it in a
    headed Chromium with the GPU, timing the frames from the start to 400 ms past the last active one (the landing's
-   bakes fall there), and requires no frame over 33 ms that is the transition's own (one that comes back at the same
-   frame, or the kit's script in two replays; "The frame gate") and a p90 of at most 20 ms with glass on. Gates that
+   bakes fall there), and requires with glass on no frame over 33 ms that its trace does not show outside the page, no
+   main-thread task over a vsync and a p90 of at most 20 ms ("The frame gate"). Gates that
    read the model's boxes frame by frame say nothing about what the browser draws; these two say it (MO1–MO5);
 7. **its mid-motion frames are in the visual set.** The change is frozen at about a quarter, a half and three quarters
    through (`check:lab:visual`), and a drag is held at a few places, not only the resting forms (MO6);
