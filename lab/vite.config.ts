@@ -109,5 +109,11 @@ export default defineConfig({
     alias: { 'vireuikit/web': resolve(HERE, '../src/web/index.ts') },
   },
   optimizeDeps: { include: ['vireglass', 'vireglass/dom'] },
-  server: { port: Number(process.env.VIREUIKIT_LAB_PORT ?? 5179), strictPort: true, host: '127.0.0.1' },
+  server: {
+    port: Number(process.env.VIREUIKIT_LAB_PORT ?? 5179),
+    strictPort: true,
+    host: '127.0.0.1',
+    // A gate's lab serves the tree as it was when it started: an edit must not reload the page it is timing.
+    ...(process.env.VIREUIKIT_LAB_STILL === '1' ? { hmr: false, watch: null } : {}),
+  },
 });
