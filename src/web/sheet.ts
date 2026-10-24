@@ -201,6 +201,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #sizes = new Map<Element, string>();
     #resizer: ResizeObserver | null = null;
     #contentShown = false;
+    #remeasureHeld = false;
     #detent: SheetDetent | null = null;
     #drag = createSheetDrag();
     #press: { id: number; y: number; grab: boolean; started: boolean; scroller: Element | null } | null = null;
@@ -756,7 +757,16 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       }
       const opened = shown && !this.#contentShown;
       this.#contentShown = shown;
-      if (changed && shown && !opened) this.#remeasure();
+      if (!changed || !shown || opened) return;
+      // While its height moves the sheet resizes its own content on every frame, and the observer then reports the
+      // measuring layout too, so a remeasure here fed the next one: the content's natural size waits for the height to rest.
+      if (this.#heightMoving()) this.#remeasureHeld = true;
+      else this.#remeasure();
+    }
+
+    /** The sheet's own height is being dragged or is springing to a detent. */
+    #heightMoving(): boolean {
+      return this.#drag.active || (this.#form?.form === 'bottom-sheet' && this.#open && this.#drag.height.x !== this.#drag.height.target);
     }
 
     #present(): void {
@@ -885,6 +895,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#grabKey = '';
       this.#scrollTop = 0;
       this.#touchTop = null;
+      this.#remeasureHeld = false;
       this.#clearInset();
       if (surface) {
         for (const name of Array.from(surface.style)) {
@@ -1182,6 +1193,11 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         this.#settle();
         return;
       }
+      if (this.#remeasureHeld && !this.#heightMoving()) {
+        this.#remeasureHeld = false;
+        this.#remeasure();
+        return;
+      }
       if (this.#morph) {
         this.#morph = null;
         this.#reglass();
@@ -1300,7 +1316,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       s.setProperty('--vk-body-lift', body.lift.toFixed(3));
       surface.toggleAttribute('data-scrim', (this.#layout?.scrim ?? false) && this.#form?.form !== 'full-screen');
       this.setAttribute('data-phase', c.phase);
-      const height = this.#drag.active ? 'dragging' : this.#form?.form === 'bottom-sheet' && this.#open && this.#drag.height.x !== this.#drag.height.target ? 'settling' : null;
+      const height = this.#drag.active ? 'dragging' : this.#heightMoving() ? 'settling' : null;
       if (height) this.setAttribute('data-height', height);
       else this.removeAttribute('data-height');
       this.#syncGrabber();

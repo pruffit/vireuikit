@@ -452,6 +452,35 @@ test.describe('the bottom sheet sits by its height', () => {
     expect(await surfaceOf(page, 'pop').evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
   });
 
+  test('a drag of its height does not measure the content on every frame, and measures what changed once it rests', async ({ page }) => {
+    await sandbox(page, 'detents=medium');
+    await page.locator('#sup-trigger').click();
+    await resting(page, 'sup');
+    const measures = () => page.evaluate(() => (window as unknown as { __measures: number }).__measures);
+    await page.evaluate(() => {
+      const w = window as unknown as { __measures: number };
+      w.__measures = 0;
+      new MutationObserver((list) => (w.__measures += list.filter((m) => m.oldValue === null).length)).observe(document.getElementById('sup')!, {
+        attributeFilter: ['data-measure'],
+        attributeOldValue: true,
+      });
+    });
+    const g = await grabberAt(page, 'sup');
+    await page.mouse.move(g.x, g.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 20; i += 1) {
+      await page.mouse.move(g.x, g.y - i * 10);
+      await nextFrame(page);
+      // A style, not markup: only the content's resize reports it.
+      if (i === 10) await surfaceOf(page, 'sup').evaluate((el) => (el.querySelector('h2')!.style.paddingBottom = '40px'));
+    }
+    const dragged = await measures();
+    await page.mouse.up();
+    await resting(page, 'sup');
+    expect(dragged).toBeLessThanOrEqual(2);
+    await expect.poll(measures).toBeGreaterThan(dragged);
+  });
+
   test('a detents attribute names the detents', async ({ page }) => {
     await sandbox(page, 'rm=1&detents=medium');
     await page.locator('#sup-trigger').click();
