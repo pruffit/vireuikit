@@ -109,26 +109,47 @@ categories); the warm-ups only so that the first measured replay does not pay th
 
 With glass on, a transition fails on:
 
-- a frame over 33 ms, unless its replay's trace shows the time was not the page's: the page's main thread busy for
-  less than a vsync in that interval, and the interval's missing time spent in the GPU process waiting in `Present` or
-  in a task that compiled a GPU program. Each excused frame is printed with that evidence. All main-thread work counts
-  as the page's, whatever script ran it;
-- a main-thread task over a vsync (16.7 ms) anywhere in the window, which an animation-frame gap does not show: a task
-  shorter than two vsyncs only delays the frame it falls in;
-- a p90 over 20 ms, of the median replay.
+- a frame over 33 ms (rule `frame`), unless its replay's trace shows the time was not the page's. The test, in this
+  order, and the first that applies decides: the page's main thread busy for a vsync or more in that interval counts; a
+  GPU program compiled in it counts; missing time that is not spent in the GPU process's `Present` counts; a
+  `Present` wait counts when the GPU process's own main-thread work (less `Present`) exceeds 4 ms in the interval or
+  either neighbour; only a `Present` wait with a quiet GPU process is excused. `Present` blocks on the GPU's
+  backlog, so a wait behind work the kit queued is the kit's. The bound is read off the data: a still page costs the
+  GPU process's main thread 0 ms at p90 and 3.5 ms at most per frame, the kit's motion frames 8.7 ms at p90 (Vega 8),
+  and a quarter of a vsync sits between them. Every stall prints the rule that decided it and its numbers; a counted
+  stall also prints the scripts of the long animation frames over it, which are a diagnosis and neither excuse nor
+  judge: only frames over 50 ms are reported, and they say who ran, not whether the time was the page's;
+- a GPU program compiled in a measured replay (rule `compile`): Skia's, stored by a GPU-process task, or linked by a
+  context. The warm-ups compile every program the transition needs, so one in a measured replay is a variant they
+  missed, which is the kit's cost and is never excused;
+- a main-thread task over a vsync (16.7 ms) anywhere in the window (rule `task`), which an animation-frame gap does
+  not always show: a task of 17 to 20 ms may delay the next frame by less than the bound;
+- a measured replay with no trace (rule `untraced`), when tracing is on: nothing can be excused or checked on it, and
+  it is not replayed again.
 
-A replay whose trace did not hold it is replayed once more for its trace; nothing is excused by not coming back. The
-table prints, per transition, glass on (stalled replays, counted and excused stalls), the idle controls, glass off, the
-cold replay, the busy ms per frame interval of the page's main thread and of the GPU process less its wait in `Present`
-(p90/max), and the longest main-thread task. A kept trace goes under the system temp directory, never the repository.
+Headroom is printed, not judged: the busy ms per frame interval of the page's main thread and of the GPU process less
+its wait in `Present` (p90/max), and the longest main-thread task. There is no bound on a p90 of the intervals, which
+sit on the vsync whatever a frame costs; the popover's headroom is issue #40. A run prints every rule it broke
+(`rules broken:`), so a canary can be held to its own. The table prints, per transition, glass on (stalled replays,
+counted and excused stalls), the idle controls, glass off and the cold replay. A kept trace goes under the system temp
+directory, never the repository.
 
-Switches: `VIREUIKIT_PERF_TRACE=0` runs untraced (then nothing is excused and the task bound is not checked);
-`VIREUIKIT_PERF_OFF_REPLAYS` sets the replays with glass off (1); `VIREUIKIT_PERF_OUT=<file>` writes one JSON line per
-recording; `VIREUIKIT_PERF_FRESH=browser` launches a browser for each transition; `VIREUIKIT_LAB_BOOT_MS` is how long a
-lab case may take to boot (30 000, for `check:lab` too). `VIREUIKIT_PERF_CANARY=<kind>:<transition>[@frame]` puts a cost
-into the measured replays with glass on, and every kind must fail every run: `fixed` blocks 40 ms on that frame of
-each, `random` 40 ms on a random frame of one, `foreign` 40 ms from an init script of its own rather than the kit's,
-and `short` a 20 ms task that leaves no frame gap.
+Switches: `VIREUIKIT_PERF_TRACE=0` runs untraced (then nothing is excused and the task bound, compiles and traces are
+not checked); `VIREUIKIT_PERF_OFF_REPLAYS` sets the replays with glass off (1); `VIREUIKIT_PERF_OUT=<file>` writes one JSON
+line per recording; `VIREUIKIT_PERF_FRESH=browser` launches a browser for each transition; `VIREUIKIT_PERF_SEED` seeds the
+random canary (20241024, printed); `VIREUIKIT_LAB_BOOT_MS` is how long a lab case may take to boot (30 000, for
+`check:lab` too). The gate starts its own lab and fails at once, naming the port and how to find its owner, when
+something already listens there.
+
+`VIREUIKIT_PERF_CANARY=<kind>:<transition>[@frame]` puts a cost into the measured replays with glass on, and every kind
+must fail every run by its own rule, which the run prints (`CANARY <kind>: must break "<rule>", broke [...]`).
+`fixed` blocks 40 ms on that frame of each (`frame`), `random` 40 ms on a seeded random frame of one (`frame`),
+`foreign` 40 ms from an init script of its own rather than the kit's (`frame`), `short` a 20 ms task started after
+the frame callback, which breaks `task` and may leave the frame gap under the bound, `gpu` one expensive fragment
+shader drawn once on a canvas, about 100 to 150 ms of GPU time, which must be counted as a busy GPU and not excused as
+a `Present` wait (`frame`), and `compile` a WebGL program of unseen source linked in the replay (`compile`).
+`npm run check:lab:perf:canaries` runs every kind on one row (`VIREUIKIT_PERF_CANARY_ROW`, "menu growth") and fails
+unless each run fails by its rule. Run it after any change to the gate.
 
 The runs behind these choices, on a Ryzen 5 3500U with Vega 8, are in issue #39.
 
@@ -555,7 +576,7 @@ An atom is done when:
    full bake and no filter swap on any frame of the change, one landing after it. `check:lab:perf` replays it in a
    headed Chromium with the GPU, timing the frames from the start to 400 ms past the last active one (the landing's
    bakes fall there), and requires with glass on no frame over 33 ms that its trace does not show outside the page, no
-   main-thread task over a vsync and a p90 of at most 20 ms ("The frame gate"). Gates that
+   main-thread task over a vsync and no GPU program compiled after the warm-ups ("The frame gate"). Gates that
    read the model's boxes frame by frame say nothing about what the browser draws; these two say it (MO1–MO5);
 7. **its mid-motion frames are in the visual set.** The change is frozen at about a quarter, a half and three quarters
    through (`check:lab:visual`), and a drag is held at a few places, not only the resting forms (MO6);

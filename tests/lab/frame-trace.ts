@@ -12,7 +12,7 @@ export type TraceEvent = {
 };
 
 // Light on purpose: every measured replay is traced, and heavier categories load the threads being timed.
-const CATEGORIES = ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame', 'gpu', 'blink.user_timing'];
+const CATEGORIES = ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame', 'gpu', 'disabled-by-default-gpu.device', 'disabled-by-default-gpu.service', 'blink.user_timing'];
 
 /** Starts a trace of the whole browser, the GPU process included; the returned function ends it and hands back its events. */
 export async function startTrace(page: Page): Promise<() => Promise<TraceEvent[]>> {
@@ -36,17 +36,29 @@ export async function startTrace(page: Page): Promise<() => Promise<TraceEvent[]
 
 /**
  * Busy ms over one frame interval: the page's main thread, the GPU process's main thread less its wait in `Present`
- * (`gpu`), that wait (`present`), and the GPU programs compiled in a GPU-process task that overlaps it.
+ * (`gpu`), that wait (`present`), and the GPU programs compiled in it: Skia's, which a GPU-process task that overlaps it
+ * stored, and the ones a context linked.
  */
 export type FrameCost = { main: number; gpu: number; present: number; compiles: number };
 
 /** A renderer main-thread task longer than a vsync, with what ran in it. */
 export type LongTask = { at: number; ms: number; what: string };
 
-/** The trace's view of a recording: each interval's cost, the evidence for each stalled one, and the long tasks. */
-export type TraceReading = { costs: FrameCost[]; stalls: Map<number, { evidence: string; external: boolean }>; longTasks: LongTask[]; longest: number };
+/** A stalled interval's verdict: `rule` names the test that decided it, `evidence` carries the numbers. */
+export type StallReading = { rule: string; evidence: string; external: boolean };
+
+/** The trace's view of a recording: each interval's cost, the verdict on each stalled one, and the long tasks. */
+export type TraceReading = { costs: FrameCost[]; stalls: Map<number, StallReading>; longTasks: LongTask[]; longest: number };
 
 export const VSYNC_MS = 16.7;
+
+/**
+ * A wait in `Present` is the OS compositor's only when the GPU process itself was quiet in the interval and the one
+ * either side of it: its main thread busy for more than this much of a frame is work the kit queued, and `Present`
+ * blocks on that backpressure. A quarter of a vsync is well above the few ms of a frame that only presents and well
+ * under one that draws.
+ */
+export const GPU_QUIET_MS = 4;
 
 type Span = [number, number];
 
@@ -109,35 +121,47 @@ export function traceFrames(events: TraceEvent[], rec: { t: number[]; sync: numb
   const gpuTasks: TraceEvent[] = [];
   const presents: Span[] = [];
   const stores: number[] = [];
+  const links: number[] = [];
+  const gpuPid = gpu.split(':')[0];
   for (const e of events) {
     const k = key(e.pid, e.tid);
     if (e.ph === 'X' && e.name === 'RunTask' && k === main) mainTasks.push(e);
     else if (e.ph === 'X' && e.name === 'RunTask' && k === gpu) gpuTasks.push(e);
     else if (e.name === 'DXGISwapChainImageBacking::Present' && k === gpu) presents.push(spanOf(e));
     else if (e.name === 'GrShaderCache::store') stores.push(e.ts);
+    else if (e.name === 'TraceGLAPI::glLinkProgram' && e.ph === 'X' && String(e.pid) === gpuPid) links.push(e.ts);
   }
   const holds = (e: TraceEvent, ts: number) => ts >= e.ts && ts <= e.ts + (e.dur ?? 0);
   const compiling = gpuTasks.filter((e) => stores.some((s) => holds(e, s)));
   const costs: FrameCost[] = [];
-  const stalls = new Map<number, { evidence: string; external: boolean }>();
   for (let i = window.from; i <= window.to; i += 1) {
     const [a, b] = [at(rec.t[i - 1]!), at(rec.t[i]!)];
     const tasks = compiling.filter((e) => e.ts < b && e.ts + (e.dur ?? 0) > a);
     const present = overlap(presents, a, b);
-    const cost: FrameCost = {
+    costs.push({
       main: overlap(mainTasks.map(spanOf), a, b),
       gpu: overlap(gpuTasks.map(spanOf), a, b) - present,
       present,
-      compiles: stores.filter((s) => tasks.some((e) => holds(e, s))).length,
-    };
-    costs.push(cost);
+      compiles: stores.filter((s) => tasks.some((e) => holds(e, s))).length + links.filter((l) => l >= a && l < b).length,
+    });
+  }
+  const stalls = new Map<number, StallReading>();
+  for (let i = window.from; i <= window.to; i += 1) {
     const gap = rec.t[i]! - rec.t[i - 1]!;
     if (gap <= stall) continue;
-    const outside = union([...presents, ...tasks.map(spanOf)], a, b);
-    // External only when the page's thread had time to spare and the missing time is spent outside the page.
-    const external = cost.main < VSYNC_MS && outside >= gap - VSYNC_MS - 1;
-    const evidence = `main thread ${cost.main.toFixed(1)} ms; GPU process ${outside.toFixed(1)} ms in Present or compiling (${cost.compiles} programs), ${cost.gpu.toFixed(1)} ms working`;
-    stalls.set(i - window.from, { evidence, external });
+    const k = i - window.from;
+    const cost = costs[k]!;
+    const [a, b] = [at(rec.t[i - 1]!), at(rec.t[i]!)];
+    const waited = union(presents, a, b);
+    const around = Math.max(...[k - 1, k, k + 1].map((j) => costs[j]?.gpu ?? 0));
+    const numbers = `main thread ${cost.main.toFixed(1)} ms; GPU process ${waited.toFixed(1)} ms in Present, ${around.toFixed(1)} ms working at most in this interval and its neighbours (quiet is ${GPU_QUIET_MS} ms), ${cost.compiles} programs compiled`;
+    let verdict: Omit<StallReading, 'evidence'>;
+    if (cost.main >= VSYNC_MS) verdict = { rule: 'main thread busy for a vsync', external: false };
+    else if (cost.compiles > 0) verdict = { rule: 'a GPU program was compiled', external: false };
+    else if (waited < gap - VSYNC_MS - 1) verdict = { rule: 'the missing time is not in Present', external: false };
+    else if (around > GPU_QUIET_MS) verdict = { rule: 'Present waited on a busy GPU process', external: false };
+    else verdict = { rule: 'the wait in Present came from outside the page', external: true };
+    stalls.set(k, { ...verdict, evidence: `${verdict.external ? 'excused' : 'counted'} by rule "${verdict.rule}": ${numbers}` });
   }
   const [from, to] = [at(rec.t[window.from - 1]!), at(rec.t[window.to]!)];
   const inWindow = mainTasks.filter((e) => e.ts < to && e.ts + (e.dur ?? 0) > from);

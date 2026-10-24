@@ -2,29 +2,47 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test as base, type Page } from '@playwright/test';
-import { VSYNC_MS, startTrace, traceFrames, type FrameCost, type LongTask, type TraceEvent } from './frame-trace';
+import { GPU_QUIET_MS, VSYNC_MS, startTrace, traceFrames, type FrameCost, type LongTask, type TraceEvent } from './frame-trace';
 import { watchPage, type PageLog } from './helpers';
-import { IDLE_LEAD_MS, LANDING_WINDOW_MS, TRANSITIONS, recordIdle, recordTransition, type Busy, type Recording, type Transition } from './transitions';
+import { IDLE_LEAD_MS, LANDING_WINDOW_MS, TRANSITIONS, recordIdle, recordTransition, type Busy, type Loaf, type Recording, type Transition } from './transitions';
 
 // Local, headed, GPU: `npm run check:lab:perf`. What it judges and why: docs/design.md, "The frame gate".
 const MAX_FRAME = 33;
-const MAX_P90 = 20;
 const WARMUPS = 3;
 const REPLAYS = 3;
 const OFF_REPLAYS = Number(process.env.VIREUIKIT_PERF_OFF_REPLAYS ?? 1);
 const TRACE = process.env.VIREUIKIT_PERF_TRACE !== '0';
 const OUT = process.env.VIREUIKIT_PERF_OUT;
 const FRESH = process.env.VIREUIKIT_PERF_FRESH === 'browser';
+const SEED = Number(process.env.VIREUIKIT_PERF_SEED ?? 20241024);
 const RUN = new Date().toISOString().replace(/[:.]/g, '-');
 const TRACE_DIR = join(tmpdir(), 'vireuikit-perf', RUN);
 
-type Canary = { kind: 'fixed' | 'random' | 'foreign' | 'short'; name: string; frame: number };
+/** What a run can break: a frame over the bound, a main-thread task over a vsync, a GPU program compiled, a replay with no trace. */
+type Rule = 'frame' | 'task' | 'compile' | 'untraced';
 
-/** `VIREUIKIT_PERF_CANARY=<fixed|random|foreign|short>:<transition>[@frame]`: a cost the gate must fail on, every run. */
+const KINDS = ['fixed', 'random', 'foreign', 'short', 'gpu', 'compile'] as const;
+type Canary = { kind: (typeof KINDS)[number]; name: string; frame: number };
+
+/** The rule each canary is made to break, among others: a 20 ms task also costs the frame after it. */
+const BREAKS: Record<Canary['kind'], Rule> = { fixed: 'frame', random: 'frame', foreign: 'frame', short: 'task', gpu: 'frame', compile: 'compile' };
+
+/** `VIREUIKIT_PERF_CANARY=<kind>:<transition>[@frame]`: a cost the gate must fail on, every run, by the rule of its kind. */
 function canaryFor(name: string): Canary | null {
-  const m = /^(?:(fixed|random|foreign|short):)?([^@]+)(?:@(\d+))?$/.exec(process.env.VIREUIKIT_PERF_CANARY ?? '');
+  const m = new RegExp(`^(?:(${KINDS.join('|')}):)?([^@]+)(?:@(\\d+))?$`).exec(process.env.VIREUIKIT_PERF_CANARY ?? '');
   if (!m || m[2] !== name) return null;
   return { kind: (m[1] ?? 'fixed') as Canary['kind'], name, frame: Number(m[3] ?? 3) };
+}
+
+/** A small seeded generator, so a random canary lands on the same replay and frame every run. */
+function seeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 let seq = 0;
@@ -42,8 +60,9 @@ const test = FRESH
   : base;
 
 type Window = { from: number; to: number };
-type Stall = { index: number; gap: number; phase: string; evidence: string | null; external: boolean };
-type Measured = { gaps: number[]; stalls: Stall[]; ms: number; traced: boolean; costs: FrameCost[]; longTasks: LongTask[]; longest: number };
+type Stall = { index: number; gap: number; phase: string; evidence: string | null; external: boolean; loaf: string };
+type Compile = { index: number; programs: number; phase: string };
+type Measured = { gaps: number[]; stalls: Stall[]; compiled: Compile[]; ms: number; traced: boolean; costs: FrameCost[]; longTasks: LongTask[]; longest: number };
 
 function replayWindow(rec: Recording): Window {
   const first = rec.active.indexOf(true);
@@ -69,6 +88,14 @@ function phaseOf(rec: Recording, i: number, idle: boolean): string {
   return `landing +${Math.round(rec.t[i]! - rec.t[last]!)} ms${bake}`;
 }
 
+/** The scripts of the long animation frames over an interval: a diagnosis of a counted stall, never a judgement of it. */
+function loafOf(loaf: Loaf[], from: number, to: number): string {
+  const frames = loaf.filter((f) => f.startTime < to && f.startTime + f.duration > from);
+  const scripts = frames.flatMap((f) => f.scripts).sort((a, b) => b.duration - a.duration).slice(0, 3);
+  if (scripts.length === 0) return frames.length ? `${frames.length} long animation frame(s), no script in them` : 'no long animation frame reported (only frames over 50 ms are)';
+  return scripts.map((s) => `${s.sourceFunctionName || s.invokerType} (${s.sourceURL.split('/').pop() || 'inline'}) ${s.duration.toFixed(0)} ms`).join(', ');
+}
+
 const pct = (sorted: number[], p: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] ?? 0;
 
 function measure(rec: Recording, idle: boolean, events: TraceEvent[] | null): Measured {
@@ -81,9 +108,10 @@ function measure(rec: Recording, idle: boolean, events: TraceEvent[] | null): Me
     gaps.push(gap);
     if (gap <= MAX_FRAME) continue;
     const read = reading?.stalls.get(i - w.from);
-    stalls.push({ index: i - w.from, gap, phase: phaseOf(rec, i, idle), evidence: read?.evidence ?? null, external: read?.external ?? false });
+    stalls.push({ index: i - w.from, gap, phase: phaseOf(rec, i, idle), evidence: read ? `rule "${read.rule}": ${read.evidence}` : null, external: read?.external ?? false, loaf: loafOf(rec.loaf, rec.t[i - 1]!, rec.t[i]!) });
   }
-  return { gaps, stalls, ms: rec.t[w.to]! - rec.t[w.from - 1]!, traced: reading !== null, costs: reading?.costs ?? [], longTasks: idle ? [] : (reading?.longTasks ?? []), longest: reading?.longest ?? 0 };
+  const compiled = (reading?.costs ?? []).flatMap((c, k): Compile[] => (c.compiles > 0 ? [{ index: k, programs: c.compiles, phase: phaseOf(rec, w.from + k, idle) }] : []));
+  return { gaps, stalls, compiled: idle ? [] : compiled, ms: rec.t[w.to]! - rec.t[w.from - 1]!, traced: reading !== null, costs: reading?.costs ?? [], longTasks: idle ? [] : (reading?.longTasks ?? []), longest: reading?.longest ?? 0 };
 }
 
 /** Blocks the page's main thread for 40 ms from a script of its own, neither the recorder's nor the kit's. */
@@ -127,7 +155,7 @@ async function replay(page: Page, transition: Transition, glass: '1' | '0', role
     appendFileSync(OUT, `${JSON.stringify({ run: RUN, seq, name: transition.name, kind: 'replay', glass, role, ...r })}\n`);
     if (i) appendFileSync(OUT, `${JSON.stringify({ run: RUN, seq, name: transition.name, kind: 'idle', glass, role, ...i })}\n`);
   }
-  if (events && (r.stalls.length > 0 || r.longTasks.length > 0 || (i?.stalls.length ?? 0) > 0)) {
+  if (events && (r.stalls.length > 0 || r.longTasks.length > 0 || r.compiled.length > 0 || (i?.stalls.length ?? 0) > 0)) {
     mkdirSync(TRACE_DIR, { recursive: true });
     const file = join(TRACE_DIR, `${String(seq).padStart(4, '0')}-${transition.name.replace(/[^a-z0-9]+/gi, '-')}-glass-${glass}.json`);
     const idleRec = idle as Recording | null;
@@ -137,13 +165,11 @@ async function replay(page: Page, transition: Transition, glass: '1' | '0', role
   return { replay: r, idle: i };
 }
 
-type Cell = { frames: number; p90: number; max: number; replays: number; stalled: number };
+type Cell = { frames: number; max: number; replays: number; stalled: number };
 
 function cell(list: Measured[]): Cell {
-  const p90s = list.map((m) => pct([...m.gaps].sort((a, b) => a - b), 0.9)).sort((a, b) => a - b);
   return {
     frames: Math.round(list.reduce((a, m) => a + m.gaps.length, 0) / Math.max(list.length, 1)),
-    p90: p90s[Math.floor(p90s.length / 2)] ?? 0,
     max: Math.max(0, ...list.flatMap((m) => m.gaps)),
     replays: list.length,
     stalled: list.filter((m) => m.stalls.length > 0).length,
@@ -174,24 +200,25 @@ base.beforeAll(async ({ browser }) => {
   });
   await page.close();
   expect(renderer, `the GPU is not in use (${renderer}); this gate does not accept software rendering`).not.toMatch(/swiftshader|software|llvmpipe|basic render|warp|microsoft basic|none/i);
-  const canary = process.env.VIREUIKIT_PERF_CANARY ? `\ncanary: ${process.env.VIREUIKIT_PERF_CANARY}, which must fail` : '';
-  console.log(`renderer: ${renderer}${canary}${TRACE ? '' : '\nuntraced: no stall can be excused and the task bound is not checked'}`);
+  const canary = process.env.VIREUIKIT_PERF_CANARY ? `\ncanary: ${process.env.VIREUIKIT_PERF_CANARY}, which must fail by its own rule (seed ${SEED})` : '';
+  console.log(`renderer: ${renderer}${canary}${TRACE ? '' : '\nuntraced: no stall can be excused, and the task bound, compiles and traces are not checked'}`);
 });
 
 base.afterAll(() => {
   if (rows.length === 0) return;
   const width = Math.max(...rows.map((r) => r.name.length), 10);
-  const c = (r: Cell) => `${String(r.frames).padStart(4)} ${r.p90.toFixed(1).padStart(5)} ${r.max.toFixed(1).padStart(6)} ${`${r.stalled}/${r.replays}`.padStart(5)}`;
+  const c = (r: Cell) => `${String(r.frames).padStart(4)} ${r.max.toFixed(1).padStart(6)} ${`${r.stalled}/${r.replays}`.padStart(5)}`;
   const idle = (r: Cell) => `${r.max.toFixed(1).padStart(5)} ${`${r.stalled}/${r.replays}`.padStart(5)}`;
   const sum = (pick: (r: Row) => Cell) => `${rows.reduce((a, r) => a + pick(r).stalled, 0)}/${rows.reduce((a, r) => a + pick(r).replays, 0)}`;
   const lines = [
-    `${''.padEnd(width)} | glass on                                  | idle on     | glass off              | idle off    | cold   | ms of a frame, p90/max | longest`,
-    `${'transition'.padEnd(width)} | frames   p90    max stall counted excused | max  stall  | frames   p90    max stall | max  stall  | max    | main      gpu          | main task`,
+    `${''.padEnd(width)} | glass on                           | idle on     | glass off        | idle off    | cold   | ms of a frame, p90/max | longest`,
+    `${'transition'.padEnd(width)} | frames    max stall counted excused | max  stall  | frames    max stall | max  stall  | max    | main      gpu          | main task`,
     ...rows.map(
       (r) =>
         `${r.name.padEnd(width)} | ${c(r.on)} ${String(r.counted).padStart(7)} ${String(r.excused).padStart(7)} | ${idle(r.idleOn)} | ${c(r.off)} | ${idle(r.idleOff)} | ${r.cold.max.toFixed(0).padStart(6)} | ${r.headroom.main} ${r.headroom.gpu}    | ${r.headroom.task.padStart(9)}`,
     ),
     `stalled replays: glass on ${sum((r) => r.on)}, idle on ${sum((r) => r.idleOn)}, glass off ${sum((r) => r.off)}, idle off ${sum((r) => r.idleOff)}; counted ${rows.reduce((a, r) => a + r.counted, 0)}, excused ${rows.reduce((a, r) => a + r.excused, 0)}`,
+    `headroom is printed, not judged; a stall is excused only by a wait in Present with the GPU process quiet (at most ${GPU_QUIET_MS} ms of its own work in the interval and either neighbour)`,
   ];
   console.log(`\n${lines.join('\n')}\n`);
 });
@@ -201,11 +228,14 @@ for (const transition of TRANSITIONS) {
     pageLog = watchPage(page, 400);
     const canary = canaryFor(transition.name);
     if (canary?.kind === 'foreign') await page.addInitScript(foreignCanary, canary.frame);
-    const random = { replay: Math.floor(Math.random() * REPLAYS), frame: 2 + Math.floor(Math.random() * 16) };
+    const random = seeded(SEED);
+    const at = { replay: Math.floor(random() * REPLAYS), frame: 2 + Math.floor(random() * 16) };
+    if (canary?.kind === 'random') console.log(`  random canary: replay ${at.replay + 1}, frame ${at.frame} (seed ${SEED})`);
     const busyFor = (i: number): Busy | undefined => {
-      if (canary?.kind === 'fixed') return { frame: canary.frame, ms: 40 };
-      if (canary?.kind === 'short') return { frame: canary.frame, ms: 20, task: true };
-      if (canary?.kind === 'random' && i === random.replay) return { frame: random.frame, ms: 40 };
+      if (canary?.kind === 'fixed') return { frame: canary.frame, kind: 'block', ms: 40 };
+      if (canary?.kind === 'short') return { frame: canary.frame, kind: 'task', ms: 20 };
+      if (canary?.kind === 'gpu' || canary?.kind === 'compile') return { frame: canary.frame, kind: canary.kind, ms: 0 };
+      if (canary?.kind === 'random' && i === at.replay) return { frame: at.frame, kind: 'block', ms: 40 };
       return undefined;
     };
     const cold = (await replay(page, transition, '1', 'cold')).replay;
@@ -215,13 +245,6 @@ for (const transition of TRANSITIONS) {
     const idleOn: Measured[] = [];
     for (let i = 0; i < REPLAYS; i += 1) {
       const r = await replay(page, transition, '1', 'measured', warm.ms, busyFor(i));
-      on.push(r.replay);
-      idleOn.push(r.idle!);
-    }
-    // A replay the trace did not hold gets one more, for its trace only: nothing is excused by not coming back.
-    const untraced = TRACE ? on.filter((m) => !m.traced).length : 0;
-    for (let k = 0; k < untraced; k += 1) {
-      const r = await replay(page, transition, '1', 'measured', warm.ms);
       on.push(r.replay);
       idleOn.push(r.idle!);
     }
@@ -238,22 +261,39 @@ for (const transition of TRANSITIONS) {
     const counted = stalls.filter((s) => !s.external);
     const excused = stalls.filter((s) => s.external);
     const longTasks = on.flatMap((m, replay) => m.longTasks.map((t) => ({ ...t, replay })));
+    const compiled = on.flatMap((m, replay) => m.compiled.map((c) => ({ ...c, replay })));
+    const untraced = TRACE ? on.flatMap((m, replay) => (m.traced ? [] : [replay + 1])) : [];
     const row: Row = { name: transition.name, cold: cell([cold]), on: cell(on), counted: counted.length, excused: excused.length, off: cell(off), idleOn: cell(idleOn), idleOff: cell(idleOff), headroom: headroom(on) };
     rows.push(row);
     const describe = (s: Stall & { replay?: number }) => `${s.gap.toFixed(1)} ms at frame ${s.index}${s.replay !== undefined ? ` of replay ${s.replay + 1}` : ''} (${s.phase}); ${s.evidence ?? 'no trace'}`;
     const notes = [
-      ...counted.map((s) => `  counted: ${describe(s)}`),
+      ...counted.map((s) => `  counted: ${describe(s)}${TRACE ? `; long animation frame: ${s.loaf}` : ''}`),
       ...excused.map((s) => `  excused: ${describe(s)}`),
       ...longTasks.map((t) => `  main-thread task over a vsync: ${t.ms.toFixed(1)} ms at +${t.at.toFixed(0)} ms of replay ${t.replay + 1}: ${t.what}`),
+      ...compiled.map((c) => `  GPU program compiled in a measured replay: ${c.programs} at frame ${c.index} of replay ${c.replay + 1} (${c.phase})`),
+      ...untraced.map((n) => `  replay ${n} has no trace: the page's mark or the GPU process's thread was not in it`),
       ...[...idleOn, ...idleOff].flatMap((m) => m.stalls.map((s) => `  idle control: ${describe(s)}`)),
       ...off.flatMap((m) => m.stalls.map((s) => `  glass off: ${describe(s)}`)),
     ];
-    console.log(`${transition.name}: glass on ${row.on.stalled}/${row.on.replays} replays stalled, ${counted.length} counted, ${excused.length} excused; p90 ${row.on.p90.toFixed(1)} ms; main ${row.headroom.main.trim()} gpu ${row.headroom.gpu.trim()}; longest main task ${row.headroom.task}${notes.length ? `\n${notes.join('\n')}` : ''}`);
+    const broken = new Set<Rule>();
+    if (counted.length > 0) broken.add('frame');
+    if (longTasks.length > 0) broken.add('task');
+    if (compiled.length > 0) broken.add('compile');
+    if (untraced.length > 0) broken.add('untraced');
+    console.log(`${transition.name}: glass on ${row.on.stalled}/${row.on.replays} replays stalled, ${counted.length} counted, ${excused.length} excused; main ${row.headroom.main.trim()} gpu ${row.headroom.gpu.trim()}; longest main task ${row.headroom.task}${notes.length ? `\n${notes.join('\n')}` : ''}`);
+    console.log(`rules broken: ${[...broken].join(', ') || 'none'}`);
+    if (canary) {
+      const wanted = BREAKS[canary.kind];
+      const verdict = broken.has(wanted) ? 'ok' : 'wrong';
+      console.log(`CANARY ${canary.kind}: must break "${wanted}", broke [${[...broken].join(', ')}]: ${verdict}`);
+      expect.soft(broken.has(wanted), `the ${canary.kind} canary must break the "${wanted}" rule`).toBe(true);
+    }
     const kept = on.flatMap((m) => m.gaps.filter((_, i) => !m.stalls.some((s) => s.index === i && s.external)));
     expect.soft(counted.length, `frames over ${MAX_FRAME} ms with glass on that the trace does not show outside the page`).toBe(0);
     expect.soft(Math.max(0, ...kept), `slowest frame with glass on, less the ones the trace shows outside the page`).toBeLessThanOrEqual(MAX_FRAME);
-    expect.soft(row.on.p90, 'p90 with glass on').toBeLessThanOrEqual(MAX_P90);
     expect.soft(longTasks.map((t) => `${t.ms.toFixed(1)} ms: ${t.what}`), `main-thread tasks over ${VSYNC_MS} ms with glass on`).toEqual([]);
+    expect.soft(compiled.map((c) => `${c.programs} at frame ${c.index} of replay ${c.replay + 1}`), 'GPU programs compiled in a measured replay, which the warm-ups should have compiled').toEqual([]);
+    expect.soft(untraced, 'measured replays with no trace, which nothing can be excused or checked on').toEqual([]);
   });
 }
 
