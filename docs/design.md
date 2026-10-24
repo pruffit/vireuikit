@@ -104,7 +104,8 @@ booting until the next one. It measures the kit with the vireglass installed in 
 Each transition is replayed three times to warm up (the cold first replay is printed, not judged), then three times
 with glass on and once with glass off, each after an idle control: the same recorder over the same page, still, for as
 long, less its first 100 ms, which are the recorder's own start. The frames are timed from the first active one to
-400 ms past the last, so the deferred landing is in the window. Every measured replay is traced (light categories).
+400 ms past the last, so the deferred landing is in the window. Every replay but the cold one is traced (light
+categories); the warm-ups only so that the first measured replay does not pay the trace's own start.
 
 With glass on, a transition fails on:
 
