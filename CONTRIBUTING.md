@@ -39,10 +39,13 @@ serves the lab; set `VIREUIKIT_REFERENCE_DIR` to a local folder of reference fra
 Reference frames are third-party and are never committed.
 
 `npm run check:lab:perf` replays every transition of `tests/lab/transitions.ts` in a headed Chromium and times its
-frames with glass on and off; it prints a table and requires no frame over 33 ms and a p90 of at most 20 ms with glass
-on. It refuses software rendering (SwiftShader and the like), because headless and software timing hid the problem it
-exists for, so it runs on a machine with a GPU and a screen and not in CI. The same list of transitions is counted in
-`check:lab` (`motion-behavior.spec.ts`), which runs anywhere.
+frames with glass on and off, each replay after an idle control of the same page; it prints a table with the headroom
+of a frame and requires no frame over 33 ms that is the transition's own (one that comes back at the same frame, or the
+kit's script in two replays) and a p90 of at most 20 ms with glass on (`docs/design.md`, "The frame gate"). It starts
+its own lab on port 5180 (`VIREUIKIT_LAB_PORT`) with reloading off, so a save during a run does not reach the page it
+times, and it fails if something already listens there. It refuses software rendering (SwiftShader and the like),
+because headless and software timing hid the problem it exists for, so it runs on a machine with a GPU and a screen and
+not in CI. The same list of transitions is counted in `check:lab` (`motion-behavior.spec.ts`), which runs anywhere.
 
 ## Depending on VireGlass
 
