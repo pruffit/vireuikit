@@ -22,3 +22,13 @@ export function deepActive(root: Root): Element | null {
   while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
   return active;
 }
+
+/** Runs `run` when the page is next idle (within 300 ms), or after 200 ms without `requestIdleCallback`; returns its cancel. */
+export function whenIdle(run: () => void): () => void {
+  if (typeof requestIdleCallback === 'function') {
+    const id = requestIdleCallback(run, { timeout: 300 });
+    return () => cancelIdleCallback(id);
+  }
+  const id = window.setTimeout(run, 200);
+  return () => window.clearTimeout(id);
+}

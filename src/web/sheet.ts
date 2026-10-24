@@ -45,7 +45,7 @@ import {
   type SheetLayout,
 } from '../kit/sheet';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
-import { deepActive, dropEmptyStyle, rootsOf } from './dom';
+import { deepActive, dropEmptyStyle, rootsOf, whenIdle } from './dom';
 import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, isEditable, shellOf, watchAdaptiveContext, windowRect } from './environment';
 import { attachControlGlass, ensureGlass, glassLoaded, glassMorph, holdGlass, landGlass, moveGlass, probeRect, type GlassFrame, type GlassSession } from './glass';
 import { createScrollEdge, type ScrollEdge } from './scroll-edge';
@@ -149,7 +149,10 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #surface: HTMLElement | null = null;
     /** The content was measured while the page was idle, and nothing has changed it since. */
     #premeasured = false;
-    #premeasureQueued = false;
+    #cancelIdle: (() => void) | null = null;
+    #cancelVerify: (() => void) | null = null;
+    /** The open used the idle measure, so one more measure when the page is idle after it checks that it was current. */
+    #verify = false;
     #dialog: HTMLDialogElement | null = null;
     #grabber: HTMLElement | null = null;
     #edge: ScrollEdge | null = null;
@@ -300,6 +303,10 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       cancelAnimationFrame(this.#frame);
       cancelAnimationFrame(this.#followFrame);
       this.#frame = this.#followFrame = 0;
+      this.#cancelIdle?.();
+      this.#cancelVerify?.();
+      this.#cancelIdle = this.#cancelVerify = null;
+      this.#verify = this.#premeasured = false;
       this.#dropGlass();
       const surface = this.#surface;
       this.#setCarried(null);
@@ -515,7 +522,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         this.#remeasure();
       });
       markup.observe(this, { childList: true, subtree: true, characterData: true });
-      // A closed surface's content reports no sizes, so a change of its own styles has to say so for the idle measure.
+      // A closed surface reports no sizes: a restyle has to say so for the idle measure.
       const restyled = new MutationObserver((records) => {
         if (this.#out || records.every((r) => r.target === surface || r.target === this.#grabber || this.#edge?.el.contains(r.target as Node))) return;
         this.#premeasured = false;
@@ -524,6 +531,15 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       restyled.observe(surface, { attributes: true, subtree: true, attributeFilter: ['class', 'style', 'hidden'] });
       this.#cleanups.push(() => restyled.disconnect());
       this.#cleanups.push(() => markup.disconnect());
+      // A late font or image resizes the content without any mutation.
+      const fonts = this.ownerDocument.fonts;
+      const stale = () => this.#remeasure();
+      fonts?.addEventListener('loadingdone', stale);
+      surface.addEventListener('load', stale, true);
+      this.#cleanups.push(() => {
+        fonts?.removeEventListener('loadingdone', stale);
+        surface.removeEventListener('load', stale, true);
+      });
 
       if (typeof ResizeObserver !== 'undefined') {
         const resizer = new ResizeObserver((entries) => this.#resized(entries));
@@ -776,8 +792,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       const opened = shown && !this.#contentShown;
       this.#contentShown = shown;
       if (!changed || !shown || opened) return;
-      // While its height moves the sheet resizes its own content on every frame, and the observer then reports the
-      // measuring layout too, so a remeasure here fed the next one: the content's natural size waits for the height to rest.
+      // The observer reports the sheet's own measuring layout too, so remeasuring mid-move feeds itself: wait for rest.
       if (this.#heightMoving()) this.#remeasureHeld = true;
       else this.#remeasure();
     }
@@ -861,14 +876,32 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
 
     /** Measures the content while the page is idle, so the click that opens the surface does not lay it out twice. */
     #premeasureSoon(): void {
-      if (this.#premeasureQueued) return;
-      this.#premeasureQueued = true;
-      const run = () => {
-        this.#premeasureQueued = false;
-        this.#premeasure();
-      };
-      if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 300 });
-      else window.setTimeout(run, 200);
+      if (this.#cancelIdle) return;
+      const surface = this.#surface;
+      this.#cancelIdle = whenIdle(() => {
+        this.#cancelIdle = null;
+        if (surface && this.#surface === surface) this.#premeasure();
+      });
+    }
+
+    #verifyMeasure(): void {
+      if (!this.#verify) return;
+      this.#verify = false;
+      const surface = this.#surface;
+      this.#cancelVerify?.();
+      this.#cancelVerify = whenIdle(() => {
+        this.#cancelVerify = null;
+        const ctx = this.#ctx;
+        const form = this.#form;
+        if (!surface || this.#surface !== surface || !ctx || !form || !this.#out || !this.#open || this.#heightMoving()) return;
+        const was = this.#content;
+        this.#maxContent = null;
+        this.#contentKey = '';
+        const now = this.#contentFor(form, ctx.window);
+        if (Math.abs(now.width - was.width) < 1 && Math.abs(now.height - was.height) < 1) return;
+        this.#place();
+        this.#run();
+      });
     }
 
     #premeasure(): void {
@@ -891,6 +924,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#focused = false;
       this.#source = this.#pickSource();
       if (!this.#premeasured) this.#contentKey = '';
+      this.#verify = this.#premeasured;
       this.#premeasured = false;
       this.#morph = null;
       this.#shown = null;
@@ -1262,6 +1296,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       }
       this.#paint();
       this.#focusIn();
+      this.#verifyMeasure();
     }
 
     #focusIn(): void {

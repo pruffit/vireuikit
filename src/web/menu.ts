@@ -24,7 +24,7 @@ import type { Rect, Size } from '../kit/geometry';
 import { CONTROL_SIZES, menuSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { effectiveInput, viewportSegments, watchPointerInput, watchViewport } from './environment';
-import { deepActive, dropEmptyStyle, rootsOf, type Root } from './dom';
+import { deepActive, dropEmptyStyle, rootsOf, whenIdle, type Root } from './dom';
 import { attachControlGlass, glassMorph, landGlass, moveGlass, type GlassFrame, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
@@ -93,7 +93,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #natural: Size | null = null;
     /** The list was measured while the page was idle, and nothing has changed it since. */
     #premeasured = false;
-    #premeasureQueued = false;
+    #cancelIdle: (() => void) | null = null;
+    #cancelVerify: (() => void) | null = null;
+    /** The open used the idle measure, so one more measure when the page is idle after it checks that it was current. */
+    #verify = false;
     #out = false;
     #viaPointer = false;
     #frame = 0;
@@ -191,6 +194,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       for (const cleanup of this.#cleanups.splice(0)) cleanup();
       cancelAnimationFrame(this.#frame);
       cancelAnimationFrame(this.#placeFrame);
+      this.#cancelIdle?.();
+      this.#cancelVerify?.();
+      this.#cancelIdle = this.#cancelVerify = null;
+      this.#verify = this.#premeasured = false;
       clearTimeout(this.#inertTimer);
       this.#frame = this.#placeFrame = this.#inertTimer = 0;
       this.#dropGlass();
@@ -287,22 +294,19 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const items = new MutationObserver((records) => {
         let changed = false;
         for (const record of records) {
-          if (record.type === 'childList' && record.target === list) {
+          if (record.type === 'childList' || record.type === 'characterData') {
             changed = true;
-            for (const node of record.removedNodes) this.#releaseItem(node);
+            if (record.target === list) for (const node of record.removedNodes) this.#releaseItem(node);
           } else if (record.type === 'attributes') {
             this.#keepFocusOff(record.target as Element);
           }
         }
         if (!changed) return;
         this.#adoptItems();
-        this.#natural = null;
-        this.#premeasured = false;
-        if (this.#out) this.#place();
-        else this.#premeasureSoon();
+        this.#invalidate();
       });
       // Read, never rewritten: the disabled attribute stays the author's.
-      items.observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+      items.observe(list, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['disabled'] });
       this.#cleanups.push(() => items.disconnect());
       this.#listen(trigger, list);
       // A closed list's own styles change its size unseen, so they say so for the idle measure.
@@ -313,6 +317,15 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       });
       restyled.observe(list, { attributes: true, subtree: true, attributeFilter: ['class', 'style', 'hidden'] });
       this.#cleanups.push(() => restyled.disconnect());
+      // A late font or image resizes the list without any mutation.
+      const fonts = this.ownerDocument.fonts;
+      const stale = () => this.#invalidate();
+      fonts?.addEventListener('loadingdone', stale);
+      list.addEventListener('load', stale, true);
+      this.#cleanups.push(() => {
+        fonts?.removeEventListener('loadingdone', stale);
+        list.removeEventListener('load', stale, true);
+      });
       this.#premeasureSoon();
       this.#mode = null;
       this.#refreshMode();
@@ -571,16 +584,38 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
 
     /** Measures the list while the page is idle, so the click that opens it does not lay it out. */
     #premeasureSoon(): void {
-      if (this.#premeasureQueued) return;
-      this.#premeasureQueued = true;
-      const run = () => {
-        this.#premeasureQueued = false;
-        if (this.#out || !this.#list || !this.isConnected) return;
+      if (this.#cancelIdle) return;
+      const list = this.#list;
+      this.#cancelIdle = whenIdle(() => {
+        this.#cancelIdle = null;
+        if (this.#out || !list || this.#list !== list || !this.isConnected) return;
         this.#natural = this.#measure();
         this.#premeasured = true;
-      };
-      if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 300 });
-      else window.setTimeout(run, 200);
+      });
+    }
+
+    /** What the list measured is no longer known to be current. */
+    #invalidate(): void {
+      this.#natural = null;
+      this.#premeasured = false;
+      if (this.#out) this.#place();
+      else this.#premeasureSoon();
+    }
+
+    #verifyMeasure(): void {
+      if (!this.#verify) return;
+      this.#verify = false;
+      const list = this.#list;
+      this.#cancelVerify?.();
+      this.#cancelVerify = whenIdle(() => {
+        this.#cancelVerify = null;
+        if (!list || this.#list !== list || !this.#out || !this.#state.open || this.#frame) return;
+        const now = this.#measure();
+        const was = this.#natural;
+        if (was && Math.abs(now.width - was.width) < 1 && Math.abs(now.height - was.height) < 1) return;
+        this.#natural = now;
+        this.#place();
+      });
     }
 
     #comeOut(): void {
@@ -589,7 +624,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       if (!list.matches(':popover-open')) list.showPopover();
       this.#out = true;
       if (!wasOut && !this.#premeasured) this.#natural = null;
-      if (!wasOut) this.#premeasured = false;
+      if (!wasOut) {
+        this.#verify = this.#premeasured;
+        this.#premeasured = false;
+      }
       this.#place(wasOut);
       if (wasOut) return;
       // Read while the trigger still has its glass, which the probe sees through.
@@ -688,6 +726,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #settle(): void {
       if (this.#state.open) {
         this.#paint();
+        this.#verifyMeasure();
         return;
       }
       const list = this.#list!;
