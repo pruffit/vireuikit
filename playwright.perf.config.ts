@@ -2,8 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 const PORT = process.env.VIREUIKIT_LAB_PORT ?? '5180';
 
-// The frame gate: a headed Chromium with the GPU on. Headless Chromium and software rendering hid the very problem
-// this gate exists for, so nothing here runs without a window. Local only, like the visual set.
+// Headed with the GPU on: headless and software rendering hid the very problem this gate exists for.
 export default defineConfig({
   testDir: 'tests/lab',
   testMatch: 'perf.spec.ts',
@@ -27,8 +26,7 @@ export default defineConfig({
       ],
     },
   },
-  // Its own lab, with reloading off: a dev server that reloads on every save loaded the page mid-replay, and a save
-  // that left the tree broken kept the page from ever booting (docs/design.md, "The frame gate").
+  // Its own lab with reloading off: a save must not reload the page being timed, or leave it unable to boot.
   webServer: {
     command: 'npm run lab',
     url: `http://127.0.0.1:${PORT}`,

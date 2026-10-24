@@ -78,25 +78,32 @@ function glassShim(): Plugin {
   };
 }
 
+// A gate's lab serves the tree as it was when it started: an edit must not reload the page it is timing.
+const STILL = process.env.VIREUIKIT_LAB_STILL === '1';
+
 // A classic script bundle of the web entry, so a page can define the elements synchronously
 // before its markup is parsed, the way a consumer's early script would.
 function earlyBundle(): Plugin {
+  const make = () =>
+    build({
+      entryPoints: [resolve(HERE, '../src/web/index.ts')],
+      bundle: true,
+      format: 'iife',
+      globalName: 'VireWeb',
+      write: false,
+      target: 'es2022',
+      logLevel: 'silent',
+    }).then((out) => out.outputFiles[0]?.text ?? '');
+  let built: Promise<string> | null = null;
   return {
     name: 'vireuikit-early-bundle',
     apply: 'serve',
     configureServer(server) {
+      if (STILL) built = make();
       server.middlewares.use('/__early.js', async (_req, res) => {
-        const out = await build({
-          entryPoints: [resolve(HERE, '../src/web/index.ts')],
-          bundle: true,
-          format: 'iife',
-          globalName: 'VireWeb',
-          write: false,
-          target: 'es2022',
-          logLevel: 'silent',
-        });
+        const text = await (built ?? make());
         res.setHeader('content-type', 'text/javascript');
-        res.end(out.outputFiles[0]?.text ?? '');
+        res.end(text);
       });
     },
   };
@@ -108,12 +115,13 @@ export default defineConfig({
   resolve: {
     alias: { 'vireuikit/web': resolve(HERE, '../src/web/index.ts') },
   },
-  optimizeDeps: { include: ['vireglass', 'vireglass/dom'] },
+  // A dependency found after start needs a reload a still lab cannot send: there nothing is pre-bundled late, so a
+  // module that cannot load as it is fails in the page instead of running on a stale bundle.
+  optimizeDeps: { include: ['vireglass', 'vireglass/dom'], ...(STILL ? { noDiscovery: true } : {}) },
   server: {
     port: Number(process.env.VIREUIKIT_LAB_PORT ?? 5179),
     strictPort: true,
     host: '127.0.0.1',
-    // A gate's lab serves the tree as it was when it started: an edit must not reload the page it is timing.
-    ...(process.env.VIREUIKIT_LAB_STILL === '1' ? { hmr: false, watch: null } : {}),
+    ...(STILL ? { hmr: false, watch: null } : {}),
   },
 });
