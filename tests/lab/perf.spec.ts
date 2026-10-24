@@ -105,7 +105,8 @@ function foreignCanary(frame: number): void {
 
 /** One replay, after an idle control in the same page when `idleMs` is given; traced when measured. */
 async function replay(page: Page, transition: Transition, glass: '1' | '0', role: string, idleMs = 0, busy?: Busy): Promise<{ replay: Measured; idle: Measured | null }> {
-  const trace = TRACE && role === 'measured';
+  // Warm-ups are traced too, not read: the first traced load of a page pays the trace's own start.
+  const trace = TRACE && role !== 'cold';
   let stop: (() => Promise<TraceEvent[]>) | null = null;
   let idle: Recording | null = null;
   const rec = await recordTransition(page, transition, glass, {
