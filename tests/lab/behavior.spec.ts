@@ -231,6 +231,30 @@ test.describe('glass and its absence', () => {
     expect(await log(page)).toEqual(['click:play']);
   });
 
+  test('a control that gets its lens back after carrying a surface builds one filter for it, in the material it shows', async ({ page }) => {
+    await openCase(page, 'view=sandbox&glass=1');
+    await page.locator('#share button').hover();
+    await page.waitForTimeout(600);
+    const lens = () =>
+      page.evaluate(() => {
+        const button = document.querySelector('#share button');
+        return (window.__labGlass ?? []).filter((l) => l.alive && l.el === button).map((l) => JSON.stringify(l.options?.material));
+      });
+    const hovered = await lens();
+    await page.evaluate(() => {
+      const host = document.getElementById('share') as unknown as VireControlElement;
+      host.setCarried(1);
+      window.__lab.resetRenderStats();
+      host.setCarried(null);
+    });
+    await expect.poll(async () => (await lens()).length).toBe(1);
+    await page.waitForTimeout(200);
+    const stats = await page.evaluate(() => window.__lab.renderStats());
+    expect(stats.filterSwaps).toBe(1);
+    expect(stats.fullBakes).toBeLessThanOrEqual(2);
+    expect(await lens()).toEqual(hovered);
+  });
+
   test('removing the element removes its lens and its filter', async ({ page }) => {
     await openCase(page, 'view=sandbox&glass=1');
     const filters = () => page.locator('svg[data-vireglass-filters] filter').count();

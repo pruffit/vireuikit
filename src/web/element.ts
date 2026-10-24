@@ -482,11 +482,11 @@ export function createControlElementClass(
       };
     }
 
-    #pushMaterial(force = false): void {
+    #pushMaterial(): void {
       const glass = this.#glass;
       if (!glass) return;
       const { material, key, pressed } = this.#atomMaterial();
-      if (!force && key === this.#lastMaterialKey) return;
+      if (key === this.#lastMaterialKey) return;
       this.#lastMaterialKey = key;
       glass.setMaterial(material);
       if (this.#glassMode() === 'touch' && this.#forced()) glass.setAppear(pressed);
