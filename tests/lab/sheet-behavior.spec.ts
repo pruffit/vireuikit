@@ -472,7 +472,7 @@ test.describe('the bottom sheet sits by its height', () => {
       await page.mouse.move(g.x, g.y - i * 10);
       await nextFrame(page);
       // A style, not markup: only the content's resize reports it.
-      if (i === 10) await surfaceOf(page, 'sup').evaluate((el) => (el.querySelector('h2')!.style.paddingBottom = '40px'));
+      if (i === 10) await surfaceOf(page, 'sup').evaluate((el) => (el.querySelector('h2')!.style.minHeight = '80px'));
     }
     const dragged = await measures();
     await page.mouse.up();
@@ -481,11 +481,11 @@ test.describe('the bottom sheet sits by its height', () => {
     await expect.poll(measures).toBeGreaterThan(dragged);
   });
 
-  for (const [what, padding] of [['grows', '80px'], ['shrinks', '0px']] as const) {
+  for (const [what, tall] of [['grows', '120px'], ['shrinks', '0px']] as const) {
     test(`content that ${what} while the sheet is dragged is what the released sheet fits`, async ({ page }) => {
       await sandbox(page, 'rm=1', { w: 390, h: 1000 });
       const title = () => surfaceOf(page, 'pop').locator('h2');
-      if (what === 'shrinks') await page.evaluate(() => (document.querySelector<HTMLElement>('#pop-surface h2')!.style.paddingBottom = '80px'));
+      if (what === 'shrinks') await page.evaluate(() => (document.querySelector<HTMLElement>('#pop-surface h2')!.style.minHeight = '120px'));
       await page.locator('#pop-trigger').click();
       await resting(page, 'pop');
       const before = await sheetHeight(page, 'pop');
@@ -495,7 +495,7 @@ test.describe('the bottom sheet sits by its height', () => {
       for (const dy of [-8, -16, -24]) await page.mouse.move(g.x, g.y + dy);
       await expect(page.locator('#pop')).toHaveAttribute('data-height', 'dragging');
       // A style, not markup: only the content's resize reports it.
-      await title().evaluate((el, p) => ((el as HTMLElement).style.paddingBottom = p), padding);
+      await title().evaluate((el, h) => ((el as HTMLElement).style.minHeight = h), tall);
       await nextFrame(page);
       await page.mouse.up();
       await resting(page, 'pop');
