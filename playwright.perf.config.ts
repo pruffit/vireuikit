@@ -23,12 +23,13 @@ export default defineConfig({
         '--disable-renderer-backgrounding',
         '--disable-backgrounding-occluded-windows',
         '--disable-background-timer-throttling',
+        '--enable-gpu-service-tracing',
       ],
     },
   },
   // Its own lab with reloading off: a save must not reload the page being timed, or leave it unable to boot.
   webServer: {
-    command: 'npm run lab',
+    command: `node scripts/check-port-free.mjs ${PORT} && npm run lab`,
     url: `http://127.0.0.1:${PORT}`,
     env: { ...(process.env as Record<string, string>), VIREUIKIT_LAB_PORT: PORT, VIREUIKIT_LAB_STILL: '1' },
     reuseExistingServer: false,
