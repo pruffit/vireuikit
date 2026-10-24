@@ -147,6 +147,9 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     static observedAttributes = ['glass', 'kind', 'detents', 'detent', 'persistent', 'grabber-label', 'detent-labels', 'scroll-edge', FORCE_ATTRIBUTE];
 
     #surface: HTMLElement | null = null;
+    /** The content was measured while the page was idle, and nothing has changed it since. */
+    #premeasured = false;
+    #premeasureQueued = false;
     #dialog: HTMLDialogElement | null = null;
     #grabber: HTMLElement | null = null;
     #edge: ScrollEdge | null = null;
@@ -428,7 +431,10 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#cleanups.push(
         watchAdaptiveContext(this.#shell, (ctx) => {
           this.#ctx = ctx;
-          if (!this.#out) return;
+          if (!this.#out) {
+            this.#premeasureSoon();
+            return;
+          }
           this.#readEnvironment();
           this.#place();
           this.#run();
@@ -509,6 +515,14 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         this.#remeasure();
       });
       markup.observe(this, { childList: true, subtree: true, characterData: true });
+      // A closed surface's content reports no sizes, so a change of its own styles has to say so for the idle measure.
+      const restyled = new MutationObserver((records) => {
+        if (this.#out || records.every((r) => r.target === surface || r.target === this.#grabber || this.#edge?.el.contains(r.target as Node))) return;
+        this.#premeasured = false;
+        this.#premeasureSoon();
+      });
+      restyled.observe(surface, { attributes: true, subtree: true, attributeFilter: ['class', 'style', 'hidden'] });
+      this.#cleanups.push(() => restyled.disconnect());
       this.#cleanups.push(() => markup.disconnect());
 
       if (typeof ResizeObserver !== 'undefined') {
@@ -724,7 +738,11 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #remeasure(): void {
       this.#maxContent = null;
       this.#contentKey = '';
-      if (!this.#out) return;
+      this.#premeasured = false;
+      if (!this.#out) {
+        this.#premeasureSoon();
+        return;
+      }
       this.#place();
       this.#run();
     }
@@ -808,7 +826,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       }
       this.#syncTriggers();
       this.#publishInset();
-      // The lens takes its first shape in the first frame: here it cost the click an interim map the frame redraws anyway.
+      // The lens, the ink and the edge take their first state in the first frame, which paints again before it is drawn.
       this.#run(!coming);
     }
 
@@ -841,11 +859,39 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#run();
     }
 
+    /** Measures the content while the page is idle, so the click that opens the surface does not lay it out twice. */
+    #premeasureSoon(): void {
+      if (this.#premeasureQueued) return;
+      this.#premeasureQueued = true;
+      const run = () => {
+        this.#premeasureQueued = false;
+        this.#premeasure();
+      };
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 300 });
+      else window.setTimeout(run, 200);
+    }
+
+    #premeasure(): void {
+      const ctx = this.#ctx;
+      if (this.#out || !ctx || !this.#surface || !this.#shell || !this.isConnected) return;
+      const keep = { source: this.#source, local: this.#sourceLocal };
+      const win = windowRect(this.#shell);
+      this.#source = this.#pickSource();
+      const client = this.#sourceClient();
+      this.#sourceLocal = client ? { ...client, x: client.x - win.x, y: client.y - win.y } : null;
+      this.#contentKey = '';
+      this.#contentFor(presentationForm(this.#kind(), ctx, this.#sourceLocal ?? undefined), ctx.window);
+      this.#premeasured = true;
+      this.#source = keep.source;
+      this.#sourceLocal = keep.local;
+    }
+
     #comeOut(): void {
       this.#out = true;
       this.#focused = false;
       this.#source = this.#pickSource();
-      this.#contentKey = '';
+      if (!this.#premeasured) this.#contentKey = '';
+      this.#premeasured = false;
       this.#morph = null;
       this.#shown = null;
       this.#form = null;
@@ -922,6 +968,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#setCarried(null);
       this.#anchorEl = null;
       this.#syncTriggers();
+      this.#premeasureSoon();
     }
 
     #syncTriggers(): void {
@@ -1145,7 +1192,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       return this.#presentation?.instantSprings ?? false;
     }
 
-    #run(glass = true): void {
+    #run(full = true): void {
       if (!this.#out || this.#forced()) return;
       if (this.#instant()) {
         this.#step(0, true);
@@ -1153,7 +1200,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         this.#afterStep();
         return;
       }
-      this.#paint(glass);
+      this.#paint(full);
       if (this.#frame) return;
       this.#lastFrame = 0;
       this.#frame = requestAnimationFrame((t) => this.#tick(t));
@@ -1295,7 +1342,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       };
     }
 
-    #paint(glass = true): void {
+    #paint(full = true): void {
       const surface = this.#surface;
       if (!surface || !this.#out) return;
       const c = this.#compose();
@@ -1319,7 +1366,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       s.setProperty('--vk-content-w', px(Math.max(0, (this.#layout?.box.width ?? box.width) - 2 * SHEET_SIZES.content.pad)));
       s.setProperty('--vk-ink-in', (Math.round(c.ink * 1000) / 1000).toFixed(3));
       s.setProperty('--vk-opaque', (this.#opaque ? 1 : c.opacity).toFixed(3));
-      this.#syncInk(this.#opaque ? 1 : c.opacity);
+      if (full) this.#syncInk(this.#opaque ? 1 : c.opacity);
       s.setProperty('--vk-scrim', (c.scrim * SHEET_SIZES.scrimAlpha).toFixed(3));
       const body = menuBody(VIREGLASS_CONTROL_MATERIAL, c.activity, false);
       s.setProperty('--vk-body-alpha', body.alpha.toFixed(3));
@@ -1334,7 +1381,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       s.setProperty('--vk-pad-t', px(this.#grabber && !this.#grabber.hidden ? SHEET_SIZES.content.handle : SHEET_SIZES.content.pad));
       this.#syncTouch();
       this.#setCarried(this.#source || this.#anchorEl ? c.carry : null);
-      if (glass) this.#pushGlass(box, c.morph, c.activity, !this.#forced() && (c.phase !== 'open' || this.#drag.active || height !== null));
+      if (full) this.#pushGlass(box, c.morph, c.activity, !this.#forced() && (c.phase !== 'open' || this.#drag.active || height !== null));
     }
 
     #pushGlass(box: MorphBox, morph: VireGlassMorph | undefined, activity: number, moving: boolean): void {
