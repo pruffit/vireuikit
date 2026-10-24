@@ -94,7 +94,7 @@ ${MENU}>[data-vk-halo]{display:none;position:fixed;left:var(--vk-halo-x,0);top:v
 ${MENU}[data-joined]>[data-vk-halo]{display:block}
 ${MENU}>[data-vk-halo]>i{display:block;width:100%;height:100%;background:#fff;clip-path:var(--vk-halo-clip,none)}
 ${MENU}[data-phase=moving]>[popover]{background-image:linear-gradient(180deg,color-mix(in srgb,var(--vireglass-tint-color,#888) calc(var(--vk-lit)*100%),transparent),transparent 75%),linear-gradient(0deg,color-mix(in srgb,#fff calc(var(--vk-lit)*100%),transparent),transparent 60%)!important}
-${MENU}[data-measure]>[popover]{width:max-content!important;height:auto!important;left:0!important;top:0!important;padding:var(--vk-menu-pad)!important;visibility:hidden}
+${MENU}[data-measure]>[popover]{display:flex!important;flex-direction:column!important;align-items:flex-start!important;width:max-content!important;height:auto!important;left:0!important;top:0!important;padding:var(--vk-menu-pad)!important;visibility:hidden}
 ${MENU}[data-measure]>[popover]>*{width:auto!important;transform:none!important}
 
 ${MENU}[data-surface=glass]>[popover]{color:var(--vireglass-ink-color,inherit);

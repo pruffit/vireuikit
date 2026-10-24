@@ -91,6 +91,9 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #anchor: GrowthPoint | null = null;
     #region: Rect | null = null;
     #natural: Size | null = null;
+    /** The list was measured while the page was idle, and nothing has changed it since. */
+    #premeasured = false;
+    #premeasureQueued = false;
     #out = false;
     #viaPointer = false;
     #frame = 0;
@@ -293,15 +296,24 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         }
         if (!changed) return;
         this.#adoptItems();
-        if (this.#out) {
-          this.#natural = null;
-          this.#place();
-        }
+        this.#natural = null;
+        this.#premeasured = false;
+        if (this.#out) this.#place();
+        else this.#premeasureSoon();
       });
       // Read, never rewritten: the disabled attribute stays the author's.
       items.observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
       this.#cleanups.push(() => items.disconnect());
       this.#listen(trigger, list);
+      // A closed list's own styles change its size unseen, so they say so for the idle measure.
+      const restyled = new MutationObserver(() => {
+        if (this.#out) return;
+        this.#premeasured = false;
+        this.#premeasureSoon();
+      });
+      restyled.observe(list, { attributes: true, subtree: true, attributeFilter: ['class', 'style', 'hidden'] });
+      this.#cleanups.push(() => restyled.disconnect());
+      this.#premeasureSoon();
       this.#mode = null;
       this.#refreshMode();
       if (this.#forced()) this.#applyForced();
@@ -557,12 +569,27 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#run();
     }
 
+    /** Measures the list while the page is idle, so the click that opens it does not lay it out. */
+    #premeasureSoon(): void {
+      if (this.#premeasureQueued) return;
+      this.#premeasureQueued = true;
+      const run = () => {
+        this.#premeasureQueued = false;
+        if (this.#out || !this.#list || !this.isConnected) return;
+        this.#natural = this.#measure();
+        this.#premeasured = true;
+      };
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 300 });
+      else window.setTimeout(run, 200);
+    }
+
     #comeOut(): void {
       const list = this.#list!;
       const wasOut = this.#out;
       if (!list.matches(':popover-open')) list.showPopover();
       this.#out = true;
-      if (!wasOut) this.#natural = null;
+      if (!wasOut && !this.#premeasured) this.#natural = null;
+      if (!wasOut) this.#premeasured = false;
       this.#place(wasOut);
       if (wasOut) return;
       // Read while the trigger still has its glass, which the probe sees through.
@@ -682,6 +709,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#glass?.setSample(this.#sample);
       this.#liveCarrier()?.setCarried?.(null);
       this.#anchorEl = null;
+      this.#premeasureSoon();
     }
 
     /** The light that bleeds past a drop's edge: a blurred copy of its outline under the surface, which the surface's own clip path cannot draw. */
@@ -910,10 +938,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.toggleAttribute('data-frost', next.frost);
       this.setAttribute('data-glass', next.glass ? 'on' : 'off');
       if (changed) this.#reattachGlass(mode);
-      if (this.#out) {
-        this.#natural = null;
-        this.#place();
-      }
+      this.#natural = null;
+      this.#premeasured = false;
+      if (this.#out) this.#place();
+      else this.#premeasureSoon();
     }
 
     #applySize(): void {
