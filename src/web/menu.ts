@@ -563,10 +563,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       if (!list.matches(':popover-open')) list.showPopover();
       this.#out = true;
       if (!wasOut) this.#natural = null;
-      this.#place();
+      this.#place(wasOut);
       if (wasOut) return;
       // Read while the trigger still has its glass, which the probe sees through.
-      this.#holdSample();
+      this.#holdSample(false);
       this.#liveCarrier()?.setCarried?.(1);
     }
 
@@ -591,7 +591,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       return natural;
     }
 
-    #place(): void {
+    #place(paint = true): void {
       const list = this.#list!;
       const spec = menuSize(this.#size());
       this.#natural ??= this.#measure();
@@ -607,10 +607,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#anchor = placement.anchor;
       list.style.setProperty('--vk-content-w', `${placement.rect.width - 2 * spec.padding}px`);
       list.toggleAttribute('data-scroll', placement.rect.height < natural.height);
-      this.#paint();
+      if (paint) this.#paint();
     }
 
-    #holdSample(): void {
+    #holdSample(paint = true): void {
       const glass = this.#glass;
       if (!glass || !this.#to) return;
       let sample = this.#sample;
@@ -620,7 +620,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       }
       this.#held = sample;
       glass.setSample(sample);
-      this.#paint();
+      if (paint) this.#paint();
     }
 
     #setBox(box: RoundedRect): void {
@@ -832,7 +832,8 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         const next: GlassFrame = {};
         if (key.geometry !== last.geometry) next.geometry = geometry;
         if (key.material !== last.material) next.material = menuMaterial(VIREGLASS_CONTROL_MATERIAL, step, round(capsule * MATERIAL_STEPS) / MATERIAL_STEPS);
-        if (key.morph !== last.morph) next.morph = lens;
+        // A morph never sent needs no null to take it away; sent, it costs the lens an interim map.
+        if (key.morph !== last.morph && !(lens === null && last.morph === '')) next.morph = lens;
         this.#lastLens = key;
         glass.frame(next);
       });
