@@ -8,10 +8,10 @@ export type TraceEvent = {
   dur?: number;
   pid: number;
   tid: number;
-  args?: { name?: string; data?: { startTime?: number } };
+  args?: { name?: string; data?: { startTime?: number; functionName?: string; url?: string; type?: string } };
 };
 
-// Light on purpose: the gate traces every measured replay, and toplevel, v8 and cc would load the threads it times.
+// Light on purpose: every measured replay is traced, and heavier categories load the threads being timed.
 const CATEGORIES = ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame', 'gpu', 'blink.user_timing'];
 
 /** Starts a trace of the whole browser, the GPU process included; the returned function ends it and hands back its events. */
@@ -35,54 +35,23 @@ export async function startTrace(page: Page): Promise<() => Promise<TraceEvent[]
 }
 
 /**
- * Busy time over one frame interval, in ms: the page's main and compositor threads, the display compositor (`viz`) and
- * the GPU process's main thread (`gpu`, which also replays the page's raster), less the time it sat in `Present`
- * waiting for the OS compositor (`present`). `compiles` counts GPU programs compiled in the interval.
+ * Busy ms over one frame interval: the page's main thread, the GPU process's main thread less its wait in `Present`
+ * (`gpu`), that wait (`present`), and the GPU programs compiled in a GPU-process task that overlaps it.
  */
-export type FrameCost = { main: number; compositor: number; viz: number; gpu: number; present: number; compiles: number };
+export type FrameCost = { main: number; gpu: number; present: number; compiles: number };
 
-export type Slice = { thread: string; name: string; ms: number };
+/** A renderer main-thread task longer than a vsync, with what ran in it. */
+export type LongTask = { at: number; ms: number; what: string };
 
-export type StallCause = 'main thread' | 'gpu process' | 'shader compile' | 'presentation' | 'nowhere visible';
+/** The trace's view of a recording: each interval's cost, the evidence for each stalled one, and the long tasks. */
+export type TraceReading = { costs: FrameCost[]; stalls: Map<number, { evidence: string; external: boolean }>; longTasks: LongTask[] };
 
-/** What the trace holds for one interval over the stall threshold. */
-export type StallTrace = FrameCost & {
-  index: number;
-  gap: number;
-  /** Begin-frames the page's compositor got inside the interval that ran no animation frame. */
-  beginFrames: number;
-  /** The longest work inside the interval on the four threads. */
-  longest: Slice[];
-  where: StallCause;
-};
-
-type Threads = { main: string; compositor: string; viz: string; gpu: string };
-
-const key = (pid: number, tid: number) => `${pid}:${tid}`;
-
-function threads(events: TraceEvent[], mark: TraceEvent): Threads | null {
-  const names = new Map<string, string>();
-  const procs = new Map<number, string>();
-  for (const e of events) {
-    if (e.ph !== 'M') continue;
-    if (e.name === 'thread_name') names.set(key(e.pid, e.tid), String(e.args?.name));
-    if (e.name === 'process_name') procs.set(e.pid, String(e.args?.name));
-  }
-  const find = (pid: number | undefined, name: string) => [...names].find(([k, n]) => n === name && k.startsWith(`${pid}:`))?.[0];
-  const gpuPid = [...procs].find(([, n]) => n === 'GPU Process')?.[0];
-  const compositor = find(mark.pid, 'Compositor');
-  const gpu = find(gpuPid, 'CrGpuMain');
-  const viz = find(gpuPid, 'VizCompositorThread');
-  if (!compositor || !gpu || !viz) return null;
-  return { main: key(mark.pid, mark.tid), compositor, viz, gpu };
-}
-
-const IGNORED = new Set(['RunTask', 'ThreadControllerImpl::RunTask', 'Scheduler::RunTask', 'Graphics.Pipeline', 'LatencyInfo.Flow']);
-const PRESENT = 'DXGISwapChainImageBacking::Present';
-/** Most of a frame: a thread busy this long inside a missed interval is where the frame went. */
-const MOST_OF_A_FRAME = 12;
+export const VSYNC_MS = 16.7;
 
 type Span = [number, number];
+
+const key = (pid: number, tid: number) => `${pid}:${tid}`;
+const spanOf = (e: TraceEvent): Span => [e.ts, e.ts + (e.dur ?? 0)];
 
 const overlap = (spans: Span[], a: number, b: number) => {
   let sum = 0;
@@ -90,64 +59,89 @@ const overlap = (spans: Span[], a: number, b: number) => {
   return sum / 1000;
 };
 
-/** The trace's view of a recording: the cost of every frame interval of the window, and the detail of every stalled one. */
-export function traceFrames(
-  events: TraceEvent[],
-  rec: { t: number[]; sync: number },
-  window: { from: number; to: number },
-  stall = 33,
-): { costs: FrameCost[]; stalls: StallTrace[] } | null {
+/** The length of the union of the spans inside [a, b]. */
+function union(spans: Span[], a: number, b: number): number {
+  const clipped = spans.map(([s, e]): Span => [Math.max(s, a), Math.min(e, b)]).filter(([s, e]) => e > s).sort((x, y) => x[0] - y[0]);
+  let sum = 0;
+  let end = -Infinity;
+  for (const [s, e] of clipped) {
+    if (e <= end) continue;
+    sum += e - Math.max(s, end);
+    end = e;
+  }
+  return sum / 1000;
+}
+
+function gpuThread(events: TraceEvent[]): string | null {
+  let gpuPid: number | undefined;
+  const names = new Map<string, string>();
+  for (const e of events) {
+    if (e.ph !== 'M') continue;
+    if (e.name === 'thread_name') names.set(key(e.pid, e.tid), String(e.args?.name));
+    if (e.name === 'process_name' && e.args?.name === 'GPU Process') gpuPid = e.pid;
+  }
+  return [...names].find(([k, n]) => n === 'CrGpuMain' && k.startsWith(`${gpuPid}:`))?.[0] ?? null;
+}
+
+function describeTask(events: TraceEvent[], task: TraceEvent): string {
+  const end = task.ts + (task.dur ?? 0);
+  const label = (e: TraceEvent) => {
+    const d = e.args?.data;
+    if (e.name === 'FunctionCall') return `${d?.functionName || 'script'} (${(d?.url ?? '').split('/').pop() || 'inline'})`;
+    if (e.name === 'EventDispatch') return `${d?.type ?? 'event'} handler`;
+    return e.name;
+  };
+  const inner = events.filter(
+    (e) => e.ph === 'X' && e.pid === task.pid && e.tid === task.tid && e.ts >= task.ts && e.ts < end && (e.dur ?? 0) >= 1000 && /FunctionCall|EventDispatch|TimerFire|FireAnimationFrame|GC|Layout|UpdateLayoutTree|Paint/.test(e.name),
+  );
+  return [...new Set(inner.sort((x, y) => (y.dur ?? 0) - (x.dur ?? 0)).map((e) => `${label(e)} ${((e.dur ?? 0) / 1000).toFixed(1)} ms`))].slice(0, 4).join(', ') || 'no script';
+}
+
+/** Reads a recording off the trace of its replay; null when the trace does not hold it. */
+export function traceFrames(events: TraceEvent[], rec: { t: number[]; sync: number }, window: { from: number; to: number }, stall: number): TraceReading | null {
   const mark = events.find((e) => e.name === 'vk-rec' && e.cat.includes('blink.user_timing') && Math.abs(Number(e.args?.data?.startTime) - rec.sync) < 0.01);
-  if (!mark) return null;
-  const th = threads(events, mark);
-  if (!th) return null;
+  const gpu = gpuThread(events);
+  if (!mark || !gpu) return null;
+  const main = key(mark.pid, mark.tid);
   const offset = mark.ts - rec.sync * 1000;
   const at = (t: number) => t * 1000 + offset;
-  const label = new Map<string, string>([[th.main, 'main'], [th.compositor, 'compositor'], [th.viz, 'viz'], [th.gpu, 'gpu']]);
-  const tasks = new Map<string, Span[]>([...label.keys()].map((k) => [k, []]));
-  const slices: (TraceEvent & { thread: string })[] = [];
+  const mainTasks: TraceEvent[] = [];
+  const gpuTasks: TraceEvent[] = [];
   const presents: Span[] = [];
-  const compiles: number[] = [];
-  const beginFrames: number[] = [];
+  const stores: number[] = [];
   for (const e of events) {
     const k = key(e.pid, e.tid);
-    const thread = label.get(k);
-    if (!thread) continue;
-    if (e.ph === 'X' && e.name === 'RunTask') tasks.get(k)!.push([e.ts, e.ts + (e.dur ?? 0)]);
-    else if (e.ph === 'X' && !IGNORED.has(e.name) && (e.dur ?? 0) > 500) slices.push({ ...e, thread });
-    if (e.name === PRESENT && k === th.gpu) presents.push([e.ts, e.ts + (e.dur ?? 0)]);
-    if (e.name === 'GrShaderCache::store') compiles.push(e.ts);
-    if (e.ph === 'I' && e.name === 'BeginFrame' && k === th.compositor) beginFrames.push(e.ts);
+    if (e.ph === 'X' && e.name === 'RunTask' && k === main) mainTasks.push(e);
+    else if (e.ph === 'X' && e.name === 'RunTask' && k === gpu) gpuTasks.push(e);
+    else if (e.name === 'DXGISwapChainImageBacking::Present' && k === gpu) presents.push(spanOf(e));
+    else if (e.name === 'GrShaderCache::store') stores.push(e.ts);
   }
-  const cost = (a: number, b: number): FrameCost => {
-    const present = overlap(presents, a, b);
-    return {
-      main: overlap(tasks.get(th.main)!, a, b),
-      compositor: overlap(tasks.get(th.compositor)!, a, b),
-      viz: overlap(tasks.get(th.viz)!, a, b),
-      gpu: overlap(tasks.get(th.gpu)!, a, b) - present,
-      present,
-      compiles: compiles.filter((ts) => ts >= a && ts < b).length,
-    };
-  };
+  const holds = (e: TraceEvent, ts: number) => ts >= e.ts && ts <= e.ts + (e.dur ?? 0);
+  const compiling = gpuTasks.filter((e) => stores.some((s) => holds(e, s)));
   const costs: FrameCost[] = [];
-  const stalls: StallTrace[] = [];
+  const stalls = new Map<number, { evidence: string; external: boolean }>();
   for (let i = window.from; i <= window.to; i += 1) {
-    const a = at(rec.t[i - 1]!);
-    const b = at(rec.t[i]!);
-    const c = cost(a, b);
-    costs.push(c);
+    const [a, b] = [at(rec.t[i - 1]!), at(rec.t[i]!)];
+    const tasks = compiling.filter((e) => e.ts < b && e.ts + (e.dur ?? 0) > a);
+    const present = overlap(presents, a, b);
+    const cost: FrameCost = {
+      main: overlap(mainTasks.map(spanOf), a, b),
+      gpu: overlap(gpuTasks.map(spanOf), a, b) - present,
+      present,
+      compiles: stores.filter((s) => tasks.some((e) => holds(e, s))).length,
+    };
+    costs.push(cost);
     const gap = rec.t[i]! - rec.t[i - 1]!;
     if (gap <= stall) continue;
-    const longest = slices
-      .map((e) => ({ thread: e.thread, name: e.name, ms: Math.max(0, Math.min(e.ts + e.dur!, b) - Math.max(e.ts, a)) / 1000 }))
-      .filter((s) => s.ms > 0.5)
-      .sort((x, y) => y.ms - x.ms)
-      .slice(0, 6);
-    const busiest = Math.max(c.main, c.gpu, c.viz);
-    const where: StallCause =
-      c.compiles > 0 ? 'shader compile' : busiest >= MOST_OF_A_FRAME ? (busiest === c.main ? 'main thread' : 'gpu process') : c.present >= MOST_OF_A_FRAME ? 'presentation' : 'nowhere visible';
-    stalls.push({ index: i - window.from, gap, ...c, beginFrames: beginFrames.filter((ts) => ts > a + 2000 && ts < b - 2000).length, longest, where });
+    const outside = union([...presents, ...tasks.map(spanOf)], a, b);
+    // External only when the page's thread had time to spare and the missing time is spent outside the page.
+    const external = cost.main < VSYNC_MS && outside >= gap - VSYNC_MS - 1;
+    const evidence = `main thread ${cost.main.toFixed(1)} ms; GPU process ${outside.toFixed(1)} ms in Present or compiling (${cost.compiles} programs), ${cost.gpu.toFixed(1)} ms working`;
+    stalls.set(i - window.from, { evidence, external });
   }
-  return { costs, stalls };
+  const [from, to] = [at(rec.t[window.from - 1]!), at(rec.t[window.to]!)];
+  const longTasks = mainTasks
+    .filter((e) => (e.dur ?? 0) > VSYNC_MS * 1000 && e.ts < to && e.ts + (e.dur ?? 0) > from)
+    .map((e) => ({ at: (e.ts - from) / 1000, ms: (e.dur ?? 0) / 1000, what: describeTask(events, e) }));
+  return { costs, stalls, longTasks };
 }

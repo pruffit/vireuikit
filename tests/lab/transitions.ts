@@ -266,8 +266,11 @@ export type Recording = {
 /** In-page: a recorder's state, kept on `window.__rec`. */
 type PageRecorder = { t: number[]; active: boolean[]; stats: Stats[]; loaf: Loaf[]; sync: number; stop: boolean };
 
-/** Starts the per-frame recorder in the page. `busy` blocks the main thread for that many ms on one frame: the gate's canary. */
-const startRecorder = (page: Page, active: string, busy?: { frame: number; ms: number }) =>
+/** A canary: block the main thread for `ms` on that frame after the first active one, in the frame or in a task of its own. */
+export type Busy = { frame: number; ms: number; task?: boolean };
+
+/** Starts the per-frame recorder in the page. */
+const startRecorder = (page: Page, active: string, busy?: Busy) =>
   page.evaluate(
     ([expr, busy]) => {
       const isActive = new Function(`return Boolean(${expr})`) as () => boolean;
@@ -297,8 +300,12 @@ const startRecorder = (page: Page, active: string, busy?: { frame: number; ms: n
         rec.stats.push(window.__lab.renderStats());
         if (on && since < 0) since = rec.t.length - 1;
         if (busy && since >= 0 && rec.t.length - 1 - since === busy.frame) {
-          const end = performance.now() + busy.ms;
-          while (performance.now() < end);
+          const block = () => {
+            const end = performance.now() + busy.ms;
+            while (performance.now() < end);
+          };
+          if (busy.task) setTimeout(block, 0);
+          else block();
         }
         if (!rec.stop) requestAnimationFrame(loop);
       };
@@ -341,7 +348,7 @@ export async function recordTransition(
   page: Page,
   transition: Transition,
   glass: '1' | '0',
-  options: { query?: string; afterOpen?: (page: Page) => Promise<void>; busy?: { frame: number; ms: number } } = {},
+  options: { query?: string; afterOpen?: (page: Page) => Promise<void>; busy?: Busy } = {},
 ): Promise<Recording> {
   await page.setViewportSize(VIEW);
   await openCase(page, `${transition.query}&glass=${glass}${options.query ? `&${options.query}` : ''}`);
@@ -371,22 +378,8 @@ export async function recordTransition(
   return { ...(await takeRecorder(page, transition.surfaces)), created };
 }
 
-export type FrameReport = { frames: number; p90: number; max: number; over: number };
-
 /** How long after the last active frame the deferred landing is timed: it starts 120 ms later and its bakes are 50 ms apart. */
 export const LANDING_WINDOW_MS = 400;
-
-/** The intervals of the frames from the one that began the transition to LANDING_WINDOW_MS past the last active one, which is where the landing's bakes fall. */
-export function frameReport(rec: Recording): FrameReport {
-  const first = rec.active.indexOf(true);
-  const last = rec.active.lastIndexOf(true);
-  const until = rec.t[last]! + LANDING_WINDOW_MS;
-  const gaps: number[] = [];
-  for (let i = Math.max(first, 1); i < rec.t.length && rec.t[i - 1]! <= until; i += 1) gaps.push(rec.t[i]! - rec.t[i - 1]!);
-  const sorted = [...gaps].sort((a, b) => a - b);
-  const p90 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.9))] ?? 0;
-  return { frames: gaps.length, p90, max: sorted.at(-1) ?? 0, over: gaps.filter((g) => g > 33).length };
-}
 
 /** What the core did while the transition ran, and the total once it had landed. */
 export function workReport(rec: Recording): { during: Stats; landed: Stats } {
