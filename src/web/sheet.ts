@@ -1576,7 +1576,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         // Nothing was captured.
       }
       if (e.type !== 'pointerup') {
-        this.#landFresh(cancelSheetDrag(this.#drag, this.#heights()).target);
+        this.#landFresh(cancelSheetDrag(this.#drag, this.#heights()).index);
         return;
       }
       if (press.grab && Math.abs(e.clientY - press.y) < DRAG_SLOP) {
@@ -1588,20 +1588,19 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       if ((e.timeStamp - this.#lastMove) / 1000 > SHEET_SIZES.drag.stale) this.#drag.velocity = 0;
       const result = releaseSheetDrag(this.#drag, this.#heights(), !this.#persistent());
       if ('close' in result) this.#close();
-      else this.#landFresh(result.target);
+      else this.#landFresh(result.index);
     }
 
     /** The detent the gesture chose among the ones it was made against, at its height for the content as it is now. */
     #landFresh(chosen: number): void {
-      const name = this.#detents.find((d) => d.height === chosen)?.name;
+      const name = this.#detents[chosen]?.name;
       this.#flushRemeasure();
-      const fresh = name ? this.#detents.find((d) => d.name === name) : undefined;
+      const fresh = name ? this.#detents.find((d) => d.names.includes(name)) : undefined;
       if (fresh) this.#drag.height.target = fresh.height;
-      this.#land(fresh?.height ?? chosen);
+      this.#land(fresh);
     }
 
-    #land(target: number): void {
-      const picked = this.#detents.find((d) => d.height === target);
+    #land(picked: NamedSheetDetent | undefined): void {
       if (picked && picked.name !== this.#detent) {
         this.#detent = picked.name;
         this.#reflect(picked.name);

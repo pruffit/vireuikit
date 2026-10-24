@@ -505,6 +505,32 @@ test.describe('the bottom sheet sits by its height', () => {
     });
   }
 
+  test('a release that chose a detent lands on it after the content shrank until two detents became one', async ({ page }) => {
+    await sandbox(page, 'rm=1&detents=peek%20medium');
+    await page.locator('#sup-trigger').click();
+    await resting(page, 'sup');
+    const g = await grabberAt(page, 'sup');
+    await page.mouse.move(g.x, g.y);
+    await page.mouse.down();
+    for (const dy of [-8, -16, -100, -200, -280]) await page.mouse.move(g.x, g.y + dy);
+    await expect(page.locator('#sup')).toHaveAttribute('data-height', 'dragging');
+    expect(await sheetHeight(page, 'sup')).toBeGreaterThan(600);
+    // Peek fits the content, which now comes within 24 dp of medium: the two detents are one (named peek) when the drag is released.
+    await surfaceOf(page, 'sup').evaluate((el) => {
+      el.querySelector<HTMLElement>('ul')!.style.display = 'none';
+      const h2 = el.querySelector<HTMLElement>('h2')!;
+      const top = el.getBoundingClientRect().top - el.scrollTop;
+      const kids = [...el.children].filter((c) => !c.hasAttribute('data-vk-grabber') && !c.matches('[data-vk-edge]'));
+      const bottom = Math.max(...kids.map((c) => c.getBoundingClientRect().bottom));
+      h2.style.minHeight = `${h2.offsetHeight + 348 - (bottom - top)}px`;
+    });
+    await nextFrame(page);
+    await page.mouse.up();
+    await resting(page, 'sup');
+    expect(near(await sheetHeight(page, 'sup'), 360, 24)).toBe(true);
+    expect(await page.locator('#sup').getAttribute('detent')).toBe('peek');
+  });
+
   test('a detents attribute names the detents', async ({ page }) => {
     await sandbox(page, 'rm=1&detents=medium');
     await page.locator('#sup-trigger').click();
