@@ -186,6 +186,8 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
     #clock = createMotionClock();
     #remeasureFrame = 0;
     #wasMoving = false;
+    #stepping = false;
+    #rtl = false;
 
     #current: HTMLButtonElement | null = null;
     #lastFocus: Element | null = null;
@@ -681,6 +683,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
     /** The container's extent along the toolbar, to the fraction: a threshold is crossed by a fraction of a dp. */
     #measureExtent(): number {
       const style = getComputedStyle(this);
+      this.#rtl = style.direction === 'rtl';
       const vertical = this.#vertical();
       const size = parseFloat(vertical ? style.height : style.width);
       if (!Number.isFinite(size)) return vertical ? this.clientHeight : this.clientWidth;
@@ -756,6 +759,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       let layout: ToolbarLayout;
       this.#forcedFrame = null;
       if (forced?.stage) {
+        this.#rtl = getComputedStyle(this).direction === 'rtl';
         const extents = this.#stageExtents(placement.orientation);
         available = extents[forced.stage];
         this.#fixExtent(available);
@@ -849,7 +853,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
         if (this.#morph) stepToolbarMorph(this.#morph, 0, true);
         this.#stepPlace(0, true);
       }
-      this.#paint();
+      if (!this.#stepping) this.#paint();
       if (this.#frame || this.#forced) return;
       if (!this.#moving()) {
         this.toggleAttribute('data-moving', false);
@@ -863,11 +867,16 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       this.#frame = 0;
       if (!this.isConnected || this.#forced) return;
       const instant = this.#presentation?.instantSprings ?? false;
-      stepMotion(this.#clock, now, (dt) => {
-        if (this.#morph) stepToolbarMorph(this.#morph, dt, instant);
-        this.#stepPlace(dt, instant);
-        return true;
-      });
+      this.#stepping = true;
+      try {
+        stepMotion(this.#clock, now, (dt) => {
+          if (this.#morph) stepToolbarMorph(this.#morph, dt, instant);
+          this.#stepPlace(dt, instant);
+          return true;
+        });
+      } finally {
+        this.#stepping = false;
+      }
       this.#paint();
       if (this.#moving()) this.#frame = requestAnimationFrame((t) => this.#tick(t));
       else this.toggleAttribute('data-moving', false);
@@ -922,7 +931,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       this.toggleAttribute('data-moving', moving);
 
       const vertical = placement.orientation === 'vertical';
-      const rtl = getComputedStyle(this).direction === 'rtl';
+      const rtl = this.#rtl;
       const side = geometry.side;
       const span = frame.shapes.length ? toolbarBounds(frame.shapes) : null;
       const shift = placement.edge === 'bottom' && this.#spacerAfter === undefined && span ? (this.#extent - span.width) / 2 - span.x : 0;

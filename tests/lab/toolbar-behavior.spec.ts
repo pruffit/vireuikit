@@ -962,3 +962,39 @@ test.describe('forced states', () => {
     await second.close();
   });
 });
+
+// ---- the cost of a frame ----------------------------------------------------------------------------------------------
+
+test.describe('the cost of a frame', () => {
+  test('a change of place reads the toolbar\'s style once, in the frame that swaps it, and the frames around it read none', async ({ page }) => {
+    await openToolbar(page, `${TOP}&spacer=0&glass=0`, 420, 400);
+    const reads = await page.evaluate(async () => {
+      const bar = document.querySelector('vire-toolbar')!;
+      const original = window.getComputedStyle;
+      let now = 0;
+      window.getComputedStyle = ((el: Element, pseudo?: string | null) => {
+        if (el === bar) now += 1;
+        return original.call(window, el, pseudo);
+      }) as typeof window.getComputedStyle;
+      const perFrame: number[] = [];
+      let live = true;
+      const loop = () => {
+        perFrame.push(now);
+        now = 0;
+        if (live) requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+      bar.setAttribute('placement', 'bottom');
+      now = 0;
+      while (bar.getAttribute('data-edge') !== 'bottom') await new Promise((r) => requestAnimationFrame(r));
+      while (bar.hasAttribute('data-moving')) await new Promise((r) => requestAnimationFrame(r));
+      live = false;
+      window.getComputedStyle = original;
+      return perFrame;
+    });
+    expect(reads.length).toBeGreaterThan(10);
+    expect(Math.max(...reads)).toBeLessThanOrEqual(1);
+    expect(reads.reduce((a, b) => a + b, 0)).toBe(1);
+  });
+
+});
