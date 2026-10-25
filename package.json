@@ -64,7 +64,7 @@
     "check:lab:perf:canaries": "node scripts/check-perf-canaries.mjs"
   },
   "peerDependencies": {
-    "vireglass": "^3.5.0"
+    "vireglass": "^3.6.0"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
@@ -72,7 +72,7 @@
     "esbuild": "0.27.7",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
-    "vireglass": "^3.5.0",
+    "vireglass": "^3.6.0",
     "vite": "8.3.2",
     "vitest": "^4.1.11"
   }
