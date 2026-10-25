@@ -30,7 +30,9 @@ const SHADOW = 'box-shadow:0 0 0 1px color-mix(in srgb,currentColor 14%,transpar
 
 // Every rule is keyed on `data-vk`, set at upgrade, so native markup keeps its own look until
 // then. Text takes the page's colour; frosted and contrast bodies assume `color-scheme` matches it.
-export const STYLES = `
+const ITEM_BOX = ['--vk-ix', '--vk-iy', '--vk-iw', '--vk-ih'].map((name) => `@property ${name}{syntax:'*';inherits:false}`).join('\n');
+
+export const STYLES = `${ITEM_BOX}
 vire-button,vire-icon-button,vire-menu{display:inline-flex;vertical-align:middle}
 ${HOST}{position:relative;--vk-press:0;--vk-hover:0;--vk-carry:1;--vk-body-alpha:0;--vk-body-white:0;--vk-body-lift:0;--vk-grow:0;--vk-defocus:0;--vk-slop-x:0;--vk-slop-y:0}
 ${HOST}::before{content:'';position:absolute;inset:calc(var(--vk-slop-y)*-1px) calc(var(--vk-slop-x)*-1px)}

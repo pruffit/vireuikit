@@ -997,4 +997,14 @@ test.describe('the cost of a frame', () => {
     expect(reads.reduce((a, b) => a + b, 0)).toBe(1);
   });
 
+  test('a toolbar item\'s box is its own: the properties that place it are not inherited by what is inside it', async ({ page }) => {
+    await openToolbar(page, `${TOP}&glass=0`);
+    const inherited = await page.evaluate(() => {
+      const item = document.querySelector<HTMLElement>('vire-toolbar [data-vk-item]:not([hidden])')!;
+      const inner = item.querySelector('button')!;
+      return { item: getComputedStyle(item).getPropertyValue('--vk-iw'), inner: getComputedStyle(inner).getPropertyValue('--vk-iw') };
+    });
+    expect(inherited.item).not.toBe('');
+    expect(inherited.inner).toBe('');
+  });
 });
