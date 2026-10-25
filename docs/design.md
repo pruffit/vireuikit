@@ -496,7 +496,10 @@ the joined body contracts to the item that stays. Glyphs defocus and come back i
   - Under reduced motion every change lands in one frame.
 - **A change of place is not a morph.** Bottom, top and the strip are different places (B 0:28, 5:56): the old one
   dematerialises (`setAppear` on every frame, never opacity) and the new one materialises, and its layout is computed
-  for its own container.
+  for its own container. The frame that swaps the form lays it out and paints once, dropping the old form's lenses, and runs
+  inside the motion's own frame chain without scheduling another. The text direction is read when the toolbar measures
+  (outside the frame), not in a frame. An item's placement properties (`--vk-ix/iy/iw/ih`) are registered as not inherited
+  in the document, since a shadow root ignores `@property`, so a moving frame restyles the items and not what is inside them.
 - **"…" is a menu.**
   - A `<vire-menu>` the element creates, with a row (icon and label) for each overflowed item in toolbar order.
   - Choosing a row clicks the original button once.
