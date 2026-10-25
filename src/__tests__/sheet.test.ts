@@ -556,40 +556,40 @@ describe('the drag', () => {
     const s = drag(400);
     swipe(s, 600, 560, 0.08);
     expect(s.velocity).toBeGreaterThan(125);
-    expect(releaseSheetDrag(s, detents, true)).toEqual({ target: 744 });
+    expect(releaseSheetDrag(s, detents, true)).toMatchObject({ target: 744 });
   });
 
   it('flings down to the next detent below, across one detent and across two', () => {
     const one = drag(744);
     swipe(one, 600, 640, 0.08);
-    expect(releaseSheetDrag(one, detents, true)).toEqual({ target: 400 });
+    expect(releaseSheetDrag(one, detents, true)).toMatchObject({ target: 400 });
     const three = [200, 400, 744];
     const two = drag(744);
     swipe(two, 600, 640, 0.08);
-    expect(releaseSheetDrag(two, three, true)).toEqual({ target: 400 });
+    expect(releaseSheetDrag(two, three, true)).toMatchObject({ target: 400 });
     const lower = drag(450);
     swipe(lower, 600, 640, 0.08);
-    expect(releaseSheetDrag(lower, three, true)).toEqual({ target: 400 });
+    expect(releaseSheetDrag(lower, three, true)).toMatchObject({ target: 400 });
     const dip = drag(400);
     swipe(dip, 600, 640, 0.08);
-    expect(releaseSheetDrag(dip, three, true)).toEqual({ target: 200 });
+    expect(releaseSheetDrag(dip, three, true)).toMatchObject({ target: 200 });
   });
 
   it('lands on the nearest detent on a slow release, either way', () => {
     const near = drag(400);
     swipe(near, 600, 480, 2);
     expect(Math.abs(near.velocity)).toBeLessThan(125);
-    expect(releaseSheetDrag(near, detents, true)).toEqual({ target: 400 });
+    expect(releaseSheetDrag(near, detents, true)).toMatchObject({ target: 400 });
     const up = drag(400);
     swipe(up, 600, 300, 3);
     expect(up.height.x).toBeCloseTo(700, 5);
-    expect(releaseSheetDrag(up, detents, true)).toEqual({ target: 744 });
+    expect(releaseSheetDrag(up, detents, true)).toMatchObject({ target: 744 });
   });
 
   it('settles back on the largest after resistance', () => {
     const s = drag(744);
     swipe(s, 600, 400, 2);
-    expect(releaseSheetDrag(s, detents, true)).toEqual({ target: 744 });
+    expect(releaseSheetDrag(s, detents, true)).toMatchObject({ target: 744 });
   });
 
   it('closes past the thresholds below the lowest when dismissible, else returns to it', () => {
@@ -599,10 +599,10 @@ describe('the drag', () => {
     expect(releaseSheetDrag(slow, detents, true)).toEqual({ close: true });
     const stay = drag(400);
     swipe(stay, 600, 680, 3);
-    expect(releaseSheetDrag(stay, detents, false)).toEqual({ target: 400 });
+    expect(releaseSheetDrag(stay, detents, false)).toMatchObject({ target: 400 });
     const short = drag(400);
     swipe(short, 600, 630, 3);
-    expect(releaseSheetDrag(short, detents, true)).toEqual({ target: 400 });
+    expect(releaseSheetDrag(short, detents, true)).toMatchObject({ target: 400 });
     const fast = drag(400);
     swipe(fast, 600, 620, 0.06);
     expect(releaseSheetDrag(fast, detents, true)).toEqual({ close: true });
@@ -621,16 +621,26 @@ describe('the drag', () => {
     const fling = drag(500);
     swipe(fling, 600, 560, 0.06);
     expect(fling.velocity).toBeGreaterThan(125);
-    expect(cancelSheetDrag(fling, detents)).toEqual({ target: 400 });
+    expect(cancelSheetDrag(fling, detents)).toMatchObject({ target: 400 });
     expect(fling.height.v).toBe(0);
     expect(fling.active).toBe(false);
     const below = drag(400);
     swipe(below, 600, 700, 0.06);
     expect(releaseSheetDrag({ ...below, height: { ...below.height } }, detents, true)).toEqual({ close: true });
-    expect(cancelSheetDrag(below, detents)).toEqual({ target: 400 });
+    expect(cancelSheetDrag(below, detents)).toMatchObject({ target: 400 });
     const above = drag(744);
     swipe(above, 600, 300, 1);
-    expect(cancelSheetDrag(above, detents)).toEqual({ target: 744 });
+    expect(cancelSheetDrag(above, detents)).toMatchObject({ target: 744 });
+  });
+
+  it('names the detent it chose by its place in the list, not only by its height', () => {
+    const three = [200, 400, 744];
+    expect(releaseSheetDrag(drag(420), three, true)).toEqual({ target: 400, index: 1 });
+    expect(releaseSheetDrag(drag(744), three, true)).toEqual({ target: 744, index: 2 });
+    expect(releaseSheetDrag(drag(150), three, false)).toEqual({ target: 200, index: 0 });
+    const fling = drag(450);
+    swipe(fling, 600, 560, 0.08);
+    expect(releaseSheetDrag(fling, three, true)).toEqual({ target: 744, index: 2 });
   });
 
   it('ignores moves before a press', () => {

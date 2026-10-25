@@ -65,7 +65,8 @@ export function moveSheetDrag(
   return clamped;
 }
 
-export type SheetRelease = { target: number } | { close: true };
+/** `index` is the detent chosen in the list the release was made against; the list can change before it lands. */
+export type SheetRelease = { target: number; index: number } | { close: true };
 
 /** The detent a release lands on, or a close; the height spring is left moving there with the finger's velocity. */
 export function releaseSheetDrag(state: SheetDragState, detents: readonly number[], dismissible: boolean): SheetRelease {
@@ -75,28 +76,30 @@ export function releaseSheetDrag(state: SheetDragState, detents: readonly number
   const v = state.velocity;
   const lowest = detents[0] ?? h;
   const largest = detents[detents.length - 1] ?? h;
-  const settle = (target: number): SheetRelease => {
+  const settle = (index: number): SheetRelease => {
+    const target = detents[index] ?? h;
     state.height.target = target;
     state.height.v = v;
-    return { target };
+    return { target, index };
   };
   if (h < lowest) {
     const below = lowest - h;
     if (dismissible && (below >= distance || v <= -fling)) return { close: true };
-    return settle(lowest);
+    return settle(0);
   }
-  if (h >= largest) return settle(largest);
+  if (h >= largest) return settle(detents.length - 1);
   if (Math.abs(v) >= fling) {
-    const next = v > 0 ? detents.find((d) => d > h) : [...detents].reverse().find((d) => d < h);
-    return settle(next ?? (v > 0 ? largest : lowest));
+    const below = detents.map((d) => d < h);
+    const next = v > 0 ? detents.findIndex((d) => d > h) : below.lastIndexOf(true);
+    return settle(next >= 0 ? next : v > 0 ? detents.length - 1 : 0);
   }
-  return settle(detents.reduce((best, d) => (Math.abs(d - h) < Math.abs(best - h) ? d : best), lowest));
+  return settle(detents.reduce((best, d, i) => (Math.abs(d - h) < Math.abs(detents[best]! - h) ? i : best), 0));
 }
 
 /** A drag the system took away: to the nearest detent, never a close, whatever the finger was doing. */
-export function cancelSheetDrag(state: SheetDragState, detents: readonly number[]): { target: number } {
+export function cancelSheetDrag(state: SheetDragState, detents: readonly number[]): { target: number; index: number } {
   state.velocity = 0;
-  return releaseSheetDrag(state, detents, false) as { target: number };
+  return releaseSheetDrag(state, detents, false) as { target: number; index: number };
 }
 
 /** Steps the height toward its detent on the detent spring; true while moving. */

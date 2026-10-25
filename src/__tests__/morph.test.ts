@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { capsuleGeometry, roundedRectGeometry } from 'vireglass';
 import {
+  SPRING_STEP,
   createGrowthState,
+  createMotionClock,
   growthFrame,
   growthPhase,
   growthStateAt,
   stepGrowth,
+  stepMotion,
   stepSpring,
   type GrowthShape,
   type Spring,
@@ -308,5 +311,51 @@ describe('holding a surface part of the way open', () => {
   it('is at rest closed and at rest open at the ends', () => {
     expect(growthPhase(growthStateAt({ shrink: 0, grow: 0 }))).toEqual(growthPhase(createGrowthState()));
     expect(growthStateAt({ shrink: 1, grow: 1 }).grow).toEqual({ x: 1, v: 0, target: 1 });
+  });
+});
+
+describe('the clock of a motion', () => {
+  const VSYNC = 1000 / 60;
+  const growth = (times: readonly number[]) => {
+    const state = createGrowthState();
+    const clock = createMotionClock();
+    return times.map((now) => {
+      stepMotion(clock, now, (dt) => stepGrowth(state, dt, true));
+      return growthPhase(state);
+    });
+  };
+  const frames = (n: number, at: (k: number) => number) => Array.from({ length: n }, (_, k) => at(k));
+
+  it('draws the same states whatever the jitter of frame times', () => {
+    let seed = 7;
+    const jitter = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 1.6;
+    const exact = growth(frames(90, (k) => 1000 + k * VSYNC));
+    expect(growth(frames(90, (k) => 1000 + k * VSYNC + jitter()))).toEqual(exact);
+  });
+
+  it('skips the states of a late frame and draws no others', () => {
+    const exact = growth(frames(60, (k) => k * VSYNC));
+    const late = growth(frames(60, (k) => k * VSYNC).filter((_, k) => k !== 12 && k !== 13));
+    expect(late).toEqual(exact.filter((_, k) => k !== 12 && k !== 13));
+  });
+
+  it('starts with a sixtieth of a second and advances at most 50 ms a frame', () => {
+    const clock = createMotionClock();
+    const count = (now: number) => {
+      let n = 0;
+      stepMotion(clock, now, () => ((n += 1), true));
+      return n;
+    };
+    expect(count(500) * SPRING_STEP).toBeCloseTo(1 / 60, 9);
+    expect(count(500 + VSYNC)).toBe(4);
+    expect(count(500 + VSYNC + 400) * SPRING_STEP).toBeCloseTo(0.05, 9);
+    expect(count(500 + 2 * VSYNC + 400)).toBe(4);
+  });
+
+  it('keeps time at a refresh rate that is not a multiple of its step', () => {
+    const clock = createMotionClock();
+    let steps = 0;
+    for (let k = 0; k <= 144; k += 1) stepMotion(clock, k * (1000 / 144), () => ((steps += 1), true));
+    expect(Math.abs(steps * SPRING_STEP - (1 + 1 / 60))).toBeLessThanOrEqual(SPRING_STEP);
   });
 });

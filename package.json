@@ -60,10 +60,11 @@
     "check:lab:visual": "playwright test visual",
     "check:lab:reference": "node scripts/check-lab-reference.mjs",
     "check:lab:visual:update": "playwright test visual --update-snapshots",
-    "check:lab:perf": "playwright test --config playwright.perf.config.ts"
+    "check:lab:perf": "playwright test --config playwright.perf.config.ts",
+    "check:lab:perf:canaries": "node scripts/check-perf-canaries.mjs"
   },
   "peerDependencies": {
-    "vireglass": "^3.4.0"
+    "vireglass": "^3.4.1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
@@ -71,7 +72,7 @@
     "esbuild": "0.27.7",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
-    "vireglass": "^3.4.0",
+    "vireglass": "^3.4.1",
     "vite": "8.3.2",
     "vitest": "^4.1.11"
   }

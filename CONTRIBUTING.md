@@ -23,6 +23,7 @@ npm run check:readme
 npm run check:lab
 npm run check:lab:visual   # local, Windows baselines
 npm run check:lab:perf     # local, a headed Chromium with a GPU
+npm run check:lab:perf:canaries # local, proves the perf gate fails on a known cost, by the right rule
 npm run check:lab:reference # local, needs VIREUIKIT_REFERENCE_DIR (frames, never committed)
 ```
 
@@ -39,10 +40,15 @@ serves the lab; set `VIREUIKIT_REFERENCE_DIR` to a local folder of reference fra
 Reference frames are third-party and are never committed.
 
 `npm run check:lab:perf` replays every transition of `tests/lab/transitions.ts` in a headed Chromium and times its
-frames with glass on and off; it prints a table and requires no frame over 33 ms and a p90 of at most 20 ms with glass
-on. It refuses software rendering (SwiftShader and the like), because headless and software timing hid the problem it
-exists for, so it runs on a machine with a GPU and a screen and not in CI. The same list of transitions is counted in
-`check:lab` (`motion-behavior.spec.ts`), which runs anywhere.
+frames with glass on and off, each replay after an idle control of the same page, under a trace; it prints a table
+with the headroom of a frame and requires with glass on no frame over 33 ms that the trace does not show outside the
+page, no main-thread task over a vsync and no GPU program compiled after the warm-ups (`docs/design.md`, "The frame gate",
+which also lists its switches and canaries; headroom is printed, not judged). `npm run check:lab:perf:canaries` runs a
+known cost through the gate, one per rule, and fails unless each is caught by its own; run it when you change the gate. It measures the installed vireglass. It starts its own lab on port 5180
+(`VIREUIKIT_LAB_PORT`) with reloading off, so a save during a run does not reach the page it times, and it fails, naming
+the port, if something already listens there (`Get-NetTCPConnection -LocalPort 5180 -State Listen` finds the owner). It refuses software rendering (SwiftShader and the like),
+because headless and software timing hid the problem it exists for, so it runs on a machine with a GPU and a screen and
+not in CI. The same list of transitions is counted in `check:lab` (`motion-behavior.spec.ts`), which runs anywhere.
 
 ## Depending on VireGlass
 

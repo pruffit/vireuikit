@@ -1,0 +1,270 @@
+import { expect, test, type Page } from '@playwright/test';
+import { openCase } from './helpers';
+
+test.use({ viewport: { width: 1900, height: 1100 } });
+
+// A surface measures its content while the page is idle so the click that opens it does not. These tests watch the
+// measuring state (`data-measure`) and the per-paint custom properties from outside, through spies installed before
+// the page runs.
+
+type Spy = { measures: Record<string, number>; props: Record<string, number>; click: { measures: number; props: Record<string, number>; lens: number } | null };
+declare global {
+  interface Window {
+    __spy: Spy;
+  }
+}
+
+const SPY = () => {
+  const spy: Spy = { measures: {}, props: {}, click: null };
+  window.__spy = spy;
+  const setAttribute = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function (name: string, value: string) {
+    if (name === 'data-measure') spy.measures[(this as Element).id] = (spy.measures[(this as Element).id] ?? 0) + 1;
+    return setAttribute.call(this, name, value);
+  };
+  const setProperty = CSSStyleDeclaration.prototype.setProperty;
+  CSSStyleDeclaration.prototype.setProperty = function (name: string, value: string | null, priority?: string) {
+    spy.props[name] = (spy.props[name] ?? 0) + 1;
+    return setProperty.call(this, name, value, priority);
+  };
+  // Registered before the surface's own frame, so it runs first in the frame after the click.
+  document.addEventListener(
+    'click',
+    () => {
+      const lensCalls = () => ((window as unknown as { __lenses?: { calls: unknown[] }[] }).__lenses ?? []).reduce((n, l) => n + l.calls.length, 0);
+      const was = { measures: { ...spy.measures }, props: { ...spy.props }, lens: lensCalls() };
+      requestAnimationFrame(() => {
+        const props: Record<string, number> = {};
+        for (const [k, n] of Object.entries(spy.props)) props[k] = n - (was.props[k] ?? 0);
+        spy.click = { measures: Object.keys(spy.measures).reduce((n, k) => n + spy.measures[k]! - (was.measures[k] ?? 0), 0), props, lens: lensCalls() - was.lens };
+      });
+    },
+    true,
+  );
+};
+
+const measures = (page: Page, id: string) => page.evaluate((id) => window.__spy.measures[id] ?? 0, id);
+const clickWork = (page: Page) => page.waitForFunction(() => window.__spy.click !== null).then(() => page.evaluate(() => window.__spy.click!));
+const noIdleCallback = (page: Page) => page.addInitScript(() => Reflect.deleteProperty(window, 'requestIdleCallback'));
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(SPY);
+});
+
+const RECORDING_LENS = `
+const flat = { luma: 0.9, busy: 0, lo: 0.9, hi: 0.9, r: 0.9, g: 0.9, b: 0.9 };
+export function probeBackdrop() { return flat; }
+export function statsFromSamples() { return flat; }
+export function attachGlass(el, opts) {
+  const rec = { id: el.id, calls: [] };
+  (window.__lenses ??= []).push(rec);
+  el.style.setProperty('backdrop-filter', 'blur(1px)');
+  const note = (morph) => rec.calls.push({ morph });
+  return {
+    update() { note(undefined); },
+    setMorph(m) { note(m); },
+    setAppear() {}, setSample() {}, setInterim() {}, setAccent() {}, setNeighbourGlow() {},
+    destroy() {},
+  };
+}`;
+const stubGlass = (page: Page) => page.route('**/vireglass_dom.js*', (route) => route.fulfill({ contentType: 'text/javascript', body: RECORDING_LENS }));
+const morphs = (page: Page, id: string) =>
+  page.evaluate((id) => (window as unknown as { __lenses: { id: string; calls: { morph: unknown }[] }[] }).__lenses.filter((l) => l.id === id).flatMap((l) => l.calls.map((c) => c.morph)), id);
+
+// ---- the menu ------------------------------------------------------------------------------------------------------
+
+const menu = async (page: Page, query = '') => {
+  await openCase(page, `view=menu&glass=0${query}`);
+  await expect.poll(() => measures(page, 'more')).toBeGreaterThan(0);
+};
+const listBox = (page: Page) => page.locator('#more-list').evaluate((el) => el.getBoundingClientRect().height);
+
+test.describe('a menu measures while the page is idle', () => {
+  test('the click that opens it does not measure, and paints once', async ({ page }) => {
+    await menu(page);
+    await page.locator('#more-trigger').click();
+    expect(await clickWork(page)).toMatchObject({ measures: 0, props: { '--vk-ink-in': 1 } });
+    await expect(page.locator('#more')).toHaveAttribute('data-phase', 'open');
+  });
+
+  test('a text edit inside an item, a font that finished loading and an image that loaded each measure again', async ({ page }) => {
+    await menu(page);
+    const changes: (() => unknown)[] = [
+      () => (document.querySelector('#more-list > button')!.lastChild!.textContent = 'A much longer label than the others'),
+      () => document.fonts.dispatchEvent(new Event('loadingdone')),
+      () => document.querySelector('#more-list > button')!.dispatchEvent(new Event('load')),
+    ];
+    for (const [i, change] of changes.entries()) {
+      const was = await measures(page, 'more');
+      await page.evaluate(change);
+      await expect.poll(() => measures(page, 'more'), `change ${i}`).toBeGreaterThan(was);
+    }
+  });
+
+  test('a size change nothing observed is found after the open settles, and the menu ends at the size it needs', async ({ page }) => {
+    await menu(page);
+    const before = await listBox(page);
+    await page.addStyleTag({ content: '#more-list > button { min-height: 80px !important; }' });
+    await page.locator('#more-trigger').click();
+    await expect(page.locator('#more')).toHaveAttribute('data-phase', 'open');
+    await expect.poll(() => listBox(page)).toBeGreaterThan(80 * 5);
+    expect(before).toBeLessThan(80 * 5);
+  });
+
+  test('with reduced motion the same stale measure is corrected too', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await menu(page);
+    await page.addStyleTag({ content: '#more-list > button { min-height: 80px !important; }' });
+    await page.locator('#more-trigger').click();
+    await expect.poll(() => listBox(page)).toBeGreaterThan(80 * 5);
+  });
+
+  test('opened from the keyboard on the idle measure, the first item has focus', async ({ page }) => {
+    await menu(page);
+    await page.locator('#more-trigger').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#more')).toHaveAttribute('data-phase', 'open');
+    expect(await page.evaluate(() => document.activeElement?.textContent?.trim())).toBe('Copy link');
+  });
+
+  test('its lens is handed no null morph on the way open', async ({ page }) => {
+    await stubGlass(page);
+    await openCase(page, 'view=menu');
+    await page.locator('#more-trigger').click();
+    await expect(page.locator('#more')).toHaveAttribute('data-phase', 'open');
+    expect((await morphs(page, 'more-list')).filter((m) => m === null)).toHaveLength(0);
+  });
+
+  test('a menu taken out of the page before its idle callback runs never measures, and one put back measures', async ({ page }) => {
+    await noIdleCallback(page);
+    await openCase(page, 'view=menu&glass=0');
+    const count = await page.evaluate(
+      () =>
+        new Promise<number[]>((resolve) => {
+          const host = document.getElementById('more')!;
+          const parent = host.parentElement!;
+          const next = host.nextSibling;
+          const at = window.__spy.measures.more ?? 0;
+          host.remove();
+          setTimeout(() => {
+            const gone = (window.__spy.measures.more ?? 0) - at;
+            parent.insertBefore(host, next);
+            setTimeout(() => resolve([gone, (window.__spy.measures.more ?? 0) - at]), 600);
+          }, 400);
+        }),
+    );
+    expect(count[0]).toBe(0);
+    expect(count[1]).toBeGreaterThan(0);
+    await page.locator('#more-trigger').click();
+    expect((await clickWork(page)).measures).toBe(0);
+  });
+
+  test('without requestIdleCallback it measures after a timer, and the open still does not', async ({ page }) => {
+    await noIdleCallback(page);
+    await menu(page);
+    await page.locator('#more-trigger').click();
+    expect((await clickWork(page)).measures).toBe(0);
+  });
+});
+
+// ---- the sheet -----------------------------------------------------------------------------------------------------
+
+const sheet = async (page: Page, query = '') => {
+  await openCase(page, `view=sheet&w=390&h=1000&glass=0${query}`);
+  await expect.poll(() => measures(page, 'pop')).toBeGreaterThan(0);
+};
+const rested = async (page: Page) => {
+  await expect(page.locator('#pop')).toHaveAttribute('data-phase', 'open');
+  await expect(page.locator('#pop')).not.toHaveAttribute('data-height', /./);
+};
+const fit = (page: Page) => page.evaluate(() => ({ height: document.getElementById('pop-surface')!.getBoundingClientRect().height }));
+
+test.describe('a sheet measures while the page is idle', () => {
+  test('the click that opens it does not measure', async ({ page }) => {
+    await sheet(page);
+    await page.locator('#pop-trigger').click();
+    expect((await clickWork(page)).measures).toBe(0);
+    await rested(page);
+  });
+
+  test('a style inside the closed content, a font and an image each measure again', async ({ page }) => {
+    await sheet(page, '&rm=1');
+    const changes: (() => unknown)[] = [
+      () => ((document.querySelector('#pop-surface h2') as HTMLElement).style.minHeight = '40px'),
+      () => document.fonts.dispatchEvent(new Event('loadingdone')),
+      () => document.querySelector('#pop-surface h2')!.dispatchEvent(new Event('load')),
+    ];
+    for (const [i, change] of changes.entries()) {
+      const was = await measures(page, 'pop');
+      await page.evaluate(change);
+      await expect.poll(() => measures(page, 'pop'), `change ${i}`).toBeGreaterThan(was);
+    }
+  });
+
+  for (const [what, query] of [['', '&rm=1'], [' with motion', '']] as const) {
+    test(`a size change nothing observed is found after the open settles, and the sheet ends as tall as one opened with it${what}`, async ({ page, context }) => {
+      const css = '#pop-surface h2 { min-height: 240px !important; }';
+      const reference = await context.newPage();
+      await reference.addInitScript((css) => document.addEventListener('DOMContentLoaded', () => document.head.append(Object.assign(document.createElement('style'), { textContent: css }))), css);
+      await openCase(reference, `view=sheet&w=390&h=1000&glass=0&rm=1`);
+      await reference.locator('#pop-trigger').click();
+      await rested(reference);
+      const want = (await fit(reference)).height;
+      await reference.close();
+      await sheet(page, query);
+      const before = (await fit(page)).height;
+      await page.addStyleTag({ content: css });
+      await page.locator('#pop-trigger').click();
+      await rested(page);
+      await expect.poll(async () => Math.abs((await fit(page)).height - want), { timeout: 5000 }).toBeLessThan(3);
+      expect(want - before).toBeGreaterThan(100);
+    });
+  }
+
+  test('opened on the idle measure, the first control has focus', async ({ page }) => {
+    await sheet(page, '&rm=1');
+    await page.locator('#pop-trigger').click();
+    await rested(page);
+    expect(await page.evaluate(() => document.activeElement?.closest('#pop-surface') !== null && document.activeElement !== document.body)).toBe(true);
+  });
+
+  test('its open hands the lens nothing inside the click: its first shape comes with the first frame', async ({ page }) => {
+    await stubGlass(page);
+    await openCase(page, 'view=sheet&w=390&h=1000&glass=1');
+    await expect.poll(() => measures(page, 'pop')).toBeGreaterThan(0);
+    await page.locator('#pop-trigger').click();
+    expect((await clickWork(page)).lens).toBe(0);
+    await rested(page);
+    expect((await morphs(page, 'pop-surface')).length).toBeGreaterThan(0);
+  });
+
+  test('its open sends the lens no null morph', async ({ page }) => {
+    await stubGlass(page);
+    await openCase(page, 'view=sheet&w=390&h=1000&rm=1&glass=1');
+    await page.locator('#pop-trigger').click();
+    await rested(page);
+    expect((await morphs(page, 'pop-surface')).filter((m) => m === null)).toHaveLength(0);
+  });
+
+  test('a sheet taken out of the page before its fallback timer runs never measures, and one put back does', async ({ page }) => {
+    await noIdleCallback(page);
+    await openCase(page, 'view=sheet&w=390&h=1000&glass=0');
+    const gone = await page.evaluate(
+      () =>
+        new Promise<number>((resolve) => {
+          const host = document.getElementById('pop')!;
+          const parent = host.parentElement!;
+          const next = host.nextSibling;
+          const at = window.__spy.measures.pop ?? 0;
+          host.remove();
+          setTimeout(() => {
+            const n = (window.__spy.measures.pop ?? 0) - at;
+            parent.insertBefore(host, next);
+            resolve(n);
+          }, 500);
+        }),
+    );
+    expect(gone).toBe(0);
+    await expect.poll(() => measures(page, 'pop')).toBeGreaterThan(0);
+  });
+});

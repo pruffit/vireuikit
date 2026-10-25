@@ -1,16 +1,17 @@
 import { defineConfig } from '@playwright/test';
 
-// The frame gate: a headed Chromium with the GPU on. Headless Chromium and software rendering hid the very problem
-// this gate exists for, so nothing here runs without a window. Local only, like the visual set.
+const PORT = process.env.VIREUIKIT_LAB_PORT ?? '5180';
+
+// Headed with the GPU on: headless and software rendering hid the very problem this gate exists for.
 export default defineConfig({
   testDir: 'tests/lab',
   testMatch: 'perf.spec.ts',
   fullyParallel: false,
   workers: 1,
   reporter: 'list',
-  timeout: 120_000,
+  timeout: 180_000,
   use: {
-    baseURL: `http://127.0.0.1:${process.env.VIREUIKIT_LAB_PORT ?? 5179}`,
+    baseURL: `http://127.0.0.1:${PORT}`,
     headless: false,
     viewport: { width: 1500, height: 1000 },
     deviceScaleFactor: 1,
@@ -22,13 +23,16 @@ export default defineConfig({
         '--disable-renderer-backgrounding',
         '--disable-backgrounding-occluded-windows',
         '--disable-background-timer-throttling',
+        '--enable-gpu-service-tracing',
       ],
     },
   },
+  // Its own lab with reloading off: a save must not reload the page being timed, or leave it unable to boot.
   webServer: {
-    command: 'npm run lab',
-    url: `http://127.0.0.1:${process.env.VIREUIKIT_LAB_PORT ?? 5179}`,
-    reuseExistingServer: true,
+    command: `node scripts/check-port-free.mjs ${PORT} && npm run lab`,
+    url: `http://127.0.0.1:${PORT}`,
+    env: { ...(process.env as Record<string, string>), VIREUIKIT_LAB_PORT: PORT, VIREUIKIT_LAB_STILL: '1' },
+    reuseExistingServer: false,
     timeout: 60_000,
   },
 });

@@ -17,14 +17,14 @@ import {
   type MenuState,
   type RoundedRect,
 } from '../kit/menu';
-import { createGrowthState, growthPhase, smoothstep, stepGrowth, type GrowthPhase, type GrowthPoint } from '../kit/morph';
+import { createGrowthState, createMotionClock, growthPhase, smoothstep, stepGrowth, stepMotion, type GrowthPhase, type GrowthPoint } from '../kit/morph';
 import { segmentOf } from '../kit/adaptive/context';
 import { sizeTier } from '../kit/adaptive/input';
 import type { Rect, Size } from '../kit/geometry';
 import { CONTROL_SIZES, menuSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { effectiveInput, viewportSegments, watchPointerInput, watchViewport } from './environment';
-import { deepActive, dropEmptyStyle, rootsOf, type Root } from './dom';
+import { deepActive, dropEmptyStyle, rootsOf, whenIdle, type Root } from './dom';
 import { attachControlGlass, glassMorph, landGlass, moveGlass, type GlassFrame, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
@@ -91,12 +91,18 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #anchor: GrowthPoint | null = null;
     #region: Rect | null = null;
     #natural: Size | null = null;
+    /** The list was measured while the page was idle, and nothing has changed it since. */
+    #premeasured = false;
+    #cancelIdle: (() => void) | null = null;
+    #cancelVerify: (() => void) | null = null;
+    /** The open used the idle measure, so one more measure when the page is idle after it checks that it was current. */
+    #verify = false;
     #out = false;
     #viaPointer = false;
     #frame = 0;
     #placeFrame = 0;
     #inertTimer = 0;
-    #lastFrame = 0;
+    #clock = createMotionClock();
     /** When the content was last fully in focus; null while it is still arriving or leaving. */
     #readySince: number | null = null;
     /** When the content came into focus, which is when a deliberate key may choose. */
@@ -188,6 +194,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       for (const cleanup of this.#cleanups.splice(0)) cleanup();
       cancelAnimationFrame(this.#frame);
       cancelAnimationFrame(this.#placeFrame);
+      this.#cancelIdle?.();
+      this.#cancelVerify?.();
+      this.#cancelIdle = this.#cancelVerify = null;
+      this.#verify = this.#premeasured = false;
       clearTimeout(this.#inertTimer);
       this.#frame = this.#placeFrame = this.#inertTimer = 0;
       this.#dropGlass();
@@ -284,24 +294,39 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const items = new MutationObserver((records) => {
         let changed = false;
         for (const record of records) {
-          if (record.type === 'childList' && record.target === list) {
+          if (record.type === 'childList' || record.type === 'characterData') {
             changed = true;
-            for (const node of record.removedNodes) this.#releaseItem(node);
+            if (record.target === list) for (const node of record.removedNodes) this.#releaseItem(node);
           } else if (record.type === 'attributes') {
             this.#keepFocusOff(record.target as Element);
           }
         }
         if (!changed) return;
         this.#adoptItems();
-        if (this.#out) {
-          this.#natural = null;
-          this.#place();
-        }
+        this.#invalidate();
       });
       // Read, never rewritten: the disabled attribute stays the author's.
-      items.observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+      items.observe(list, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['disabled'] });
       this.#cleanups.push(() => items.disconnect());
       this.#listen(trigger, list);
+      // A closed list's own styles change its size unseen, so they say so for the idle measure.
+      const restyled = new MutationObserver(() => {
+        if (this.#out) return;
+        this.#premeasured = false;
+        this.#premeasureSoon();
+      });
+      restyled.observe(list, { attributes: true, subtree: true, attributeFilter: ['class', 'style', 'hidden'] });
+      this.#cleanups.push(() => restyled.disconnect());
+      // A late font or image resizes the list without any mutation.
+      const fonts = this.ownerDocument.fonts;
+      const stale = () => this.#invalidate();
+      fonts?.addEventListener('loadingdone', stale);
+      list.addEventListener('load', stale, true);
+      this.#cleanups.push(() => {
+        fonts?.removeEventListener('loadingdone', stale);
+        list.removeEventListener('load', stale, true);
+      });
+      this.#premeasureSoon();
       this.#mode = null;
       this.#refreshMode();
       if (this.#forced()) this.#applyForced();
@@ -557,16 +582,56 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#run();
     }
 
+    /** Measures the list while the page is idle, so the click that opens it does not lay it out. */
+    #premeasureSoon(): void {
+      if (this.#cancelIdle) return;
+      const list = this.#list;
+      this.#cancelIdle = whenIdle(() => {
+        this.#cancelIdle = null;
+        if (this.#out || !list || this.#list !== list || !this.isConnected) return;
+        this.#natural = this.#measure();
+        this.#premeasured = true;
+      });
+    }
+
+    /** What the list measured is no longer known to be current. */
+    #invalidate(): void {
+      this.#natural = null;
+      this.#premeasured = false;
+      if (this.#out) this.#place();
+      else this.#premeasureSoon();
+    }
+
+    #verifyMeasure(): void {
+      if (!this.#verify) return;
+      this.#verify = false;
+      const list = this.#list;
+      this.#cancelVerify?.();
+      this.#cancelVerify = whenIdle(() => {
+        this.#cancelVerify = null;
+        if (!list || this.#list !== list || !this.#out || !this.#state.open || this.#frame) return;
+        const now = this.#measure();
+        const was = this.#natural;
+        if (was && Math.abs(now.width - was.width) < 1 && Math.abs(now.height - was.height) < 1) return;
+        this.#natural = now;
+        this.#place();
+      });
+    }
+
     #comeOut(): void {
       const list = this.#list!;
       const wasOut = this.#out;
       if (!list.matches(':popover-open')) list.showPopover();
       this.#out = true;
-      if (!wasOut) this.#natural = null;
-      this.#place();
+      if (!wasOut && !this.#premeasured) this.#natural = null;
+      if (!wasOut) {
+        this.#verify = this.#premeasured;
+        this.#premeasured = false;
+      }
+      this.#place(wasOut);
       if (wasOut) return;
       // Read while the trigger still has its glass, which the probe sees through.
-      this.#holdSample();
+      this.#holdSample(false);
       this.#liveCarrier()?.setCarried?.(1);
     }
 
@@ -591,7 +656,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       return natural;
     }
 
-    #place(): void {
+    #place(paint = true): void {
       const list = this.#list!;
       const spec = menuSize(this.#size());
       this.#natural ??= this.#measure();
@@ -607,10 +672,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#anchor = placement.anchor;
       list.style.setProperty('--vk-content-w', `${placement.rect.width - 2 * spec.padding}px`);
       list.toggleAttribute('data-scroll', placement.rect.height < natural.height);
-      this.#paint();
+      if (paint) this.#paint();
     }
 
-    #holdSample(): void {
+    #holdSample(paint = true): void {
       const glass = this.#glass;
       if (!glass || !this.#to) return;
       let sample = this.#sample;
@@ -620,7 +685,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       }
       this.#held = sample;
       glass.setSample(sample);
-      this.#paint();
+      if (paint) this.#paint();
     }
 
     #setBox(box: RoundedRect): void {
@@ -642,17 +707,15 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         return;
       }
       if (this.#frame) return;
-      this.#lastFrame = 0;
+      this.#clock = createMotionClock();
       this.#frame = requestAnimationFrame((t) => this.#tick(t));
     }
 
     #tick(now: number): void {
       this.#frame = 0;
       if (!this.isConnected || this.#forced()) return;
-      const dt = this.#lastFrame ? Math.min((now - this.#lastFrame) / 1000, 0.05) : 1 / 60;
-      this.#lastFrame = now;
       const instant = this.#presentation?.instantSprings ?? false;
-      const moving = stepGrowth(this.#growth, dt, this.#state.open, instant);
+      const moving = stepMotion(this.#clock, now, (dt) => stepGrowth(this.#growth, dt, this.#state.open, instant));
       this.#paint();
       if (moving) this.#frame = requestAnimationFrame((t) => this.#tick(t));
       else this.#settle();
@@ -661,6 +724,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #settle(): void {
       if (this.#state.open) {
         this.#paint();
+        this.#verifyMeasure();
         return;
       }
       const list = this.#list!;
@@ -682,6 +746,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#glass?.setSample(this.#sample);
       this.#liveCarrier()?.setCarried?.(null);
       this.#anchorEl = null;
+      this.#premeasureSoon();
     }
 
     /** The light that bleeds past a drop's edge: a blurred copy of its outline under the surface, which the surface's own clip path cannot draw. */
@@ -832,7 +897,8 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         const next: GlassFrame = {};
         if (key.geometry !== last.geometry) next.geometry = geometry;
         if (key.material !== last.material) next.material = menuMaterial(VIREGLASS_CONTROL_MATERIAL, step, round(capsule * MATERIAL_STEPS) / MATERIAL_STEPS);
-        if (key.morph !== last.morph) next.morph = lens;
+        // A morph never sent needs no null to take it away; sent, it costs the lens an interim map.
+        if (key.morph !== last.morph && !(lens === null && last.morph === '')) next.morph = lens;
         this.#lastLens = key;
         glass.frame(next);
       });
@@ -909,10 +975,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.toggleAttribute('data-frost', next.frost);
       this.setAttribute('data-glass', next.glass ? 'on' : 'off');
       if (changed) this.#reattachGlass(mode);
-      if (this.#out) {
-        this.#natural = null;
-        this.#place();
-      }
+      this.#natural = null;
+      this.#premeasured = false;
+      if (this.#out) this.#place();
+      else this.#premeasureSoon();
     }
 
     #applySize(): void {

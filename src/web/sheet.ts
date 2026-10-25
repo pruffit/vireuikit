@@ -13,7 +13,7 @@ import {
 import { presentationForm, type PresentationForm, type SurfaceKind } from '../kit/adaptive/presentation';
 import type { Rect, Size } from '../kit/geometry';
 import { menuBody, menuMaterial, type RoundedRect } from '../kit/menu';
-import { POPOVER_GROWTH_TIMING, createGrowthState, growthPhase, growthStateAt, heldGrowthState, stepGrowth, type GrowthPoint } from '../kit/morph';
+import { POPOVER_GROWTH_TIMING, createGrowthState, createMotionClock, growthPhase, growthStateAt, heldGrowthState, stepGrowth, stepMotion, type GrowthPoint } from '../kit/morph';
 import {
   SHEET_SIZES,
   createSheetDrag,
@@ -45,7 +45,7 @@ import {
   type SheetLayout,
 } from '../kit/sheet';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
-import { deepActive, dropEmptyStyle, rootsOf } from './dom';
+import { deepActive, dropEmptyStyle, rootsOf, whenIdle } from './dom';
 import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, isEditable, shellOf, watchAdaptiveContext, windowRect } from './environment';
 import { attachControlGlass, ensureGlass, glassLoaded, glassMorph, holdGlass, landGlass, moveGlass, probeRect, type GlassFrame, type GlassSession } from './glass';
 import { createScrollEdge, type ScrollEdge } from './scroll-edge';
@@ -147,6 +147,12 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     static observedAttributes = ['glass', 'kind', 'detents', 'detent', 'persistent', 'grabber-label', 'detent-labels', 'scroll-edge', FORCE_ATTRIBUTE];
 
     #surface: HTMLElement | null = null;
+    /** The content was measured while the page was idle, and nothing has changed it since. */
+    #premeasured = false;
+    #cancelIdle: (() => void) | null = null;
+    #cancelVerify: (() => void) | null = null;
+    /** The open used the idle measure, so one more measure when the page is idle after it checks that it was current. */
+    #verify = false;
     #dialog: HTMLDialogElement | null = null;
     #grabber: HTMLElement | null = null;
     #edge: ScrollEdge | null = null;
@@ -201,6 +207,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #sizes = new Map<Element, string>();
     #resizer: ResizeObserver | null = null;
     #contentShown = false;
+    #remeasureHeld = false;
     #detent: SheetDetent | null = null;
     #drag = createSheetDrag();
     #press: { id: number; y: number; grab: boolean; started: boolean; scroller: Element | null } | null = null;
@@ -212,7 +219,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #touch = '';
     #frame = 0;
     #followFrame = 0;
-    #lastFrame = 0;
+    #clock = createMotionClock();
     #forcedState: Forced | null = null;
 
     get a11y(): A11yOverride {
@@ -296,6 +303,10 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       cancelAnimationFrame(this.#frame);
       cancelAnimationFrame(this.#followFrame);
       this.#frame = this.#followFrame = 0;
+      this.#cancelIdle?.();
+      this.#cancelVerify?.();
+      this.#cancelIdle = this.#cancelVerify = null;
+      this.#verify = this.#premeasured = false;
       this.#dropGlass();
       const surface = this.#surface;
       this.#setCarried(null);
@@ -427,7 +438,10 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#cleanups.push(
         watchAdaptiveContext(this.#shell, (ctx) => {
           this.#ctx = ctx;
-          if (!this.#out) return;
+          if (!this.#out) {
+            this.#premeasureSoon();
+            return;
+          }
           this.#readEnvironment();
           this.#place();
           this.#run();
@@ -508,7 +522,24 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         this.#remeasure();
       });
       markup.observe(this, { childList: true, subtree: true, characterData: true });
+      // A closed surface reports no sizes: a restyle has to say so for the idle measure.
+      const restyled = new MutationObserver((records) => {
+        if (this.#out || records.every((r) => r.target === surface || r.target === this.#grabber || this.#edge?.el.contains(r.target as Node))) return;
+        this.#premeasured = false;
+        this.#premeasureSoon();
+      });
+      restyled.observe(surface, { attributes: true, subtree: true, attributeFilter: ['class', 'style', 'hidden'] });
+      this.#cleanups.push(() => restyled.disconnect());
       this.#cleanups.push(() => markup.disconnect());
+      // A late font or image resizes the content without any mutation.
+      const fonts = this.ownerDocument.fonts;
+      const stale = () => this.#remeasure();
+      fonts?.addEventListener('loadingdone', stale);
+      surface.addEventListener('load', stale, true);
+      this.#cleanups.push(() => {
+        fonts?.removeEventListener('loadingdone', stale);
+        surface.removeEventListener('load', stale, true);
+      });
 
       if (typeof ResizeObserver !== 'undefined') {
         const resizer = new ResizeObserver((entries) => this.#resized(entries));
@@ -723,7 +754,11 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #remeasure(): void {
       this.#maxContent = null;
       this.#contentKey = '';
-      if (!this.#out) return;
+      this.#premeasured = false;
+      if (!this.#out) {
+        this.#premeasureSoon();
+        return;
+      }
       this.#place();
       this.#run();
     }
@@ -756,7 +791,24 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       }
       const opened = shown && !this.#contentShown;
       this.#contentShown = shown;
-      if (changed && shown && !opened) this.#remeasure();
+      if (!changed || !shown || opened) return;
+      // The observer reports the sheet's own measuring layout too, so remeasuring mid-move feeds itself: wait for rest.
+      if (this.#heightMoving()) this.#remeasureHeld = true;
+      else this.#remeasure();
+    }
+
+    /** Measures the content now if a change waited for the height to come to rest. */
+    #flushRemeasure(): void {
+      if (!this.#remeasureHeld) return;
+      this.#remeasureHeld = false;
+      this.#maxContent = null;
+      this.#contentKey = '';
+      this.#place();
+    }
+
+    /** The sheet's own height is being dragged or is springing to a detent. */
+    #heightMoving(): boolean {
+      return this.#drag.active || (this.#form?.form === 'bottom-sheet' && this.#open && this.#drag.height.x !== this.#drag.height.target);
     }
 
     #present(): void {
@@ -781,14 +833,16 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         this.#source = source;
       }
       this.#open = true;
-      if (!this.#out) {
+      const coming = !this.#out;
+      if (coming) {
         // Laid out and read before it is presented: a modal dialog makes the page inert, and an inert page cannot be read.
         this.#comeOut();
         this.#present();
       }
       this.#syncTriggers();
       this.#publishInset();
-      this.#run();
+      // The lens, the ink and the edge take their first state in the first frame, which paints again before it is drawn.
+      this.#run(!coming);
     }
 
     /** The platform or the host opened the surface itself: pick it up on this frame. */
@@ -820,11 +874,58 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#run();
     }
 
+    /** Measures the content while the page is idle, so the click that opens the surface does not lay it out twice. */
+    #premeasureSoon(): void {
+      if (this.#cancelIdle) return;
+      const surface = this.#surface;
+      this.#cancelIdle = whenIdle(() => {
+        this.#cancelIdle = null;
+        if (surface && this.#surface === surface) this.#premeasure();
+      });
+    }
+
+    #verifyMeasure(): void {
+      if (!this.#verify) return;
+      this.#verify = false;
+      const surface = this.#surface;
+      this.#cancelVerify?.();
+      this.#cancelVerify = whenIdle(() => {
+        this.#cancelVerify = null;
+        const ctx = this.#ctx;
+        const form = this.#form;
+        if (!surface || this.#surface !== surface || !ctx || !form || !this.#out || !this.#open || this.#heightMoving()) return;
+        const was = this.#content;
+        this.#maxContent = null;
+        this.#contentKey = '';
+        const now = this.#contentFor(form, ctx.window);
+        if (Math.abs(now.width - was.width) < 1 && Math.abs(now.height - was.height) < 1) return;
+        this.#place();
+        this.#run();
+      });
+    }
+
+    #premeasure(): void {
+      const ctx = this.#ctx;
+      if (this.#out || !ctx || !this.#surface || !this.#shell || !this.isConnected) return;
+      const keep = { source: this.#source, local: this.#sourceLocal };
+      const win = windowRect(this.#shell);
+      this.#source = this.#pickSource();
+      const client = this.#sourceClient();
+      this.#sourceLocal = client ? { ...client, x: client.x - win.x, y: client.y - win.y } : null;
+      this.#contentKey = '';
+      this.#contentFor(presentationForm(this.#kind(), ctx, this.#sourceLocal ?? undefined), ctx.window);
+      this.#premeasured = true;
+      this.#source = keep.source;
+      this.#sourceLocal = keep.local;
+    }
+
     #comeOut(): void {
       this.#out = true;
       this.#focused = false;
       this.#source = this.#pickSource();
-      this.#contentKey = '';
+      if (!this.#premeasured) this.#contentKey = '';
+      this.#verify = this.#premeasured;
+      this.#premeasured = false;
       this.#morph = null;
       this.#shown = null;
       this.#form = null;
@@ -836,7 +937,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#place(true);
       this.#probed = this.#backdrop();
       this.#setCarried(1);
-      this.#holdSample();
+      this.#holdSample(false);
     }
 
     #settle(): void {
@@ -885,6 +986,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#grabKey = '';
       this.#scrollTop = 0;
       this.#touchTop = null;
+      this.#remeasureHeld = false;
       this.#clearInset();
       if (surface) {
         for (const name of Array.from(surface.style)) {
@@ -900,6 +1002,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#setCarried(null);
       this.#anchorEl = null;
       this.#syncTriggers();
+      this.#premeasureSoon();
     }
 
     #syncTriggers(): void {
@@ -1123,7 +1226,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       return this.#presentation?.instantSprings ?? false;
     }
 
-    #run(): void {
+    #run(full = true): void {
       if (!this.#out || this.#forced()) return;
       if (this.#instant()) {
         this.#step(0, true);
@@ -1131,18 +1234,16 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         this.#afterStep();
         return;
       }
-      this.#paint();
+      this.#paint(full);
       if (this.#frame) return;
-      this.#lastFrame = 0;
+      this.#clock = createMotionClock();
       this.#frame = requestAnimationFrame((t) => this.#tick(t));
     }
 
     #tick(now: number): void {
       this.#frame = 0;
       if (!this.isConnected || !this.#out || this.#forced()) return;
-      const dt = this.#lastFrame ? Math.min((now - this.#lastFrame) / 1000, 0.05) : 1 / 60;
-      this.#lastFrame = now;
-      const moving = this.#step(dt, false);
+      const moving = stepMotion(this.#clock, now, (dt) => this.#step(dt, false));
       this.#paint();
       if (moving) this.#frame = requestAnimationFrame((t) => this.#tick(t));
       else this.#afterStep();
@@ -1182,12 +1283,18 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         this.#settle();
         return;
       }
+      if (this.#remeasureHeld && !this.#heightMoving()) {
+        this.#remeasureHeld = false;
+        this.#remeasure();
+        return;
+      }
       if (this.#morph) {
         this.#morph = null;
         this.#reglass();
       }
       this.#paint();
       this.#focusIn();
+      this.#verifyMeasure();
     }
 
     #focusIn(): void {
@@ -1268,7 +1375,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       };
     }
 
-    #paint(): void {
+    #paint(full = true): void {
       const surface = this.#surface;
       if (!surface || !this.#out) return;
       const c = this.#compose();
@@ -1292,7 +1399,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       s.setProperty('--vk-content-w', px(Math.max(0, (this.#layout?.box.width ?? box.width) - 2 * SHEET_SIZES.content.pad)));
       s.setProperty('--vk-ink-in', (Math.round(c.ink * 1000) / 1000).toFixed(3));
       s.setProperty('--vk-opaque', (this.#opaque ? 1 : c.opacity).toFixed(3));
-      this.#syncInk(this.#opaque ? 1 : c.opacity);
+      if (full) this.#syncInk(this.#opaque ? 1 : c.opacity);
       s.setProperty('--vk-scrim', (c.scrim * SHEET_SIZES.scrimAlpha).toFixed(3));
       const body = menuBody(VIREGLASS_CONTROL_MATERIAL, c.activity, false);
       s.setProperty('--vk-body-alpha', body.alpha.toFixed(3));
@@ -1300,14 +1407,14 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       s.setProperty('--vk-body-lift', body.lift.toFixed(3));
       surface.toggleAttribute('data-scrim', (this.#layout?.scrim ?? false) && this.#form?.form !== 'full-screen');
       this.setAttribute('data-phase', c.phase);
-      const height = this.#drag.active ? 'dragging' : this.#form?.form === 'bottom-sheet' && this.#open && this.#drag.height.x !== this.#drag.height.target ? 'settling' : null;
+      const height = this.#drag.active ? 'dragging' : this.#heightMoving() ? 'settling' : null;
       if (height) this.setAttribute('data-height', height);
       else this.removeAttribute('data-height');
       this.#syncGrabber();
       s.setProperty('--vk-pad-t', px(this.#grabber && !this.#grabber.hidden ? SHEET_SIZES.content.handle : SHEET_SIZES.content.pad));
       this.#syncTouch();
       this.#setCarried(this.#source || this.#anchorEl ? c.carry : null);
-      this.#pushGlass(box, c.morph, c.activity, !this.#forced() && (c.phase !== 'open' || this.#drag.active || height !== null));
+      if (full) this.#pushGlass(box, c.morph, c.activity, !this.#forced() && (c.phase !== 'open' || this.#drag.active || height !== null));
     }
 
     #pushGlass(box: MorphBox, morph: VireGlassMorph | undefined, activity: number, moving: boolean): void {
@@ -1328,7 +1435,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         const next: GlassFrame = {};
         if (key.geometry !== last.geometry) next.geometry = geometry;
         if (key.material !== last.material) next.material = menuMaterial(VIREGLASS_CONTROL_MATERIAL, step);
-        if (key.morph !== last.morph) next.morph = lens;
+        if (key.morph !== last.morph && !(lens === null && last.morph === '')) next.morph = lens;
         this.#lastLens = key;
         glass.frame(next);
       });
@@ -1344,7 +1451,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       return { ...read, luma: read.luma * k, lo: read.lo * k, hi: read.hi * k, r: read.r * k, g: read.g * k, b: read.b * k };
     }
 
-    #holdSample(): void {
+    #holdSample(paint = true): void {
       const glass = this.#glass;
       const surface = this.#surface;
       const layout = this.#layout;
@@ -1360,7 +1467,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       }
       this.#held = sample;
       glass.setSample(sample);
-      this.#paint();
+      if (paint) this.#paint();
     }
 
     /** With one detent the grabber is a picture of the swipe; with more it is the slider that moves between them. */
@@ -1502,22 +1609,31 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         // Nothing was captured.
       }
       if (e.type !== 'pointerup') {
-        this.#land(cancelSheetDrag(this.#drag, this.#heights()).target);
+        this.#landFresh(cancelSheetDrag(this.#drag, this.#heights()).index);
         return;
       }
       if (press.grab && Math.abs(e.clientY - press.y) < DRAG_SLOP) {
         this.#drag.active = false;
+        this.#flushRemeasure();
         this.#stepDetent(1, true);
         return;
       }
       if ((e.timeStamp - this.#lastMove) / 1000 > SHEET_SIZES.drag.stale) this.#drag.velocity = 0;
       const result = releaseSheetDrag(this.#drag, this.#heights(), !this.#persistent());
       if ('close' in result) this.#close();
-      else this.#land(result.target);
+      else this.#landFresh(result.index);
     }
 
-    #land(target: number): void {
-      const picked = this.#detents.find((d) => d.height === target);
+    /** The detent the gesture chose among the ones it was made against, at its height for the content as it is now. */
+    #landFresh(chosen: number): void {
+      const name = this.#detents[chosen]?.name;
+      this.#flushRemeasure();
+      const fresh = name ? this.#detents.find((d) => d.names.includes(name)) : undefined;
+      if (fresh) this.#drag.height.target = fresh.height;
+      this.#land(fresh);
+    }
+
+    #land(picked: NamedSheetDetent | undefined): void {
       if (picked && picked.name !== this.#detent) {
         this.#detent = picked.name;
         this.#reflect(picked.name);

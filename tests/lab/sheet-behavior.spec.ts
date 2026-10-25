@@ -452,6 +452,85 @@ test.describe('the bottom sheet sits by its height', () => {
     expect(await surfaceOf(page, 'pop').evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
   });
 
+  test('a drag of its height does not measure the content on every frame, and measures what changed once it rests', async ({ page }) => {
+    await sandbox(page, 'detents=medium');
+    await page.locator('#sup-trigger').click();
+    await resting(page, 'sup');
+    const measures = () => page.evaluate(() => (window as unknown as { __measures: number }).__measures);
+    await page.evaluate(() => {
+      const w = window as unknown as { __measures: number };
+      w.__measures = 0;
+      new MutationObserver((list) => (w.__measures += list.filter((m) => m.oldValue === null).length)).observe(document.getElementById('sup')!, {
+        attributeFilter: ['data-measure'],
+        attributeOldValue: true,
+      });
+    });
+    const g = await grabberAt(page, 'sup');
+    await page.mouse.move(g.x, g.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 20; i += 1) {
+      await page.mouse.move(g.x, g.y - i * 10);
+      await nextFrame(page);
+      // A style, not markup: only the content's resize reports it.
+      if (i === 10) await surfaceOf(page, 'sup').evaluate((el) => (el.querySelector('h2')!.style.minHeight = '80px'));
+    }
+    const dragged = await measures();
+    await page.mouse.up();
+    await resting(page, 'sup');
+    expect(dragged).toBeLessThanOrEqual(2);
+    await expect.poll(measures).toBeGreaterThan(dragged);
+  });
+
+  for (const [what, tall] of [['grows', '120px'], ['shrinks', '0px']] as const) {
+    test(`content that ${what} while the sheet is dragged is what the released sheet fits`, async ({ page }) => {
+      await sandbox(page, 'rm=1', { w: 390, h: 1000 });
+      const title = () => surfaceOf(page, 'pop').locator('h2');
+      if (what === 'shrinks') await page.evaluate(() => (document.querySelector<HTMLElement>('#pop-surface h2')!.style.minHeight = '120px'));
+      await page.locator('#pop-trigger').click();
+      await resting(page, 'pop');
+      const before = await sheetHeight(page, 'pop');
+      const g = await grabberAt(page, 'pop');
+      await page.mouse.move(g.x, g.y);
+      await page.mouse.down();
+      for (const dy of [-8, -16, -24]) await page.mouse.move(g.x, g.y + dy);
+      await expect(page.locator('#pop')).toHaveAttribute('data-height', 'dragging');
+      // A style, not markup: only the content's resize reports it.
+      await title().evaluate((el, h) => ((el as HTMLElement).style.minHeight = h), tall);
+      await nextFrame(page);
+      await page.mouse.up();
+      await resting(page, 'pop');
+      const content = await surfaceOf(page, 'pop').evaluate((el) => el.scrollHeight);
+      expect(Math.abs(content + 12 - before)).toBeGreaterThan(40);
+      expect(near(await sheetHeight(page, 'pop'), content + 12, 2)).toBe(true);
+    });
+  }
+
+  test('a release that chose a detent lands on it after the content shrank until two detents became one', async ({ page }) => {
+    await sandbox(page, 'rm=1&detents=peek%20medium');
+    await page.locator('#sup-trigger').click();
+    await resting(page, 'sup');
+    const g = await grabberAt(page, 'sup');
+    await page.mouse.move(g.x, g.y);
+    await page.mouse.down();
+    for (const dy of [-8, -16, -100, -200, -280]) await page.mouse.move(g.x, g.y + dy);
+    await expect(page.locator('#sup')).toHaveAttribute('data-height', 'dragging');
+    expect(await sheetHeight(page, 'sup')).toBeGreaterThan(600);
+    // Peek fits the content, which now comes within 24 dp of medium: the two detents are one (named peek) when the drag is released.
+    await surfaceOf(page, 'sup').evaluate((el) => {
+      el.querySelector<HTMLElement>('ul')!.style.display = 'none';
+      const h2 = el.querySelector<HTMLElement>('h2')!;
+      const top = el.getBoundingClientRect().top - el.scrollTop;
+      const kids = [...el.children].filter((c) => !c.hasAttribute('data-vk-grabber') && !c.matches('[data-vk-edge]'));
+      const bottom = Math.max(...kids.map((c) => c.getBoundingClientRect().bottom));
+      h2.style.minHeight = `${h2.offsetHeight + 348 - (bottom - top)}px`;
+    });
+    await nextFrame(page);
+    await page.mouse.up();
+    await resting(page, 'sup');
+    expect(near(await sheetHeight(page, 'sup'), 360, 24)).toBe(true);
+    expect(await page.locator('#sup').getAttribute('detent')).toBe('peek');
+  });
+
   test('a detents attribute names the detents', async ({ page }) => {
     await sandbox(page, 'rm=1&detents=medium');
     await page.locator('#sup-trigger').click();
