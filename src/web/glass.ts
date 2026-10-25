@@ -127,6 +127,7 @@ export async function ensureGlass(): Promise<void> {
 export function probeRect(doc: Document, box: Rect): BackdropSample | null {
   if (!loaded) return null;
   const probe = doc.createElement('div');
+  probe.setAttribute('data-vk-sample', '');
   probe.style.cssText = `position:fixed;left:${box.x}px;top:${box.y}px;width:${box.width}px;height:${box.height}px;visibility:hidden;pointer-events:none`;
   doc.body.append(probe);
   try {

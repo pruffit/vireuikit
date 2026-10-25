@@ -53,6 +53,17 @@ import { createScrollEdge, type ScrollEdge } from './scroll-edge';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
+const ENVIRONMENT_QUERIES = ['(prefers-color-scheme: dark)', '(forced-colors: active)'];
+const SAMPLE_KEYS = ['luma', 'lo', 'hi', 'r', 'g', 'b'] as const;
+const SAMPLE_TOLERANCE = 0.03;
+
+function isProbe(node: Node): boolean {
+  return node instanceof Element && (node.hasAttribute('data-vk-probe') || node.hasAttribute('data-vk-sample'));
+}
+
+function sameBox(a: Rect, b: Rect): boolean {
+  return Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
+}
 const GLASS_ON = new Set(['', 'present', 'touch']);
 const MATERIAL_STEPS = 10;
 const DRAG_SLOP = 4;
@@ -152,8 +163,13 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #premeasured = false;
     #cancelIdle: (() => void) | null = null;
     #cancelVerify: (() => void) | null = null;
-    /** The open used the idle measure, so one more measure when the page is idle after it checks that it was current. */
-    #verify = false;
+    /** What the open took from the idle work: once it settles and the page is idle, each is read again and corrected if it was stale. */
+    #verify = { content: false, env: false, sample: false };
+    #idleFull = false;
+    /** The backdrop of the box the surface will occupy, read while the page was idle; any change to the page behind it drops it. */
+    #idleSample: { box: Rect; sample: BackdropSample } | null = null;
+    #envFresh = false;
+    #pageWatch: MutationObserver | null = null;
     #dialog: HTMLDialogElement | null = null;
     #grabber: HTMLElement | null = null;
     #edge: ScrollEdge | null = null;
@@ -308,7 +324,9 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#cancelIdle?.();
       this.#cancelVerify?.();
       this.#cancelIdle = this.#cancelVerify = null;
-      this.#verify = this.#premeasured = false;
+      this.#verify = { content: false, env: false, sample: false };
+      this.#premeasured = this.#idleFull = this.#envFresh = false;
+      this.#idleSample = null;
       this.#dropGlass();
       const surface = this.#surface;
       this.#setCarried(null);
@@ -441,6 +459,8 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         watchAdaptiveContext(this.#shell, (ctx) => {
           this.#ctx = ctx;
           if (!this.#out) {
+            this.#envFresh = false;
+            this.#idleSample = null;
             this.#premeasureSoon();
             return;
           }
@@ -541,6 +561,22 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#cleanups.push(() => {
         fonts?.removeEventListener('loadingdone', stale);
         surface.removeEventListener('load', stale, true);
+      });
+
+      // What lies behind the surface is read ahead of the open; anything that can change it drops that read.
+      const behind = () => this.#dropSample();
+      fonts?.addEventListener('loadingdone', behind);
+      on(this.ownerDocument, 'load', behind, true);
+      on(this.ownerDocument, 'scroll', behind, true);
+      const watch = new MutationObserver((records) => {
+        if (records.some((r) => !this.contains(r.target) && !(r.type === 'childList' && [...r.addedNodes, ...r.removedNodes].every(isProbe)))) behind();
+      });
+      this.#pageWatch = watch;
+      for (const root of rootsOf(this)) watch.observe(root, { childList: true, attributes: true, characterData: true, subtree: true });
+      this.#cleanups.push(() => {
+        fonts?.removeEventListener('loadingdone', behind);
+        watch.disconnect();
+        this.#pageWatch = null;
       });
 
       if (typeof ResizeObserver !== 'undefined') {
@@ -685,9 +721,13 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       if (typeof window !== 'undefined') {
         on(window, 'resize', () => {
           this.#envDirty = true;
+          this.#dropEnvironment();
+          this.#dropSample();
           this.#follow();
         });
-        if (typeof window.matchMedia === 'function') on(window.matchMedia('(prefers-color-scheme: dark)'), 'change', () => this.#schemeChanged());
+        if (typeof window.matchMedia === 'function') {
+          for (const query of ENVIRONMENT_QUERIES) on(window.matchMedia(query), 'change', () => this.#schemeChanged());
+        }
         const vv = window.visualViewport;
         if (vv) {
           on(vv, 'resize', () => this.#viewportChanged());
@@ -709,7 +749,12 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     }
 
     #schemeChanged(): void {
-      if (!this.#out) return;
+      this.#envFresh = false;
+      this.#dropSample();
+      if (!this.#out) {
+        this.#premeasureSoon(false);
+        return;
+      }
       this.#readEnvironment();
       this.#paint();
     }
@@ -877,18 +922,36 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     }
 
     /** Measures the content while the page is idle, so the click that opens the surface does not lay it out twice. */
-    #premeasureSoon(): void {
+    #premeasureSoon(full = true): void {
+      if (full) this.#idleFull = true;
       if (this.#cancelIdle) return;
       const surface = this.#surface;
       this.#cancelIdle = whenIdle(() => {
         this.#cancelIdle = null;
-        if (surface && this.#surface === surface) this.#premeasure();
+        const all = this.#idleFull;
+        this.#idleFull = false;
+        if (!surface || this.#surface !== surface || this.#out) return;
+        if (all || !this.#premeasured) this.#premeasure();
+        this.#presample();
       });
     }
 
+    /** The page behind the surface changed: the sample read for it is gone, and the next idle moment reads it again. */
+    #dropSample(): void {
+      if (this.#out || !this.#idleSample) return;
+      this.#idleSample = null;
+      this.#premeasureSoon(false);
+    }
+
+    #dropEnvironment(): void {
+      this.#envFresh = false;
+      if (!this.#out) this.#premeasureSoon(false);
+    }
+
     #verifyMeasure(): void {
-      if (!this.#verify) return;
-      this.#verify = false;
+      const taken = this.#verify;
+      if (!taken.content && !taken.env && !taken.sample) return;
+      this.#verify = { content: false, env: false, sample: false };
       const surface = this.#surface;
       this.#cancelVerify?.();
       this.#cancelVerify = whenIdle(() => {
@@ -896,29 +959,98 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         const ctx = this.#ctx;
         const form = this.#form;
         if (!surface || this.#surface !== surface || !ctx || !form || !this.#out || !this.#open || this.#heightMoving()) return;
-        const was = this.#content;
-        this.#maxContent = null;
-        this.#contentKey = '';
-        const now = this.#contentFor(form, ctx.window);
-        if (Math.abs(now.width - was.width) < 1 && Math.abs(now.height - was.height) < 1) return;
-        this.#place();
-        this.#run();
+        let moved = false;
+        if (taken.env) {
+          const was = [this.#safeBottom, this.#canvasLuma];
+          this.#readEnvironment();
+          moved = was[0] !== this.#safeBottom || was[1] !== this.#canvasLuma;
+        }
+        if (taken.content) {
+          const was = this.#content;
+          this.#maxContent = null;
+          this.#contentKey = '';
+          const now = this.#contentFor(form, ctx.window);
+          moved ||= Math.abs(now.width - was.width) >= 1 || Math.abs(now.height - was.height) >= 1;
+        }
+        if (moved) {
+          this.#place();
+          this.#run();
+        }
+        if (taken.sample) this.#verifySample();
       });
     }
 
-    #premeasure(): void {
+    /** The surface is hidden from the probe while it reads, so the backdrop is what lies behind it and not the surface itself. */
+    #verifySample(): void {
+      const surface = this.#surface;
+      if (!surface || !this.#out || !this.#layout) return;
+      surface.style.setProperty('visibility', 'hidden');
+      let fresh: BackdropSample | null;
+      try {
+        fresh = this.#backdrop(false);
+      } finally {
+        surface.style.removeProperty('visibility');
+      }
+      const held = this.#probed;
+      if (!fresh || !held || SAMPLE_KEYS.every((key) => Math.abs(fresh[key] - held[key]) < SAMPLE_TOLERANCE)) return;
+      this.#probed = fresh;
+      this.#holdSample();
+    }
+
+    /** Runs `read` with the source and the window as the surface will find them when it opens. */
+    #asOpening<T>(read: (ctx: AdaptiveContext, win: Rect, local: RoundedRect | null) => T): T | null {
       const ctx = this.#ctx;
-      if (this.#out || !ctx || !this.#surface || !this.#shell || !this.isConnected) return;
+      if (this.#out || !ctx || !this.#surface || !this.#shell || !this.isConnected) return null;
       const keep = { source: this.#source, local: this.#sourceLocal };
       const win = windowRect(this.#shell);
       this.#source = this.#pickSource();
       const client = this.#sourceClient();
       this.#sourceLocal = client ? { ...client, x: client.x - win.x, y: client.y - win.y } : null;
-      this.#contentKey = '';
-      this.#contentFor(presentationForm(this.#kind(), ctx, this.#sourceLocal ?? undefined), ctx.window);
-      this.#premeasured = true;
-      this.#source = keep.source;
-      this.#sourceLocal = keep.local;
+      try {
+        return read(ctx, win, this.#sourceLocal);
+      } finally {
+        this.#source = keep.source;
+        this.#sourceLocal = keep.local;
+      }
+    }
+
+    #premeasure(): void {
+      if (!this.#envFresh) this.#readEnvironment();
+      const measured = this.#asOpening((ctx, _win, local) => {
+        this.#contentKey = '';
+        this.#contentFor(presentationForm(this.#kind(), ctx, local ?? undefined), ctx.window);
+        return true;
+      });
+      if (measured) this.#premeasured = true;
+    }
+
+    /** Reads the backdrop of the box the surface will occupy while the page is idle, so the click that opens it does not hit-test the page. */
+    #presample(): void {
+      if (this.#idleSample || this.#dialog || this.#sample || !glassLoaded() || !this.#premeasured) return;
+      if (!this.#envFresh) this.#readEnvironment();
+      const box = this.#asOpening((ctx, win, local) => {
+        const form = presentationForm(this.#kind(), ctx, local ?? undefined);
+        const content = this.#contentFor(form, ctx.window);
+        const detents = this.#detentList({ width: form.region.width, height: form.region.height }, content);
+        const asked = this.getAttribute('detent') as SheetDetent | null;
+        const picked = detents.find((d) => asked !== null && d.names.includes(asked)) ?? detents[0];
+        if (!picked) return null;
+        const layout = sheetLayout({
+          form,
+          window: ctx.window,
+          source: local,
+          content,
+          height: picked.height,
+          grabber: form.form === 'bottom-sheet' && (detents.length > 1 || !this.#persistent()),
+          bottomInset: this.#safeBottom,
+          lift: 0,
+        });
+        return { x: win.x + layout.box.x, y: win.y + layout.box.y, width: layout.box.width, height: layout.box.height };
+      });
+      if (!box) return;
+      const sample = probeRect(this.ownerDocument, box);
+      this.#pageWatch?.takeRecords();
+      if (sample) this.#idleSample = { box, sample };
     }
 
     #comeOut(): void {
@@ -926,7 +1058,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#focused = false;
       this.#source = this.#pickSource();
       if (!this.#premeasured) this.#contentKey = '';
-      this.#verify = this.#premeasured;
+      this.#verify = { content: this.#premeasured, env: this.#envFresh, sample: false };
       this.#premeasured = false;
       this.#morph = null;
       this.#shown = null;
@@ -935,7 +1067,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#detent = null;
       this.#scrollTop = this.#surface!.scrollTop;
       this.#envDirty = false;
-      this.#readEnvironment();
+      if (!this.#envFresh) this.#readEnvironment();
       this.#place(true);
       this.#probed = this.#backdrop();
       this.#setCarried(1);
@@ -1183,6 +1315,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       const inset = parseFloat(style.paddingBottom);
       const canvas = /rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)/.exec(style.backgroundColor);
       probe.remove();
+      this.#envFresh = true;
       this.#safeBottom = Number.isFinite(inset) ? Math.max(inset, 0) : 0;
       this.#canvasLuma = canvas ? (0.2126 * Number(canvas[1]) + 0.7152 * Number(canvas[2]) + 0.0722 * Number(canvas[3])) / 255 : null;
     }
@@ -1443,11 +1576,16 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       });
     }
 
-    #backdrop(): BackdropSample | null {
+    #backdrop(cached = true): BackdropSample | null {
       const layout = this.#layout;
       if (!layout) return null;
       const { x, y } = this.#origin;
-      const read = this.#sample ?? probeRect(this.ownerDocument, { x: x + layout.box.x, y: y + layout.box.y, width: layout.box.width, height: layout.box.height });
+      const box = { x: x + layout.box.x, y: y + layout.box.y, width: layout.box.width, height: layout.box.height };
+      const idle = this.#idleSample;
+      this.#idleSample = null;
+      const spared = cached && idle && !this.#sample && sameBox(idle.box, box) ? idle.sample : null;
+      if (spared) this.#verify.sample = true;
+      const read = this.#sample ?? spared ?? probeRect(this.ownerDocument, box);
       if (!read || !layout.scrim) return read;
       const k = 1 - SHEET_SIZES.scrimAlpha;
       return { ...read, luma: read.luma * k, lo: read.lo * k, hi: read.hi * k, r: read.r * k, g: read.g * k, b: read.b * k };
@@ -1714,6 +1852,9 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
         this.#readEnvironment();
         this.#place();
         this.#run();
+      } else {
+        this.#dropSample();
+        this.#dropEnvironment();
       }
     }
 
@@ -1755,6 +1896,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
           this.#glass = session;
           this.#lastLens = { material: '', morph: '', geometry: '' };
           if (this.#out) this.#holdSample();
+          else this.#premeasureSoon(false);
           this.dispatchEvent(new CustomEvent('vire-glass-ready'));
         })
         .catch(() => {

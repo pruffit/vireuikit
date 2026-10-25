@@ -268,3 +268,128 @@ test.describe('a sheet measures while the page is idle', () => {
     await expect.poll(() => measures(page, 'pop')).toBeGreaterThan(0);
   });
 });
+
+// ---- the popover's backdrop and environment ------------------------------------------------------------------------
+
+type Reads = { hits: number; env: number; click: { hits: number; env: number } | null };
+declare global {
+  interface Window {
+    __reads: Reads;
+  }
+}
+
+// Counts the page hit tests and the environment reads (the probe element the surface appends); the click's share is what
+// happens between the click's capture and the next frame.
+const READS = () => {
+  const reads: Reads = { hits: 0, env: 0, click: null };
+  window.__reads = reads;
+  const hit = document.elementsFromPoint.bind(document);
+  document.elementsFromPoint = (x: number, y: number) => {
+    reads.hits += 1;
+    return hit(x, y);
+  };
+  const computed = window.getComputedStyle.bind(window);
+  window.getComputedStyle = ((el: Element, pseudo?: string | null) => {
+    if (el.hasAttribute('data-vk-probe')) reads.env += 1;
+    return computed(el, pseudo);
+  }) as typeof window.getComputedStyle;
+  document.addEventListener(
+    'click',
+    () => {
+      const was = { hits: reads.hits, env: reads.env };
+      requestAnimationFrame(() => (reads.click = { hits: reads.hits - was.hits, env: reads.env - was.env }));
+    },
+    true,
+  );
+};
+
+const popover = async (page: Page, query = '') => {
+  await page.addInitScript(READS);
+  await openCase(page, `view=sheet&w=700&h=720&glass=1${query}`);
+  await calm(page);
+};
+// The idle reads are done once nothing reads for a while.
+const calm = async (page: Page) => {
+  let last = -1;
+  await expect
+    .poll(async () => {
+      const now = await page.evaluate(() => window.__reads.hits + window.__reads.env);
+      const same = now === last && now > 0;
+      last = now;
+      return same;
+    }, { intervals: [400] })
+    .toBe(true);
+};
+const clickReads = (page: Page) => page.waitForFunction(() => window.__reads.click !== null).then(() => page.evaluate(() => window.__reads.click!));
+const reads = (page: Page) => page.evaluate(() => ({ hits: window.__reads.hits, env: window.__reads.env }));
+const restOpen = (page: Page) => expect(page.locator('#pop')).toHaveAttribute('data-phase', 'open');
+
+test.describe('a popover reads its backdrop and its environment while the page is idle', () => {
+  test('the click that opens it hit-tests nothing and reads no environment', async ({ page }) => {
+    await popover(page);
+    await page.locator('#pop-trigger').click();
+    expect(await clickReads(page)).toEqual({ hits: 0, env: 0 });
+    await restOpen(page);
+  });
+
+  test('a scroll of a container behind it drops the sample, and the click reads the page', async ({ page }) => {
+    await popover(page);
+    await page.evaluate(() => {
+      const inner = document.createElement('div');
+      inner.id = 'inner';
+      inner.style.cssText = 'position:absolute;left:500px;top:300px;width:80px;height:80px;overflow:auto';
+      inner.innerHTML = '<div style="height:400px"></div>';
+      document.getElementById('frame')!.append(inner);
+    });
+    await calm(page);
+    await page.evaluate(() => (window.__reads.click = null));
+    // Clicked in the scroll event itself, before the page is idle again to read what the scroll dropped.
+    await page.evaluate(() => {
+      const inner = document.getElementById('inner')!;
+      inner.addEventListener('scroll', () => document.getElementById('pop-trigger')!.click(), { once: true });
+      inner.scrollTop = 40;
+    });
+    expect((await clickReads(page)).hits).toBeGreaterThan(0);
+  });
+
+  test('a backdrop that changed without a signal is read again once the open settles, and the ink follows', async ({ page }) => {
+    await popover(page);
+    // An adopted sheet is no mutation, so nothing tells the surface.
+    await page.evaluate(() => {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync('.sh-frame, .sh-frame * { background: #000 !important; color: #fff !important; }');
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    });
+    await page.locator('#pop-trigger').click();
+    expect((await clickReads(page)).hits).toBe(0);
+    await restOpen(page);
+    await expect.poll(() => page.locator('#pop').getAttribute('data-ink')).toBe('light');
+  });
+
+  test('its environment is read again after the colour scheme changes, and the click still reads none', async ({ page }) => {
+    await popover(page);
+    const was = (await reads(page)).env;
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await expect.poll(async () => (await reads(page)).env).toBeGreaterThan(was);
+    await calm(page);
+    await page.locator('#pop-trigger').click();
+    expect((await clickReads(page)).env).toBe(0);
+    await restOpen(page);
+  });
+
+  test('opened from the keyboard on the idle reads, the first control has focus', async ({ page }) => {
+    await popover(page);
+    await page.locator('#pop-trigger').focus();
+    await page.keyboard.press('Enter');
+    await restOpen(page);
+    expect(await page.evaluate(() => document.activeElement?.closest('#pop-surface') !== null && document.activeElement !== document.body)).toBe(true);
+  });
+
+  test('with reduced motion the open takes the idle reads too', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await popover(page);
+    await page.locator('#pop-trigger').click();
+    expect(await clickReads(page)).toEqual({ hits: 0, env: 0 });
+    await restOpen(page);
+  });
+});
