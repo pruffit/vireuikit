@@ -307,6 +307,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         'data-search',
         'data-minimized',
         'data-moving',
+        'data-defocus',
         'data-lens',
         'data-scroll',
       ]) {
@@ -1168,7 +1169,9 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         restore = scrolls;
       }
       const ink = frame.showing === 'from' ? frame.ink.outgoing : frame.ink.incoming;
-      this.style.setProperty('--vk-ink', clamp01(ink).toFixed(3));
+      const inkText = clamp01(ink).toFixed(3);
+      this.style.setProperty('--vk-ink', inkText);
+      this.toggleAttribute('data-defocus', inkText !== '1.000');
 
       const box = frame.body;
       const s = nav.style;
@@ -1227,9 +1230,9 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       const el = this.#lens;
       const slot = this.#lensSlot;
       if (!el || !slot) return;
-      const visible = lens !== null;
-      this.toggleAttribute('data-lens', visible);
-      if (!lens) {
+      const shownLens = lens !== null && (lens.dragging || round(clamp01(lens.lift) * 100) / 100 > 0);
+      this.toggleAttribute('data-lens', shownLens);
+      if (!lens || !shownLens) {
         if (!moving && slot.session) landGlass(slot.session);
         this.#markUnder([], null);
         return;

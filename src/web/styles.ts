@@ -139,14 +139,17 @@ ${NAV}[data-form=sidebar]>nav [data-badge]:not(:empty){inset-inline-start:auto;i
 ${NAV}>nav>[data-vk-pill]{position:absolute;left:calc(var(--vk-px,0px) - var(--vk-x,0px));top:calc(var(--vk-py,0px) - var(--vk-y,0px));
  width:var(--vk-pw,0px);height:var(--vk-ph,0px);border-radius:var(--vk-pr,0px);box-sizing:border-box;pointer-events:none;
  background:color-mix(in srgb,currentColor 14%,transparent);opacity:var(--vk-pill-op,1)}
+${NAV}[data-moving]>nav>[data-vk-pill]{will-change:opacity}
 ${NAV}>nav>button[data-vk-toggle]{appearance:none;-webkit-appearance:none;position:absolute;left:calc(var(--vk-lx,0px) - var(--vk-x,0px));top:calc(var(--vk-ly,0px) - var(--vk-y,0px));
  width:var(--vk-lw,0px);height:var(--vk-lh,0px);box-sizing:border-box;margin:0;padding:0;border:0;border-radius:50%;outline:none;
  display:grid;place-items:center;background:transparent;color:inherit;cursor:pointer;pointer-events:auto;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 ${NAV}>nav>button[data-vk-toggle][hidden]{display:none}
 ${NAV}>nav>button[data-vk-toggle]>svg{width:22px;height:22px}
 @media (hover:hover){${NAV}>nav>button[data-vk-toggle]:hover{background:color-mix(in srgb,currentColor 8%,transparent)}}
-${NAV}[data-moving]>nav>:is(ul,a,button){opacity:var(--vk-ink);filter:blur(calc((1 - var(--vk-ink))*6px))}
-${NAV}[data-moving]>[data-accessory][data-moving]>*{opacity:var(--vk-ink);filter:blur(calc((1 - var(--vk-ink))*6px))}
+${NAV}[data-moving]>nav>:is(ul,a,button){opacity:var(--vk-ink)}
+${NAV}[data-moving][data-defocus]>nav>:is(ul,a,button){filter:blur(calc((1 - var(--vk-ink))*6px))}
+${NAV}[data-moving]>[data-accessory][data-moving]>*{opacity:var(--vk-ink)}
+${NAV}[data-moving][data-defocus]>[data-accessory][data-moving]>*{filter:blur(calc((1 - var(--vk-ink))*6px))}
 /* Parked as a clipped speck rather than hidden: a lens that is drawn once is not drawn for the first time on the first frame of a morph. */
 ${NAV}>[data-vk-lens]{position:absolute;left:var(--vk-x,0px);top:var(--vk-y,0px);width:2px;height:2px;clip-path:inset(50%);box-sizing:border-box;
  border-radius:var(--vk-r,0px);display:flex;align-items:center;justify-content:center;overflow:clip;pointer-events:none;color:inherit;
