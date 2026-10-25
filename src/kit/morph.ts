@@ -5,35 +5,91 @@ import { halfMinDp, type VireGlassGeometry, type VireGlassMorph } from 'vireglas
  *  integration entirely, for reduced motion. `rest` scales how near it must be to stop. */
 export type Spring = { x: number; v: number; target: number };
 
-/** The step the springs integrate in, s; a motion's clock counts in it. */
+/** The step the springs integrate in at most, s. */
 export const SPRING_STEP = 1 / 240;
 
-const FRAME_STEPS_MAX = Math.round(0.05 / SPRING_STEP);
+const RATES_HZ = [30, 48, 50, 60, 72, 75, 90, 100, 120, 144, 165, 180, 240];
+const SAMPLES_MAX = 16;
+const SAMPLES_MIN = 8;
+const FRAME_MS_MAX = 50;
 
-/** A motion's time in whole spring steps since its first frame. */
-export type MotionClock = { origin: number; steps: number };
+const intervals: number[] = [];
+let period = 1 / 60;
+let lastObserved = Number.NaN;
+let probing = false;
+
+/** The page's refresh period, s: the median of recent frame intervals, snapped to a canonical rate when within 5 %. */
+export const framePeriod = (): number => period;
+
+/** Takes one observed frame interval (ms); intervals over 50 ms are pauses, not frames. */
+export function observeFrameInterval(ms: number): void {
+  if (!(ms > 0) || ms > FRAME_MS_MAX) return;
+  intervals.push(ms);
+  if (intervals.length > SAMPLES_MAX) intervals.shift();
+  if (intervals.length < SAMPLES_MIN) return;
+  const sorted = [...intervals].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  const median = sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+  const rate = RATES_HZ.reduce((best, hz) => (Math.abs(median - 1000 / hz) < Math.abs(median - 1000 / best) ? hz : best));
+  const snapped = Math.abs(median - 1000 / rate) <= 0.05 * (1000 / rate);
+  period = snapped ? 1 / rate : Math.round(median * 10) / 10 / 1000;
+}
+
+/** Forgets what was observed; for tests. */
+export function resetFramePeriod(): void {
+  intervals.length = 0;
+  period = 1 / 60;
+  lastObserved = Number.NaN;
+}
+
+/** Measures the refresh period over a few frames, once per page; the callbacks only record time. */
+export function probeFramePeriod(): void {
+  if (probing || typeof requestAnimationFrame !== 'function') return;
+  probing = true;
+  let left = SAMPLES_MIN + 1;
+  let last = Number.NaN;
+  const tick = (t: number): void => {
+    if (!Number.isNaN(last)) observeFrameInterval(t - last);
+    last = t;
+    left -= 1;
+    if (left > 0) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+/** A motion's time in whole frames since its first one, at the period the page had then. */
+export type MotionClock = { origin: number; frames: number; period: number; last: number };
 
 /** A clock that starts on the first frame it is handed. */
-export const createMotionClock = (): MotionClock => ({ origin: Number.NaN, steps: 0 });
+export const createMotionClock = (): MotionClock => ({ origin: Number.NaN, frames: 0, period: Number.NaN, last: Number.NaN });
 
 /**
- * Runs `step` once per spring step due at the frame `now` (ms) and returns its last answer, or true when no step is due. The first
- * frame is 1/60 s and time rounds to whole steps, so a frame's state depends on its count, not on the jitter of frame times.
+ * Runs `step` for every frame due at `now` (ms), each as equal sub-steps of at most 1/240 s that add up to one refresh
+ * period, and returns the last answer, or true when no frame is due. The first frame counts as one and time rounds to
+ * whole frames, so a frame's state depends on its count, not on the jitter of frame times.
  */
 export function stepMotion(clock: MotionClock, now: number, step: (dt: number) => boolean): boolean {
-  const ms = SPRING_STEP * 1000;
   if (Number.isNaN(clock.origin)) {
-    clock.origin = now - ms * Math.round(1 / 60 / SPRING_STEP);
-    clock.steps = 0;
+    clock.period = framePeriod();
+    clock.origin = now - clock.period * 1000;
+    clock.frames = 0;
+  } else if (now !== lastObserved) {
+    observeFrameInterval(now - clock.last);
   }
-  let due = Math.round((now - clock.origin) / ms) - clock.steps;
-  if (due > FRAME_STEPS_MAX) {
-    clock.origin += (due - FRAME_STEPS_MAX) * ms;
-    due = FRAME_STEPS_MAX;
+  lastObserved = now;
+  clock.last = now;
+  const ms = clock.period * 1000;
+  const cap = Math.ceil(FRAME_MS_MAX / ms - 1e-9);
+  let due = Math.round((now - clock.origin) / ms) - clock.frames;
+  if (due > cap) {
+    clock.origin += (due - cap) * ms;
+    due = cap;
   }
+  const n = Math.ceil(clock.period / SPRING_STEP - 1e-9);
+  const dt = clock.period / n;
   let moving = true;
-  for (let i = 0; i < due; i += 1) moving = step(SPRING_STEP);
-  clock.steps += Math.max(due, 0);
+  for (let i = 0; i < due; i += 1) for (let j = 0; j < n; j += 1) moving = step(dt);
+  clock.frames += Math.max(due, 0);
   return moving;
 }
 

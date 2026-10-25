@@ -13,7 +13,7 @@ import {
 import { presentationForm, type PresentationForm, type SurfaceKind } from '../kit/adaptive/presentation';
 import type { Rect, Size } from '../kit/geometry';
 import { menuBody, menuMaterial, type RoundedRect } from '../kit/menu';
-import { POPOVER_GROWTH_TIMING, createGrowthState, createMotionClock, growthPhase, growthStateAt, heldGrowthState, stepGrowth, stepMotion, type GrowthPoint } from '../kit/morph';
+import { probeFramePeriod, POPOVER_GROWTH_TIMING, createGrowthState, createMotionClock, growthPhase, growthStateAt, heldGrowthState, stepGrowth, stepMotion, type GrowthPoint } from '../kit/morph';
 import {
   SHEET_SIZES,
   createSheetDrag,
@@ -284,6 +284,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     }
 
     connectedCallback(): void {
+      probeFramePeriod();
       for (const key of ['a11y', 'sample', 'detent']) {
         if (!Object.prototype.hasOwnProperty.call(this, key)) continue;
         const value: unknown = Reflect.get(this, key);

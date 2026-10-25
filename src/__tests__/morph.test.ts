@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { capsuleGeometry, roundedRectGeometry } from 'vireglass';
 import {
   SPRING_STEP,
+  framePeriod,
+  observeFrameInterval,
+  resetFramePeriod,
   createGrowthState,
   createMotionClock,
   growthFrame,
@@ -315,7 +318,12 @@ describe('holding a surface part of the way open', () => {
 });
 
 describe('the clock of a motion', () => {
-  const VSYNC = 1000 / 60;
+  afterEach(() => resetFramePeriod());
+  const settle = (hz: number) => {
+    resetFramePeriod();
+    for (let k = 0; k < 8; k += 1) observeFrameInterval(1000 / hz);
+  };
+  const seeded = (seed: number, amp: number) => () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 2 * amp;
   const growth = (times: readonly number[]) => {
     const state = createGrowthState();
     const clock = createMotionClock();
@@ -324,38 +332,100 @@ describe('the clock of a motion', () => {
       return growthPhase(state);
     });
   };
-  const frames = (n: number, at: (k: number) => number) => Array.from({ length: n }, (_, k) => at(k));
+  const frames = (n: number, ms: number, jitter = () => 0) => Array.from({ length: n }, (_, k) => 1000 + k * ms + jitter());
 
-  it('draws the same states whatever the jitter of frame times', () => {
-    let seed = 7;
-    const jitter = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 1.6;
-    const exact = growth(frames(90, (k) => 1000 + k * VSYNC));
-    expect(growth(frames(90, (k) => 1000 + k * VSYNC + jitter()))).toEqual(exact);
+  it.each([60, 75, 90, 120, 144, 165])('advances exactly one period every frame at %i Hz', (hz) => {
+    settle(hz);
+    const clock = createMotionClock();
+    for (const now of frames(120, 1000 / hz)) {
+      let advanced = 0;
+      let steps = 0;
+      stepMotion(clock, now, (dt) => ((advanced += dt), (steps += 1), true));
+      expect(advanced).toBeCloseTo(1 / hz, 12);
+      expect(steps).toBe(Math.ceil(240 / hz - 1e-9));
+    }
+  });
+
+  it.each([60, 120, 144])('draws the same states whatever the ±1 ms jitter of frame times at %i Hz', (hz) => {
+    settle(hz);
+    const exact = growth(frames(120, 1000 / hz));
+    expect(growth(frames(120, 1000 / hz, seeded(7, 1)))).toEqual(exact);
+  });
+
+  it.each([120, 144])('advances one period on its first frame at %i Hz', (hz) => {
+    settle(hz);
+    let advanced = 0;
+    stepMotion(createMotionClock(), 500, (dt) => ((advanced += dt), true));
+    expect(advanced).toBeCloseTo(1 / hz, 12);
   });
 
   it('skips the states of a late frame and draws no others', () => {
-    const exact = growth(frames(60, (k) => k * VSYNC));
-    const late = growth(frames(60, (k) => k * VSYNC).filter((_, k) => k !== 12 && k !== 13));
+    settle(60);
+    const all = frames(60, 1000 / 60);
+    const exact = growth(all);
+    const late = growth(all.filter((_, k) => k !== 12 && k !== 13));
     expect(late).toEqual(exact.filter((_, k) => k !== 12 && k !== 13));
   });
 
-  it('starts with a sixtieth of a second and advances at most 50 ms a frame', () => {
+  it('advances at most 50 ms after a stall and goes on from there', () => {
+    settle(60);
     const clock = createMotionClock();
-    const count = (now: number) => {
-      let n = 0;
-      stepMotion(clock, now, () => ((n += 1), true));
-      return n;
+    const advance = (now: number) => {
+      let advanced = 0;
+      stepMotion(clock, now, (dt) => ((advanced += dt), true));
+      return advanced;
     };
-    expect(count(500) * SPRING_STEP).toBeCloseTo(1 / 60, 9);
-    expect(count(500 + VSYNC)).toBe(4);
-    expect(count(500 + VSYNC + 400) * SPRING_STEP).toBeCloseTo(0.05, 9);
-    expect(count(500 + 2 * VSYNC + 400)).toBe(4);
+    expect(advance(500)).toBeCloseTo(1 / 60, 12);
+    expect(advance(500 + 1000 / 60)).toBeCloseTo(1 / 60, 12);
+    expect(advance(500 + 1000 / 60 + 400)).toBeCloseTo(0.05, 12);
+    expect(advance(500 + 2000 / 60 + 400)).toBeCloseTo(1 / 60, 12);
   });
 
-  it('keeps time at a refresh rate that is not a multiple of its step', () => {
+  it('draws at 60 Hz the states the 1/240 s clock drew', () => {
+    settle(60);
+    const old = createGrowthState();
+    const oldPhases = Array.from({ length: 90 }, () => {
+      for (let i = 0; i < 4; i += 1) stepGrowth(old, SPRING_STEP, true);
+      return growthPhase(old);
+    });
+    expect(growth(frames(90, 1000 / 60))).toEqual(oldPhases);
+  });
+
+  it('keeps the period it began with when the page estimate moves', () => {
+    settle(60);
     const clock = createMotionClock();
-    let steps = 0;
-    for (let k = 0; k <= 144; k += 1) stepMotion(clock, k * (1000 / 144), () => ((steps += 1), true));
-    expect(Math.abs(steps * SPRING_STEP - (1 + 1 / 60))).toBeLessThanOrEqual(SPRING_STEP);
+    stepMotion(clock, 0, () => true);
+    settle(144);
+    let advanced = 0;
+    stepMotion(clock, 1000 / 60, (dt) => ((advanced += dt), true));
+    expect(advanced).toBeCloseTo(1 / 60, 12);
+  });
+
+  describe('the page refresh period', () => {
+    it('is a sixtieth of a second until eight frames are seen', () => {
+      for (let k = 0; k < 7; k += 1) observeFrameInterval(1000 / 144);
+      expect(framePeriod()).toBe(1 / 60);
+      observeFrameInterval(1000 / 144);
+      expect(framePeriod()).toBe(1 / 144);
+    });
+
+    it('snaps to a canonical rate within 5 % and does not move with jitter', () => {
+      const jitter = seeded(3, 0.25);
+      for (let k = 0; k < 40; k += 1) {
+        observeFrameInterval(1000 / 144 + jitter());
+        if (k >= 7) expect(framePeriod()).toBe(1 / 144);
+      }
+    });
+
+    it('rounds a rate that is no canonical one to 0.1 ms', () => {
+      settle(55);
+      expect(framePeriod()).toBeCloseTo(0.0182, 9);
+    });
+
+    it('ignores a pause of more than 50 ms', () => {
+      settle(120);
+      for (let k = 0; k < 4; k += 1) observeFrameInterval(400);
+      expect(framePeriod()).toBe(1 / 120);
+    });
   });
 });

@@ -14,7 +14,7 @@ import { hitTarget, sizeTier } from '../kit/adaptive/input';
 import { navigationForm, type NavigationForm, type NavigationFormKind } from '../kit/adaptive/navigation';
 import { ATOM_AT_REST, atomBody, atomMaterial } from '../kit/atom';
 import { menuMaterial } from '../kit/menu';
-import { createMotionClock, stepMotion } from '../kit/morph';
+import { probeFramePeriod, createMotionClock, stepMotion } from '../kit/morph';
 import {
   aimNavMorph,
   cancelNavDrag,
@@ -248,6 +248,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     }
 
     connectedCallback(): void {
+      probeFramePeriod();
       for (const key of ['a11y', 'sample', 'scroller']) {
         if (!Object.prototype.hasOwnProperty.call(this, key)) continue;
         const value: unknown = Reflect.get(this, key);
@@ -1123,11 +1124,14 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       const morph = this.#morph;
       if (!this.isConnected || !morph || this.#forced()) return;
       const instant = this.#presentation?.instantSprings ?? false;
+      const drag = this.#drag;
+      const pill = this.#pillAnim.state;
+      const acc = this.#accAnim.state;
       const moving = stepMotion(this.#clock, now, (dt) => {
         let moved = stepNavMorph(morph, dt, instant);
-        if (this.#restLayout() && stepNavDrag(this.#drag, dt, instant)) moved = true;
-        if (stepFormMorph(this.#pillAnim.state, dt, 1, instant)) moved = true;
-        if (stepFormMorph(this.#accAnim.state, dt, 1, instant)) moved = true;
+        if (this.#restLayout() && stepNavDrag(drag, dt, instant)) moved = true;
+        if (stepFormMorph(pill, dt, 1, instant)) moved = true;
+        if (stepFormMorph(acc, dt, 1, instant)) moved = true;
         return moved;
       });
       this.#paint();

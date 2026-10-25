@@ -17,7 +17,7 @@ import {
   type MenuState,
   type RoundedRect,
 } from '../kit/menu';
-import { createGrowthState, createMotionClock, growthPhase, smoothstep, stepGrowth, stepMotion, type GrowthPhase, type GrowthPoint } from '../kit/morph';
+import { probeFramePeriod, createGrowthState, createMotionClock, growthPhase, smoothstep, stepGrowth, stepMotion, type GrowthPhase, type GrowthPoint } from '../kit/morph';
 import { segmentOf } from '../kit/adaptive/context';
 import { sizeTier } from '../kit/adaptive/input';
 import type { Rect, Size } from '../kit/geometry';
@@ -176,6 +176,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     }
 
     connectedCallback(): void {
+      probeFramePeriod();
       for (const key of ['a11y', 'sample']) {
         if (!Object.prototype.hasOwnProperty.call(this, key)) continue;
         const value: unknown = Reflect.get(this, key);

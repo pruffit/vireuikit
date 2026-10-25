@@ -16,7 +16,7 @@ import {
   stepControlVisual,
   visualAtomState,
 } from '../kit/behavior/visual';
-import { createMotionClock, stepMotion } from '../kit/morph';
+import { probeFramePeriod, createMotionClock, stepMotion } from '../kit/morph';
 import { pressResponse } from '../kit/response';
 import { BUTTON_SIZES, CONTROL_SIZES, hitSlop, iconButtonSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
@@ -124,6 +124,7 @@ export function createControlElementClass(
     }
 
     connectedCallback(): void {
+      probeFramePeriod();
       // Set before the element was defined, a property lands on the instance and hides the accessor.
       for (const key of ['a11y', 'sample']) {
         if (!Object.prototype.hasOwnProperty.call(this, key)) continue;
