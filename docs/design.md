@@ -142,7 +142,7 @@ sit on the vsync whatever a frame costs; the popover's headroom is issue #40. A 
 counted and excused stalls), the idle controls, glass off and the cold replay. A kept trace goes under the system temp
 directory, never the repository.
 
-Switches: `VIREUIKIT_PERF_TRACE=0` runs untraced (then nothing is excused and the task bound, compiles and traces are
+Switches: `VIREUIKIT_PERF_KEEP=all` keeps the trace of every traced replay, not only those that broke a rule; `VIREUIKIT_PERF_TRACE=0` runs untraced (then nothing is excused and the task bound, compiles and traces are
 not checked); `VIREUIKIT_PERF_OFF_REPLAYS` sets the replays with glass off (1); `VIREUIKIT_PERF_OUT=<file>` writes one JSON
 line per recording; `VIREUIKIT_PERF_FRESH=browser` launches a browser for each transition; `VIREUIKIT_PERF_SEED` seeds the
 random canary (20241024, printed); `VIREUIKIT_LAB_BOOT_MS` is how long a lab case may take to boot (30 000, for

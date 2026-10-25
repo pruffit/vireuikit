@@ -13,6 +13,7 @@ const REPLAYS = 3;
 const OFF_REPLAYS = Number(process.env.VIREUIKIT_PERF_OFF_REPLAYS ?? 1);
 const TRACE = process.env.VIREUIKIT_PERF_TRACE !== '0';
 const OUT = process.env.VIREUIKIT_PERF_OUT;
+const KEEP_ALL = process.env.VIREUIKIT_PERF_KEEP === 'all';
 const FRESH = process.env.VIREUIKIT_PERF_FRESH === 'browser';
 const SEED = Number(process.env.VIREUIKIT_PERF_SEED ?? 20241024);
 const RUN = new Date().toISOString().replace(/[:.]/g, '-');
@@ -155,7 +156,7 @@ async function replay(page: Page, transition: Transition, glass: '1' | '0', role
     appendFileSync(OUT, `${JSON.stringify({ run: RUN, seq, name: transition.name, kind: 'replay', glass, role, ...r })}\n`);
     if (i) appendFileSync(OUT, `${JSON.stringify({ run: RUN, seq, name: transition.name, kind: 'idle', glass, role, ...i })}\n`);
   }
-  if (events && (r.stalls.length > 0 || r.longTasks.length > 0 || r.compiled.length > 0 || (i?.stalls.length ?? 0) > 0)) {
+  if (events && (KEEP_ALL || r.stalls.length > 0 || r.longTasks.length > 0 || r.compiled.length > 0 || (i?.stalls.length ?? 0) > 0)) {
     mkdirSync(TRACE_DIR, { recursive: true });
     const file = join(TRACE_DIR, `${String(seq).padStart(4, '0')}-${transition.name.replace(/[^a-z0-9]+/gi, '-')}-glass-${glass}.json`);
     const idleRec = idle as Recording | null;

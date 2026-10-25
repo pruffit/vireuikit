@@ -56,6 +56,7 @@ const FORCE_ATTRIBUTE = 'data-vire-force-state';
 const ENVIRONMENT_QUERIES = ['(prefers-color-scheme: dark)', '(forced-colors: active)'];
 const SAMPLE_KEYS = ['luma', 'lo', 'hi', 'r', 'g', 'b'] as const;
 const SAMPLE_TOLERANCE = 0.03;
+const RESAMPLE_QUIET_MS = 250;
 
 function isProbe(node: Node): boolean {
   return node instanceof Element && (node.hasAttribute('data-vk-probe') || node.hasAttribute('data-vk-sample'));
@@ -169,6 +170,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     /** The backdrop of the box the surface will occupy, read while the page was idle; any change to the page behind it drops it. */
     #idleSample: { box: Rect; sample: BackdropSample } | null = null;
     #envFresh = false;
+    #resampleTimer = 0;
     #pageWatch: MutationObserver | null = null;
     #dialog: HTMLDialogElement | null = null;
     #grabber: HTMLElement | null = null;
@@ -325,6 +327,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#cancelVerify?.();
       this.#cancelIdle = this.#cancelVerify = null;
       this.#verify = { content: false, env: false, sample: false };
+      window.clearTimeout(this.#resampleTimer);
       this.#premeasured = this.#idleFull = this.#envFresh = false;
       this.#idleSample = null;
       this.#dropGlass();
@@ -928,19 +931,34 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       const surface = this.#surface;
       this.#cancelIdle = whenIdle(() => {
         this.#cancelIdle = null;
-        const all = this.#idleFull;
-        this.#idleFull = false;
         if (!surface || this.#surface !== surface || this.#out) return;
-        if (all || !this.#premeasured) this.#premeasure();
-        this.#presample();
+        if (this.#idleStep()) this.#premeasureSoon(false);
       });
     }
 
-    /** The page behind the surface changed: the sample read for it is gone, and the next idle moment reads it again. */
+    /** One piece of the idle work per idle callback, so no task of it is longer than the piece; true while more is left. */
+    #idleStep(): boolean {
+      if (this.#idleFull || !this.#premeasured) {
+        this.#idleFull = false;
+        return this.#premeasure();
+      }
+      if (!this.#envFresh) {
+        this.#readEnvironment();
+        return true;
+      }
+      this.#presample();
+      return false;
+    }
+
+    /** The page behind the surface changed: the sample read for it is gone, and it is read again once the page has been quiet and no surface is moving. */
     #dropSample(): void {
-      if (this.#out || !this.#idleSample) return;
+      if (this.#out) return;
       this.#idleSample = null;
-      this.#premeasureSoon(false);
+      window.clearTimeout(this.#resampleTimer);
+      this.#resampleTimer = window.setTimeout(() => {
+        const root = this.getRootNode() as ParentNode;
+        if (!root.querySelector('[data-vk][data-phase]')) this.#premeasureSoon(false);
+      }, RESAMPLE_QUIET_MS);
     }
 
     #dropEnvironment(): void {
@@ -976,7 +994,11 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
           this.#place();
           this.#run();
         }
-        if (taken.sample) this.#verifySample();
+        if (!taken.sample) return;
+        this.#cancelVerify = whenIdle(() => {
+          this.#cancelVerify = null;
+          if (this.#surface === surface && this.#out && this.#open) this.#verifySample();
+        });
       });
     }
 
@@ -1014,20 +1036,19 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       }
     }
 
-    #premeasure(): void {
-      if (!this.#envFresh) this.#readEnvironment();
+    #premeasure(): boolean {
       const measured = this.#asOpening((ctx, _win, local) => {
         this.#contentKey = '';
         this.#contentFor(presentationForm(this.#kind(), ctx, local ?? undefined), ctx.window);
         return true;
       });
       if (measured) this.#premeasured = true;
+      return measured === true;
     }
 
     /** Reads the backdrop of the box the surface will occupy while the page is idle, so the click that opens it does not hit-test the page. */
     #presample(): void {
       if (this.#idleSample || this.#dialog || this.#sample || !glassLoaded() || !this.#premeasured) return;
-      if (!this.#envFresh) this.#readEnvironment();
       const box = this.#asOpening((ctx, win, local) => {
         const form = presentationForm(this.#kind(), ctx, local ?? undefined);
         const content = this.#contentFor(form, ctx.window);
