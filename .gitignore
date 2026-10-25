@@ -10,3 +10,4 @@ Thumbs.db
 /*.measure.json
 test-results/
 playwright-report/
+/lab-scenarios/

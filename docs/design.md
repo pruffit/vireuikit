@@ -92,6 +92,7 @@ attribute, a development aid of the elements that the lab and the snapshots use.
 | `npm run check:lab:visual` | the screenshot set: atom × state × backdrop × glass on/off, the navigation's four forms and the lens frozen mid-morph, the scroll edge's dissolve, dimming and flat band, and the adaptive stage at six presets, against committed baselines in `tests/lab/__screenshots__/<platform>/`. Local only: the baselines are Windows renders and CI does not run it. `npm run check:lab:visual:update` rewrites them |
 | `npm run check:lab:reference` | local only, needs the third-party frames in `VIREUIKIT_REFERENCE_DIR` (never committed): the menu parity gate on the `view=menu-reference` stage, ours against the reference at ten instants of the growth and the retraction (silhouette overlap, lightness, edge energy of the content, centroid; acceptance N29). Skips with a message without the frames |
 | `npm run check:lab:perf` | local only, a headed Chromium with the GPU: the frames of every transition of `tests/lab/transitions.ts` with glass on and off beside an idle control, and the headroom of a frame (see "The frame gate") |
+| `npm run check:lab:scenarios` | local only, headless: every presented frame of what a user does with the menu, popover, sheet, toolbar, navigation and the atoms (open, close, drag, tap, hover, press, resize) through 1.5 s after the last motion, with gates on those frames (seam, vanish, shape, ghost, state) and canaries that must fail them (see "Scenario recordings") |
 | existing | `check:english`, `check:package`, `check:readme`, `typecheck` (the model under `src/kit` is also checked with no DOM lib), `build` |
 
 Visual baselines change only on purpose, in the same commit as the code that changes the look.
@@ -163,6 +164,71 @@ a `Present` wait (`frame`), and `compile` a WebGL program of unseen source linke
 unless each run fails by its rule. Run it after any change to the gate.
 
 The runs behind these choices, on a Ryzen 5 3500U with Vega 8, are in issue #39.
+
+### Scenario recordings
+
+`check:lab:scenarios` (`tests/lab/scenarios/`) plays what a user does with an element and judges the frames the user
+sees, from just before the input to 1.5 s after the last kit motion ends. The frame gate above times frames and the
+visual baselines hold forced still states; neither looks at the picture during and after an interaction, which is
+where the acceptance of 25.10 (issue #44) found a pop after every motion, hover that cannot be seen, items that vanish
+in a drag and shapes that are square for a second. It is local (`npm run check:lab:scenarios`), headless, and runs
+its own lab on port 5180 (`VIREUIKIT_LAB_PORT`) built the way the frame gate's is.
+
+**Capture.** `Page.startScreencast` as lossless PNG, every frame acknowledged at once. A frame comes with the
+compositor's timestamp, which is on the page's clock (`performance.timeOrigin + now()`; the frame of a change lands 2
+to 4 ms after it), so frames, inputs and motion edges share one timeline. A frame is delivered for each presented
+frame that changed, so a still page gives none, and that is what "nothing changed" means here. Tracing screenshots
+(`disabled-by-default-devtools.screenshot`) were measured and rejected: they are scaled to 498 px wide and compressed to
+about 6 kB, and they come at roughly every second to third frame. The screencast delivered 90 of 91 frames of a page
+changing on every frame, at 900 × 700 and at 480 × 560, as PNG and as JPEG. The browser is Playwright's headless
+Chromium with its software renderer (SwiftShader): the same pixels on every run, which a gate on pixels needs, where
+a GPU adapter gave frames that varied from run to run while its shaders were compiled. Software rendering makes a
+frame slower than on a GPU, so the recording is a verdict on what is drawn, not on how fast; `check:lab:perf` is the
+verdict on speed.
+
+**Motion edges.** `requestMotionFrame` in `src/web/dom.ts` calls `globalThis.__vireMotion('start' | 'end')` when the
+count of pending motion frames goes 0 → 1 and when, at the end of a frame's callback, it is 0 again; without a probe
+that is a property read at two instants per motion. The recorder installs the probe before the page's scripts, merges
+motions less than 50 ms apart, and reads the boxes of the elements a scenario names after each frame's callbacks
+(`MessageChannel`), so a frame can be judged against where its elements were.
+
+**Gates**, each printing its numbers; the limits are `LIMITS` in `gates.ts`. Colour difference is CIE76 ΔE in Lab; a
+pixel "changed" above ΔE 3. A still page between two frames of the same content measures 0.000 (the render is
+deterministic and the PNG lossless), so there is no noise floor to hide a threshold in.
+
+| Gate | Definition | Limit | Data behind it |
+| --- | --- | --- | --- |
+| seam | in the region of the scenario's elements (their boxes at the motion's start and end, 20 px around), the frame that presents a motion's last tick and every frame after it, up to 1.5 s or the next motion, differ from the frame before by no more than the limit; and the first of them differs from the last by less than the drift limit | share of pixels changed ≤ 0.2 %, mean ΔE ≤ 0.15, drift ≤ 0.4 % | still steps 0.000; a canary that settles 0.000; pops of #44 from mean ΔE 0.08 (0.5 % changed) to 3.8 (35 %) |
+| vanish | every item keeps its ink in every frame: ink is the pixels more than ΔE 14 from the median colour of the item's box, counted against the same count in the frame before the input; the real glyph or the lens's magnified copy both count | ≥ 50 % of the ink at rest | tapping every item: lowest 83 % (touch 92 %); items that vanish in a drag: 0 to 33 % |
+| shape | outside the radius of a capsule (half the short side, whatever the element declares), further than a fifth of the radius from the arc, a frame shows the backdrop (the page with the kit hidden, or the frame before the input for an element on glass of its own); judged in frames outside the kit's motions, where a box is the shape drawn in it | ≤ 15 % of those pixels more than ΔE 6 from the reference | a resting capsule 0.8 % (its shadow); a square behind a capsule 100 % |
+| ghost | while a surface is the size of its target (± 8 px), the part of it that belongs to the open form (the grabber) looks like the settled target in its box | ≤ 5 % of the part's pixels over ΔE 3 | a clean pill 0 %, a strip left on it 100 % |
+| state | the element's box at the mark a scenario sets (hover, press, settled) differs from its box before the input | mean ΔE ≥ 2.3, a just noticeable difference | press 2.8 to 10.6; the lab's toolbar buttons hover at 4.2 to 5.5 and the navigation's at 2.7 to 3.2 |
+
+**Scenarios** are in `scenarios.ts`: the menu opening, closing and opening again; the popover and the popover as a
+bottom sheet; the sheet growing and collapsing into its trigger, dragged between detents and scrolled; the toolbar
+collapsing into its button and back, changing place, hovered button by button; the navigation with its lens dragged
+across every item and back at 600 px/s (moves every 8 ms), every item tapped by mouse and by touch, a tap during a form
+morph, resized bar → rail → sidebar and back, hovered item by item; button and icon button hover and press over the
+lab's light, dark, busy and mid backdrops and across a light/dark border (`backdrop=split&split=<selector>`). A scenario
+that fails a gate on a finding of #44 carries it in `known`: the table prints it as known, the run stays green, and the
+run fails the day the gate passes, so the label is removed with the fix (`VIREUIKIT_SCENARIOS_STRICT=1` fails on known
+findings too; `VIREUIKIT_SCENARIOS_ONLY=<regex>` runs some scenarios; `VIREUIKIT_LAB_REUSE=1` reuses a lab already
+served on the port, for work on the gates only).
+
+**Output**, in `lab-scenarios/` (git-ignored; `VIREUIKIT_SCENARIOS_OUT`): per scenario `sheet.png` (every presented
+frame in a grid, labelled in ms from the input; the frame that presents a motion's last tick is blue, a frame a gate
+points at is red), `sheet.html` and `frames/` (the frames as PNG), `metrics.json` (frame times and gaps, motions,
+marks, each gate's numbers and per-frame series), and at the end `summary.txt` and `summary.json`; the summary table
+is printed. Look at the sheets before a handoff.
+
+**Canaries** (`canaries.ts`, `canaries.spec.ts`, run with the scenarios): a synthetic page per gate that must fail it
+(a label that arrives 400 ms after the motion, an item erased in a drag, a square behind a capsule, a strip left on a
+pill, a hover of ΔE 1.3) and the same page without the defect that must pass it. Run them after any change to a gate.
+
+**What it does not see.** It judges what is drawn in a software render, so a difference that only the GPU makes is
+not in it. A gate reads the boxes of the elements a scenario names, so a defect in an element nobody tracked is not in
+it either. A defect that is a single wrong pixel colour in a region that moves with the motion (a spring's last
+tick) is bounded by the seam's limit, not zero.
 
 ## The menu
 

@@ -24,6 +24,7 @@ npm run check:lab
 npm run check:lab:visual   # local, Windows baselines
 npm run check:lab:perf     # local, a headed Chromium with a GPU
 npm run check:lab:perf:canaries # local, proves the perf gate fails on a known cost, by the right rule
+npm run check:lab:scenarios # local, headless: records what a user sees in each interaction and judges the frames
 npm run check:lab:reference # local, needs VIREUIKIT_REFERENCE_DIR (frames, never committed)
 ```
 
@@ -38,6 +39,15 @@ run it. The comparison is strict (`docs/design.md`); refresh the baselines with
 `npm run check:lab:visual:update` only when the look changes on purpose. `npm run lab`
 serves the lab; set `VIREUIKIT_REFERENCE_DIR` to a local folder of reference frames to see them in its side pane.
 Reference frames are third-party and are never committed.
+
+`npm run check:lab:scenarios` plays the interactions of every element (open, close, drag, tap, hover, press, resize) in a
+headless Chromium and keeps every presented frame from before the input to 1.5 s after the last kit motion. It judges
+the frames: nothing changes after a motion ends (seam), no item vanishes in a drag or tap, rounded shapes keep their
+radius, a part of an open surface is gone when it has shrunk to its trigger, and hover and press are seen over every
+backdrop. It prints a table, and writes contact sheets and per-frame metrics to `lab-scenarios/` (git-ignored); look at
+the sheets before handing an element over. Its canaries (synthetic pages that must fail each gate) run with it. A gate
+that fails on a known finding is labelled in `tests/lab/scenarios/scenarios.ts`; fixing the finding turns the run red
+until the label is removed. Definitions, limits and the data behind them: `docs/design.md`, "Scenario recordings".
 
 `npm run check:lab:perf` replays every transition of `tests/lab/transitions.ts` in a headed Chromium and times its
 frames with glass on and off, each replay after an idle control of the same page, under a trace; it prints a table

@@ -61,7 +61,8 @@
     "check:lab:reference": "node scripts/check-lab-reference.mjs",
     "check:lab:visual:update": "playwright test visual --update-snapshots",
     "check:lab:perf": "playwright test --config playwright.perf.config.ts",
-    "check:lab:perf:canaries": "node scripts/check-perf-canaries.mjs"
+    "check:lab:perf:canaries": "node scripts/check-perf-canaries.mjs",
+    "check:lab:scenarios": "playwright test --config playwright.scenarios.config.ts"
   },
   "peerDependencies": {
     "vireglass": "^3.6.0"

@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: 'tests/lab',
-  testIgnore: 'perf.spec.ts',
+  testIgnore: ['perf.spec.ts', 'scenarios/**'],
   snapshotPathTemplate: '{testDir}/__screenshots__/{platform}/{arg}{ext}',
   fullyParallel: false,
   workers: 1,

@@ -12,5 +12,5 @@
     "types": ["node", "vite/client"],
     "paths": { "vireuikit/web": ["./src/web/index.ts"] }
   },
-  "include": ["src", "lab", "tests", "playwright.config.ts", "playwright.perf.config.ts"]
+  "include": ["src", "lab", "tests", "playwright.config.ts", "playwright.perf.config.ts", "playwright.scenarios.config.ts"]
 }
