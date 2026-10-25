@@ -187,8 +187,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
     #remeasureFrame = 0;
     #wasMoving = false;
     #stepping = false;
-    #sweep = false;
-    #rtl = false;
+    #rtl: boolean | null = null;
 
     #current: HTMLButtonElement | null = null;
     #lastFocus: Element | null = null;
@@ -685,7 +684,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
     /** The container's extent along the toolbar, to the fraction: a threshold is crossed by a fraction of a dp. */
     #measureExtent(): number {
       const style = getComputedStyle(this);
-      this.#rtl = style.direction === 'rtl';
+      if (!this.#stepping) this.#rtl = style.direction === 'rtl';
       const vertical = this.#vertical();
       const size = parseFloat(vertical ? style.height : style.width);
       if (!Number.isFinite(size)) return vertical ? this.clientHeight : this.clientWidth;
@@ -851,12 +850,16 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
 
     #run(): void {
       const instant = this.#presentation?.instantSprings ?? false;
+      let swept = false;
       if (instant && !this.#forced) {
         if (this.#morph) stepToolbarMorph(this.#morph, 0, true);
-        this.#stepPlace(0, true);
+        swept = this.#stepPlace(0, true);
       }
-      if (!this.#stepping) this.#paint();
-      if (this.#frame || this.#forced) return;
+      if (!this.#stepping) {
+        this.#rtl ??= getComputedStyle(this).direction === 'rtl';
+        this.#paint(swept);
+      }
+      if (this.#frame || this.#forced || this.#stepping) return;
       if (!this.#moving()) {
         this.toggleAttribute('data-moving', false);
         return;
@@ -870,37 +873,43 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       if (!this.isConnected || this.#forced) return;
       const instant = this.#presentation?.instantSprings ?? false;
       this.#stepping = true;
+      let swept = false;
       try {
         stepMotion(this.#clock, now, (dt) => {
           if (this.#morph) stepToolbarMorph(this.#morph, dt, instant);
-          this.#stepPlace(dt, instant);
+          if (this.#stepPlace(dt, instant)) swept = true;
           return true;
         });
       } finally {
         this.#stepping = false;
       }
-      this.#paint();
+      this.#paint(swept);
       if (this.#moving()) this.#frame = requestAnimationFrame((t) => this.#tick(t));
       else this.toggleAttribute('data-moving', false);
     }
 
-    #stepPlace(dt: number, instant: boolean): void {
+    /** Whether the form was swapped, which leaves the old form's lenses to be dropped by the next paint. */
+    #stepPlace(dt: number, instant: boolean): boolean {
       const placing = this.#placing;
-      if (!placing) return;
+      if (!placing) return false;
+      let swapped = false;
       const moving = stepSpring(placing.t, dt, TOOLBAR_PLACE_TIMING.response, TOOLBAR_PLACE_TIMING.damping, instant);
       if (!placing.swapped && placing.t.x >= 0.5) {
         placing.swapped = true;
         this.#applyPlacement(placing.pending);
         this.#computeAfterSwap();
+        swapped = true;
       }
       if (!moving) {
         if (!placing.swapped) {
           placing.swapped = true;
           this.#applyPlacement(placing.pending);
           this.#computeAfterSwap();
+          swapped = true;
         }
         this.#placing = null;
       }
+      return swapped;
     }
 
     #computeAfterSwap(): void {
@@ -908,7 +917,6 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       this.#placing = null;
       this.#compute(true);
       this.#placing = placing;
-      this.#sweep = true;
     }
 
     #appearNow(): number {
@@ -922,7 +930,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       return placing.swapped ? frame.incoming : frame.outgoing;
     }
 
-    #paint(): void {
+    #paint(sweep = false): void {
       const geometry = this.#geometry;
       const layout = this.#layout;
       const morph = this.#morph;
@@ -934,7 +942,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       this.toggleAttribute('data-moving', moving);
 
       const vertical = placement.orientation === 'vertical';
-      const rtl = this.#rtl;
+      const rtl = this.#rtl === true;
       const side = geometry.side;
       const span = frame.shapes.length ? toolbarBounds(frame.shapes) : null;
       const shift = placement.edge === 'bottom' && this.#spacerAfter === undefined && span ? (this.#extent - span.width) / 2 - span.x : 0;
@@ -963,7 +971,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
         else if (target && this.#forcedFrame === null) this.#placeMore(more, fit(target), 0);
         else this.#placeMore(more, null, 0);
       }
-      this.#paintCapsules(frame, aside ? fit(aside.box, true) : null, appear, fit, moving);
+      this.#paintCapsules(frame, aside ? fit(aside.box, true) : null, appear, fit, moving, sweep);
       if (follow) for (const item of this.#items) item.surface?.follow?.();
       if (this.#focusMore && more && more.shown && more.ink > 0.05) {
         this.#focusMore = false;
@@ -1113,7 +1121,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       }
     }
 
-    #paintCapsules(frame: ToolbarFrame, asideBox: MorphBox | null, appear: number, fit: (b: MorphBox) => MorphBox, live: boolean): void {
+    #paintCapsules(frame: ToolbarFrame, asideBox: MorphBox | null, appear: number, fit: (b: MorphBox) => MorphBox, live: boolean, sweep: boolean): void {
       const placement = this.#placement!;
       const axis = placement.orientation === 'vertical' ? 'y' : 'x';
       const shapes: { key: string; box: MorphBox }[] = frame.capsules.map((c, i) => ({ key: c.items[0] ?? `c${i}`, box: fit(c.box) }));
@@ -1167,7 +1175,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       }
       for (const [key, capsule] of this.#capsules) {
         if (capsule.used) continue;
-        if ((!moving && !this.#placing) || this.#sweep) {
+        if ((!moving && !this.#placing) || sweep) {
           capsule.session?.destroy();
           capsule.el.remove();
           this.#capsules.delete(key);
@@ -1175,7 +1183,6 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
           capsule.el.hidden = true;
         }
       }
-      this.#sweep = false;
     }
 
     /** Hands a lens only what changed: a moved box needs nothing, a new size rebuilds its filter and a new presence only writes it. While the toolbar moves the lens is in interim. */

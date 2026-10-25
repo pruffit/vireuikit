@@ -296,10 +296,22 @@ ${TB_BARE}{color:ButtonText;background:ButtonFace;border:1px solid ButtonText}
 `;
 
 const STYLE_ATTR = 'data-vireuikit';
+const PROPERTIES_ATTR = 'data-vireuikit-properties';
+
+/** A ShadowRoot ignores @property, so the registrations go in the document, once. */
+function registerProperties(doc: Document, nonce?: string): void {
+  if (doc.querySelector(`style[${PROPERTIES_ATTR}]`)) return;
+  const style = doc.createElement('style');
+  style.setAttribute(PROPERTIES_ATTR, '');
+  if (nonce) style.nonce = nonce;
+  style.textContent = ITEM_BOX;
+  doc.head.appendChild(style);
+}
 
 export function ensureStyles(from: Element, nonce?: string): void {
   const root = from.getRootNode();
   const host: Document | ShadowRoot = root instanceof ShadowRoot ? root : from.ownerDocument;
+  if (host instanceof ShadowRoot) registerProperties(from.ownerDocument, nonce);
   if (host.querySelector(`style[${STYLE_ATTR}]`)) return;
   const style = from.ownerDocument.createElement('style');
   style.setAttribute(STYLE_ATTR, '');

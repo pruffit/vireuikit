@@ -1007,4 +1007,99 @@ test.describe('the cost of a frame', () => {
     expect(inherited.item).not.toBe('');
     expect(inherited.inner).toBe('');
   });
+
+  test('a change of place runs one frame chain: the frame that swaps it schedules the next one once', async ({ page }) => {
+    await openToolbar(page, `${TOP}&spacer=0&glass=0`, 420, 400);
+    const peak = await page.evaluate(async () => {
+      const bar = document.querySelector('vire-toolbar')!;
+      const request = window.requestAnimationFrame;
+      const cancel = window.cancelAnimationFrame;
+      const pending = new Set<number>();
+      let most = 0;
+      window.requestAnimationFrame = (callback) => {
+        const id = request.call(window, (t) => {
+          pending.delete(id);
+          callback(t);
+        });
+        pending.add(id);
+        most = Math.max(most, pending.size);
+        return id;
+      };
+      window.cancelAnimationFrame = (id) => {
+        pending.delete(id);
+        cancel.call(window, id);
+      };
+      bar.setAttribute('placement', 'bottom');
+      while (bar.getAttribute('data-edge') !== 'bottom') await new Promise((r) => request.call(window, r));
+      while (bar.hasAttribute('data-moving')) await new Promise((r) => request.call(window, r));
+      window.requestAnimationFrame = request;
+      window.cancelAnimationFrame = cancel;
+      return most;
+    });
+    expect(peak).toBe(1);
+  });
+
+  test('the direction is read when a change of place starts: a page flipped to rtl between two of them paints the second mirrored', async ({ page }) => {
+    await openToolbar(page, `${TOP}&spacer=0&glass=0`, 720, 400);
+    const order = () =>
+      page.evaluate(() => {
+        const xs = [...document.querySelectorAll<HTMLElement>('vire-toolbar [data-vk-item]:not([hidden])')].map((el) => el.getBoundingClientRect().x);
+        return xs[0]! < xs[xs.length - 1]! ? 'ltr' : 'rtl';
+      });
+    const move = (to: string) =>
+      page.evaluate(async (edge) => {
+        const bar = document.querySelector('vire-toolbar')!;
+        bar.setAttribute('placement', edge);
+        while (bar.getAttribute('data-edge') !== edge) await new Promise((r) => requestAnimationFrame(r));
+        while (bar.hasAttribute('data-moving')) await new Promise((r) => requestAnimationFrame(r));
+      }, to);
+    await move('bottom');
+    expect(await order()).toBe('ltr');
+    await page.evaluate(() => document.documentElement.setAttribute('dir', 'rtl'));
+    await move('top');
+    expect(await order()).toBe('rtl');
+  });
+
+  test('a paint after a change of place keeps the lenses that are in use', async ({ page }) => {
+    await openToolbar(page, `${TOP}&spacer=0&glass=0`, 420, 400);
+    await page.evaluate(async () => {
+      const bar = document.querySelector('vire-toolbar')!;
+      bar.setAttribute('placement', 'bottom');
+      while (bar.getAttribute('data-edge') !== 'bottom') await new Promise((r) => requestAnimationFrame(r));
+      while (bar.hasAttribute('data-moving')) await new Promise((r) => requestAnimationFrame(r));
+    });
+    const tag = () =>
+      page.evaluate(() => {
+        const caps = [...document.querySelectorAll('vire-toolbar [data-vk-capsule]')];
+        caps.forEach((c, i) => c.getAttribute('data-seen') ?? c.setAttribute('data-seen', String(i)));
+        return caps.filter((c) => !(c as HTMLElement).hidden).map((c) => c.getAttribute('data-seen'));
+      });
+    const before = await tag();
+    expect(before.length).toBeGreaterThan(0);
+    await reflow(page, 430, 400);
+    expect(await tag()).toEqual(before);
+  });
+
+  test('inside a shadow root the properties that place an item are still not inherited', async ({ page }) => {
+    await openToolbar(page, `${TOP}&glass=0`);
+    const inherited = await page.evaluate(async () => {
+      document.querySelectorAll('style[data-vireuikit], style[data-vireuikit-properties]').forEach((el) => el.remove());
+      const host = document.createElement('div');
+      host.style.cssText = 'position:absolute;left:0;top:300px;width:420px';
+      document.body.append(host);
+      const root = host.attachShadow({ mode: 'open' });
+      root.innerHTML =
+        '<vire-toolbar placement="top" style="display:block" aria-label="Shadow"><div data-group>' +
+        '<vire-icon-button><button type="button" aria-label="A" data-priority="9">A</button></vire-icon-button>' +
+        '<vire-icon-button><button type="button" aria-label="B" data-priority="8">B</button></vire-icon-button></div></vire-toolbar>';
+      const bar = root.querySelector('vire-toolbar')!;
+      while (!bar.hasAttribute('data-stage')) await new Promise((r) => requestAnimationFrame(r));
+      await new Promise((r) => requestAnimationFrame(r));
+      const item = bar.querySelector<HTMLElement>('[data-vk-item]:not([hidden])')!;
+      const inner = item.querySelector('button')!;
+      return { item: getComputedStyle(item).getPropertyValue('--vk-iw'), inner: getComputedStyle(inner).getPropertyValue('--vk-iw') };
+    });
+    expect(inherited.item).not.toBe('');
+    expect(inherited.inner).toBe('');
+  });
 });
