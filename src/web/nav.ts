@@ -204,6 +204,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       from: { box: MorphBox; placement: string } | null;
       to: { box: MorphBox; placement: string } | null;
     } = { state: { ...createFormMorph(), t: { x: 1, v: 0, target: 1 } }, from: null, to: null };
+    #accHeld = false;
     #frame = 0;
     #clock = createMotionClock();
     #lensFor: Element | null = null;
@@ -774,6 +775,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         anim.to = target;
         anim.state.t = { x: 0, v: 0, target: 1 };
         anim.state.fromInk = 1;
+        this.#accHeld = !!this.#morph && this.#lifting(this.#morph);
       } else if (anim.to && anim.state.t.x < 1 && anim.to.placement === placement) {
         anim.to = target;
       } else {
@@ -1114,6 +1116,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         if (layout) stepNavDrag(this.#drag, 0, true);
         stepFormMorph(this.#pillAnim.state, 0, 1, true);
         stepFormMorph(this.#accAnim.state, 0, 1, true);
+        this.#accHeld = false;
       }
       this.#paint();
       if (this.#frame || this.#forced()) return;
@@ -1133,7 +1136,9 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         let moved = stepNavMorph(morph, dt, instant);
         if (this.#restLayout() && stepNavDrag(drag, dt, instant)) moved = true;
         if (stepFormMorph(pill, dt, 1, instant)) moved = true;
-        if (stepFormMorph(acc, dt, 1, instant)) moved = true;
+        if (this.#accHeld && (instant || !this.#lifting(morph))) this.#accHeld = false;
+        if (this.#accHeld) moved = true;
+        else if (stepFormMorph(acc, dt, 1, instant)) moved = true;
         return moved;
       });
       this.#paint();
@@ -1288,6 +1293,12 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#under = links;
       if (links.size > 0) this.style.setProperty('--vk-under', clamp01(lift).toFixed(3));
       else this.style.removeProperty('--vk-under');
+    }
+
+    /** The body has not begun to contract; the accessory reshapes only once it has (M 8:35-8:47 phase order). */
+    #lifting(morph: NavMorphState): boolean {
+      const { x, target } = morph.t;
+      return x < 1 && target === 1 && (x <= 0 || currentNavFrame(morph).phase === 'lift');
     }
 
     #accMoving(): boolean {

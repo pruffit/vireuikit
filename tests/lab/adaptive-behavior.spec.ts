@@ -173,6 +173,64 @@ test.describe('the bottom accessory', () => {
   });
 });
 
+test.describe('the bottom accessory in a form change', () => {
+  const sample = (page: Page) =>
+    page.evaluate(
+      () =>
+        new Promise<{ body: number[]; acc: number[] }[]>((resolve) => {
+          const read = (el: Element) => {
+            const r = el.getBoundingClientRect();
+            return [r.x, r.y, r.width, r.height];
+          };
+          const out: { body: number[]; acc: number[] }[] = [];
+          const tick = () => {
+            out.push({ body: read(document.querySelector('#nav > nav')!), acc: read(document.querySelector('#nav [data-accessory]')!) });
+            if (!window.__adaptive.settled() || out.length < 4) requestAnimationFrame(tick);
+            else resolve(out);
+          };
+          window.__adaptive.set({ w: 800 });
+          requestAnimationFrame(tick);
+        }),
+    );
+  const differs = (a: number[], b: number[]) => a.some((v, i) => Math.abs(v - b[i]!) > 0.01);
+
+  test('does not reshape while the selection lifts, reaches its place with the body and lands where it was going', async ({ page }) => {
+    await openStage(page, 'preset=phone-portrait&selected=2&glass=0', { width: 800, height: 800 });
+    await set(page, { w: 360, h: 800 });
+    await settled(page);
+    const frames = await sample(page);
+    const first = (pick: (f: (typeof frames)[number]) => number[]) => frames.findIndex((f) => differs(pick(f), pick(frames[0]!)));
+    const bodyStart = first((f) => f.body);
+    const accStart = first((f) => f.acc);
+    expect(bodyStart).toBeGreaterThan(0);
+    expect(accStart).toBeGreaterThanOrEqual(bodyStart);
+    await expect(page.locator('#accessory')).toHaveAttribute('data-placement', 'content-bottom');
+    const side = await body(page);
+    const acc = await box(page, '#nav [data-accessory]');
+    expect(acc.x).toBeGreaterThanOrEqual(side.x + side.width - 0.5);
+  });
+
+  test('under reduced motion it is in its place in the next frame', async ({ page }) => {
+    await openStage(page, 'preset=phone-portrait&selected=2&rm=1', { width: 360, height: 800 });
+    await set(page, { w: 800 });
+    await nextFrame(page);
+    await expect(page.locator('#accessory')).toHaveAttribute('data-placement', 'content-bottom');
+    expect(await page.locator('#accessory').getAttribute('data-moving')).toBeNull();
+  });
+
+  test('turned back during the lift it never moves and then lands in the old place', async ({ page }) => {
+    await openStage(page, 'preset=phone-portrait&selected=2&glass=0', { width: 360, height: 800 });
+    const before = await box(page, '#nav [data-accessory]');
+    await set(page, { w: 800 });
+    await set(page, { w: 360 });
+    await settled(page);
+    await expect(page.locator('#accessory')).toHaveAttribute('data-placement', 'above-bar');
+    const after = await box(page, '#nav [data-accessory]');
+    expect(after.x).toBeCloseTo(before.x, 0);
+    expect(after.width).toBeCloseTo(before.width, 0);
+  });
+});
+
 test.describe('one body', () => {
   // Glass off: with software-rendered glass a frame lasts longer than the spring's step cap and every step looks bigger.
   const sweep = async (page: Page) => {

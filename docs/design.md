@@ -287,6 +287,9 @@ here the anchor is the selected destination. `<vire-nav>` builds it:
   has its own glass and reshapes between placements by `formMorphFrame`; `data-placement` on it tells the host which
   content to show (transport only when `in-bar`). Along the content it ends at the margin, or at the leading edge of a
   side sheet when one is open (`endInset`), so it never runs under it.
+  In a form change it starts reshaping when the body starts to contract, not while the selection lifts: the reference's
+  phases run lift, contract, grow, settle (M 8:35-8:47). The accessory's own timing has no local reference footage (the U
+  video is not downloaded), so only that order is taken from it; the accessory's spring is unchanged.
 - **The person's choices stay theirs.** The `collapsed` attribute is the sidebar collapsed into a rail: the toggle sets
   and clears it and fires `vire-nav-collapse`; the host remembers it (a cookie, so the server renders the right form).
   An expandable rail on an expanded window opens the sidebar over the content with a scrim and closes on Escape, a press
