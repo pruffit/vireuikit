@@ -24,6 +24,16 @@ export function deepActive(root: Root): Element | null {
 }
 
 const motionFrames = new Set<number>();
+let motionAnnounced = false;
+
+/** Tells a page-level probe (`globalThis.__vireMotion`) when a motion starts and when its last frame has run: the edges a recording needs. */
+function announceMotion(): void {
+  const running = motionFrames.size > 0;
+  if (running === motionAnnounced) return;
+  motionAnnounced = running;
+  (globalThis as { __vireMotion?: (state: 'start' | 'end') => void }).__vireMotion?.(running ? 'start' : 'end');
+}
+
 const idleWaiters = new Set<() => void>();
 let flushQueued = false;
 
@@ -48,17 +58,22 @@ export function requestMotionFrame(callback: FrameRequestCallback): number {
     try {
       callback(t);
     } finally {
+      announceMotion();
       motionEnded();
     }
   });
   motionFrames.add(id);
+  announceMotion();
   return id;
 }
 
 export function cancelMotionFrame(id: number): void {
   if (!id) return;
   cancelAnimationFrame(id);
-  if (motionFrames.delete(id)) motionEnded();
+  if (motionFrames.delete(id)) {
+    announceMotion();
+    motionEnded();
+  }
 }
 
 /** Runs `run` when the page is next idle (within 300 ms) and no kit motion runs, or after 200 ms without `requestIdleCallback`; returns its cancel. */

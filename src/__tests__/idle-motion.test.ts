@@ -96,3 +96,36 @@ describe.each([true, false])('idle work with requestIdleCallback %s', (withIdle)
     expect(second).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('the motion probe', () => {
+  beforeEach(() => install(true));
+
+  it('reports one start when the first frame is requested and one end after the last frame has run', () => {
+    const seen: string[] = [];
+    vi.stubGlobal('__vireMotion', (state: string) => seen.push(state));
+    let steps = 0;
+    const tick = (): void => {
+      steps += 1;
+      if (steps < 3) requestMotionFrame(tick);
+    };
+    requestMotionFrame(tick);
+    requestMotionFrame(() => undefined);
+    expect(seen).toEqual(['start']);
+    flushFrames();
+    flushFrames();
+    expect(seen).toEqual(['start']);
+    flushFrames();
+    expect(seen).toEqual(['start', 'end']);
+  });
+
+  it('reports the end of a cancelled motion and nothing without a probe', () => {
+    const seen: string[] = [];
+    vi.stubGlobal('__vireMotion', (state: string) => seen.push(state));
+    cancelMotionFrame(requestMotionFrame(() => undefined));
+    expect(seen).toEqual(['start', 'end']);
+    vi.unstubAllGlobals();
+    install(true);
+    requestMotionFrame(() => undefined);
+    expect(() => flushFrames()).not.toThrow();
+  });
+});
