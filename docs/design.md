@@ -104,10 +104,13 @@ baseline to force a rewrite.
 
 ### The frame gate
 
-`check:lab:perf` (`tests/lab/perf.spec.ts`) starts its own lab, on port 5180 or `VIREUIKIT_LAB_PORT`, with reloading
-off (`VIREUIKIT_LAB_STILL`): no HMR, no file watcher, `/__early.js` built once, and no dependency pre-bundled after
-start. A lab that reloads on a save loaded the page mid-replay, and a save that left the tree broken kept the page from
-booting until the next one. It measures the kit with the vireglass installed in `node_modules`, not a branch of it.
+`check:lab:perf` (`tests/lab/perf.spec.ts`) builds the lab once (`scripts/serve-lab-build.mjs`, an unminified `vite build`
+of `lab/` with the same entry points, `?view=` and `?case=` switches and vireglass as the dev server) and serves the
+build on port 5180 or `VIREUIKIT_LAB_PORT`; `VIREUIKIT_LAB_STILL` keeps `/__early.js` built once. The dev server hands
+the page every module as its own request, and some 150 page loads of that exhausted the socket buffers of Windows
+(`net::ERR_NO_BUFFER_SPACE`); a built page is a handful of requests, and a save cannot reach the page being timed. A
+request of the page that fails on the network fails its row, naming the URL and the error, and a row that threw before
+it had a result is listed under "rows with no result" beside the table. It measures the kit with the vireglass installed in `node_modules`, not a branch of it.
 
 Each transition is replayed three times to warm up (the cold first replay is printed, not judged), then three times
 with glass on and once with glass off, each after an idle control: the same recorder over the same page, still, for as

@@ -44,8 +44,8 @@ frames with glass on and off, each replay after an idle control of the same page
 with the headroom of a frame and requires with glass on no frame over 33 ms that the trace does not show outside the
 page, no main-thread task over a vsync and no GPU program compiled after the warm-ups (`docs/design.md`, "The frame gate",
 which also lists its switches and canaries; headroom is printed, not judged). `npm run check:lab:perf:canaries` runs a
-known cost through the gate, one per rule, and fails unless each is caught by its own; run it when you change the gate. It measures the installed vireglass. It starts its own lab on port 5180
-(`VIREUIKIT_LAB_PORT`) with reloading off, so a save during a run does not reach the page it times, and it fails, naming
+known cost through the gate, one per rule, and fails unless each is caught by its own; run it when you change the gate. It measures the installed vireglass. It builds the lab once (`scripts/serve-lab-build.mjs`) and serves the build on port 5180
+(`VIREUIKIT_LAB_PORT`), so a save during a run does not reach the page it times and a page load is a few requests, not one per module, and it fails, naming
 the port, if something already listens there (`Get-NetTCPConnection -LocalPort 5180 -State Listen` finds the owner). It refuses software rendering (SwiftShader and the like),
 because headless and software timing hid the problem it exists for, so it runs on a machine with a GPU and a screen and
 not in CI. The same list of transitions is counted in `check:lab` (`motion-behavior.spec.ts`), which runs anywhere.

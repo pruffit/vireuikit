@@ -48,6 +48,8 @@ function seeded(seed: number): () => number {
 
 let seq = 0;
 let pageLog: PageLog | null = null;
+/** Rows that threw before they had a result: named in the summary, so a row that is not in the table is not mistaken for one that passed. */
+const lost: { name: string; error: string }[] = [];
 
 const test = FRESH
   ? base.extend({
@@ -206,6 +208,7 @@ base.beforeAll(async ({ browser }) => {
 });
 
 base.afterAll(() => {
+  if (lost.length > 0) console.log(`\nrows with no result:\n${lost.map((l) => `  ${l.name}: ${l.error}`).join('\n')}`);
   if (rows.length === 0) return;
   const width = Math.max(...rows.map((r) => r.name.length), 10);
   const c = (r: Cell) => `${String(r.frames).padStart(4)} ${r.max.toFixed(1).padStart(6)} ${`${r.stalled}/${r.replays}`.padStart(5)}`;
@@ -227,6 +230,14 @@ base.afterAll(() => {
 for (const transition of TRANSITIONS) {
   test(transition.name, async ({ page }) => {
     pageLog = watchPage(page, 400);
+    const netFailures: string[] = [];
+    page.on('requestfailed', (r) => {
+      const why = r.failure()?.errorText ?? 'failed';
+      if (why !== 'net::ERR_ABORTED') netFailures.push(`${r.url()} ${why}`);
+    });
+    page.on('response', (r) => {
+      if (r.status() >= 400 && !r.url().endsWith('/favicon.ico')) netFailures.push(`${r.url()} answered ${r.status()}`);
+    });
     const canary = canaryFor(transition.name);
     if (canary?.kind === 'foreign') await page.addInitScript(foreignCanary, canary.frame);
     const random = seeded(SEED);
@@ -295,10 +306,14 @@ for (const transition of TRANSITIONS) {
     expect.soft(longTasks.map((t) => `${t.ms.toFixed(1)} ms: ${t.what}`), `main-thread tasks over ${VSYNC_MS} ms with glass on`).toEqual([]);
     expect.soft(compiled.map((c) => `${c.programs} at frame ${c.index} of replay ${c.replay + 1}`), 'GPU programs compiled in a measured replay, which the warm-ups should have compiled').toEqual([]);
     expect.soft(untraced, 'measured replays with no trace, which nothing can be excused or checked on').toEqual([]);
+    expect.soft(netFailures, 'requests of the page that failed, after which nothing the replays measured can be trusted').toEqual([]);
   });
 }
 
 base.afterEach(({}, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus && !rows.some((r) => r.name === testInfo.title)) {
+    lost.push({ name: testInfo.title, error: (testInfo.errors[0]?.message ?? testInfo.status ?? 'unknown').split('\n').slice(0, 3).join(' ') });
+  }
   pageLog?.stop();
   if (pageLog && testInfo.status !== testInfo.expectedStatus) console.log(`What the page said during "${testInfo.title}":\n${pageLog.lines.join('\n') || '(nothing)'}`);
   pageLog = null;

@@ -27,12 +27,13 @@ export default defineConfig({
       ],
     },
   },
-  // Its own lab with reloading off: a save must not reload the page being timed, or leave it unable to boot.
+  // Its own lab, built once and served as built: a save must not reach the page being timed, and a page load is a few
+  // requests, not one per module (the dev server's hundreds exhausted the socket buffers of Windows).
   webServer: {
-    command: `node scripts/check-port-free.mjs ${PORT} && npm run lab`,
+    command: `node scripts/check-port-free.mjs ${PORT} && node scripts/serve-lab-build.mjs ${PORT}`,
     url: `http://127.0.0.1:${PORT}`,
     env: { ...(process.env as Record<string, string>), VIREUIKIT_LAB_PORT: PORT, VIREUIKIT_LAB_STILL: '1' },
     reuseExistingServer: false,
-    timeout: 60_000,
+    timeout: 120_000,
   },
 });

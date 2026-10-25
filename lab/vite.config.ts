@@ -1,4 +1,5 @@
 import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -95,16 +96,21 @@ function earlyBundle(): Plugin {
       logLevel: 'silent',
     }).then((out) => out.outputFiles[0]?.text ?? '');
   let built: Promise<string> | null = null;
+  const answer = async (_req: IncomingMessage, res: ServerResponse) => {
+    const text = await (built ?? make());
+    res.setHeader('content-type', 'text/javascript');
+    res.end(text);
+  };
   return {
     name: 'vireuikit-early-bundle',
     apply: 'serve',
     configureServer(server) {
       if (STILL) built = make();
-      server.middlewares.use('/__early.js', async (_req, res) => {
-        const text = await (built ?? make());
-        res.setHeader('content-type', 'text/javascript');
-        res.end(text);
-      });
+      server.middlewares.use('/__early.js', answer);
+    },
+    configurePreviewServer(server) {
+      built = make();
+      server.middlewares.use('/__early.js', answer);
     },
   };
 }
@@ -124,4 +130,5 @@ export default defineConfig({
     host: '127.0.0.1',
     ...(STILL ? { hmr: false, watch: null } : {}),
   },
+  preview: { port: Number(process.env.VIREUIKIT_LAB_PORT ?? 5179), strictPort: true, host: '127.0.0.1' },
 });
