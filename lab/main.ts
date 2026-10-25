@@ -257,6 +257,15 @@ else if (view === 'menu-reference') await menuReference(stage, document.getEleme
 else if (view === 'adaptive') await adaptiveStage(stage, document.getElementById('rows')!, params, { glass, backdrop, chrome });
 else gallery();
 
+// `split` runs its light/dark border through the middle of the element `split=<selector>` names, to see a state across it.
+if (backdrop === 'split') {
+  const target = document.querySelector(params.get('split') ?? '');
+  if (target) {
+    const box = target.getBoundingClientRect();
+    stage.style.setProperty('--split', `${box.x + box.width / 2 - stage.getBoundingClientRect().x}px`);
+  }
+}
+
 function buildChrome(): void {
   const bar = document.getElementById('bar')!;
   const select = (name: string, options: readonly string[], current: string) =>

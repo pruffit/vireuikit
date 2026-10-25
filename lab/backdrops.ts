@@ -1,7 +1,7 @@
 // Backdrops are generated, so the repository carries no third-party images.
 import type { BackdropSample } from 'vireglass';
 
-export const BACKDROPS = ['light', 'dark', 'text', 'busy', 'photo', 'mid'] as const;
+export const BACKDROPS = ['light', 'dark', 'text', 'busy', 'photo', 'mid', 'split'] as const;
 export type Backdrop = (typeof BACKDROPS)[number];
 
 const hash = (x: number, y: number): number => {
@@ -84,6 +84,7 @@ const CSS = `
 [data-backdrop='dark'] { background: radial-gradient(circle at 20% 70%, #4a2e63 0, transparent 48%), radial-gradient(circle at 80% 25%, #1f4a5e 0, transparent 52%), #121216; }
 [data-backdrop='text'] { background: #fbfbf8; }
 [data-backdrop='mid'] { background: #86868c; }
+[data-backdrop='split'] { background: linear-gradient(90deg, #f2f2f4 var(--split, 50%), #121216 var(--split, 50%)); }
 [data-backdrop='photo'] { color-scheme: dark; color: #fff; }
 [data-backdrop='busy'] { background: #eceef2; }
 .bd-layer { position: absolute; inset: 0; z-index: -1; overflow: clip; }
