@@ -40,7 +40,7 @@ import {
 } from '../kit/nav';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, effectiveInput, isEditable, shellOf, watchAdaptiveContext } from './environment';
-import { deepActive, dropEmptyStyle } from './dom';
+import { cancelMotionFrame, deepActive, dropEmptyStyle, requestMotionFrame } from './dom';
 import { attachControlGlass, holdGlass, landGlass, moveGlass, type GlassSession } from './glass';
 import { createScrollEdge, type ScrollEdge } from './scroll-edge';
 import { ensureStyles } from './styles';
@@ -265,7 +265,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
 
     disconnectedCallback(): void {
       for (const cleanup of this.#cleanups.splice(0)) cleanup();
-      cancelAnimationFrame(this.#frame);
+      cancelMotionFrame(this.#frame);
       this.#frame = 0;
       this.#swallow?.();
       this.#unhold?.();
@@ -1117,7 +1117,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       this.#paint();
       if (this.#frame || this.#forced()) return;
       this.#clock = createMotionClock();
-      this.#frame = requestAnimationFrame((t) => this.#tick(t));
+      this.#frame = requestMotionFrame((t) => this.#tick(t));
     }
 
     #tick(now: number): void {
@@ -1136,7 +1136,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
         return moved;
       });
       this.#paint();
-      if (moving) this.#frame = requestAnimationFrame((t) => this.#tick(t));
+      if (moving) this.#frame = requestMotionFrame((t) => this.#tick(t));
     }
 
     #paint(): void {
@@ -1555,7 +1555,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
     // ---- forced states ------------------------------------------------------------------------------------------
 
     #applyForced(): void {
-      cancelAnimationFrame(this.#frame);
+      cancelMotionFrame(this.#frame);
       this.#frame = 0;
       this.#drag = createNavDrag();
       this.#morph = null;

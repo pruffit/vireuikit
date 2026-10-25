@@ -25,7 +25,7 @@ import type { Rect, Size } from '../kit/geometry';
 import { CONTROL_SIZES, menuSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { effectiveInput, viewportSegments, watchPointerInput, watchViewport } from './environment';
-import { deepActive, dropEmptyStyle, rootsOf, whenIdle, type Root } from './dom';
+import { cancelMotionFrame, deepActive, dropEmptyStyle, requestMotionFrame, rootsOf, whenIdle, type Root } from './dom';
 import { attachControlGlass, glassMorph, landGlass, moveGlass, type GlassFrame, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
@@ -194,7 +194,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
 
     disconnectedCallback(): void {
       for (const cleanup of this.#cleanups.splice(0)) cleanup();
-      cancelAnimationFrame(this.#frame);
+      cancelMotionFrame(this.#frame);
       cancelAnimationFrame(this.#placeFrame);
       this.#cancelIdle?.();
       this.#cancelVerify?.();
@@ -710,7 +710,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       }
       if (this.#frame) return;
       this.#clock = createMotionClock();
-      this.#frame = requestAnimationFrame((t) => this.#tick(t));
+      this.#frame = requestMotionFrame((t) => this.#tick(t));
     }
 
     #tick(now: number): void {
@@ -719,7 +719,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const instant = this.#presentation?.instantSprings ?? false;
       const moving = stepMotion(this.#clock, now, (dt) => stepGrowth(this.#growth, dt, this.#state.open, instant));
       this.#paint();
-      if (moving) this.#frame = requestAnimationFrame((t) => this.#tick(t));
+      if (moving) this.#frame = requestMotionFrame((t) => this.#tick(t));
       else this.#settle();
     }
 
@@ -835,7 +835,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#trigger?.setAttribute('aria-expanded', 'false');
       for (const item of this.#items()) item.removeAttribute('data-pressed');
       stepGrowth(this.#growth, 0, false, true);
-      cancelAnimationFrame(this.#frame);
+      cancelMotionFrame(this.#frame);
       this.#frame = 0;
       this.#settle();
     }
@@ -926,7 +926,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
             ...(glow === undefined ? {} : { glow }),
             ...(tall === undefined ? {} : { height: tall }),
           };
-      cancelAnimationFrame(this.#frame);
+      cancelMotionFrame(this.#frame);
       this.#frame = 0;
       if (!phase) {
         this.#state = MENU_CLOSED;

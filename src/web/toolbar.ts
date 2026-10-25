@@ -34,7 +34,7 @@ import {
   type ToolbarMorphState,
 } from '../kit/toolbar';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
-import { dropEmptyStyle, deepActive } from './dom';
+import { cancelMotionFrame, dropEmptyStyle, deepActive, requestMotionFrame } from './dom';
 import { effectiveInput, shellOf, watchAdaptiveContext, watchPointerInput } from './environment';
 import { attachControlGlassNow, ensureGlass, glassLoaded, moveGlass, probeRect, type GlassSession } from './glass';
 import { createScrollEdge, type ScrollEdge } from './scroll-edge';
@@ -240,7 +240,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
 
     disconnectedCallback(): void {
       for (const cleanup of this.#cleanups.splice(0)) cleanup();
-      cancelAnimationFrame(this.#frame);
+      cancelMotionFrame(this.#frame);
       cancelAnimationFrame(this.#remeasureFrame);
       this.#frame = this.#remeasureFrame = 0;
       this.#choosing?.();
@@ -866,7 +866,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
         return;
       }
       this.#clock = createMotionClock();
-      this.#frame = requestAnimationFrame((t) => this.#tick(t));
+      this.#frame = requestMotionFrame((t) => this.#tick(t));
     }
 
     #tick(now: number): void {
@@ -885,7 +885,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
         this.#stepping = false;
       }
       this.#paint(swept);
-      if (this.#moving()) this.#frame = requestAnimationFrame((t) => this.#tick(t));
+      if (this.#moving()) this.#frame = requestMotionFrame((t) => this.#tick(t));
       else this.toggleAttribute('data-moving', false);
     }
 
@@ -1387,7 +1387,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
     // ---- forced states --------------------------------------------------------------------------------------------
 
     #applyForced(): void {
-      cancelAnimationFrame(this.#frame);
+      cancelMotionFrame(this.#frame);
       this.#frame = 0;
       this.toggleAttribute('data-forced', this.#forced !== null);
       this.#placing = null;

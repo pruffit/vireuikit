@@ -46,7 +46,7 @@ import {
   type SheetLayout,
 } from '../kit/sheet';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
-import { deepActive, dropEmptyStyle, rootsOf, whenIdle } from './dom';
+import { cancelMotionFrame, deepActive, dropEmptyStyle, requestMotionFrame, rootsOf, whenIdle } from './dom';
 import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, isEditable, shellOf, watchAdaptiveContext, windowRect } from './environment';
 import { attachControlGlass, ensureGlass, glassLoaded, glassMorph, holdGlass, landGlass, moveGlass, probeRect, type GlassFrame, type GlassSession } from './glass';
 import { createScrollEdge, type ScrollEdge } from './scroll-edge';
@@ -320,7 +320,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
 
     disconnectedCallback(): void {
       for (const cleanup of this.#cleanups.splice(0)) cleanup();
-      cancelAnimationFrame(this.#frame);
+      cancelMotionFrame(this.#frame);
       cancelAnimationFrame(this.#followFrame);
       this.#frame = this.#followFrame = 0;
       this.#cancelIdle?.();
@@ -1124,7 +1124,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
 
     #reset(): void {
       const surface = this.#surface;
-      cancelAnimationFrame(this.#frame);
+      cancelMotionFrame(this.#frame);
       this.#frame = 0;
       this.#out = false;
       this.#open = false;
@@ -1393,7 +1393,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#paint(full);
       if (this.#frame) return;
       this.#clock = createMotionClock();
-      this.#frame = requestAnimationFrame((t) => this.#tick(t));
+      this.#frame = requestMotionFrame((t) => this.#tick(t));
     }
 
     #tick(now: number): void {
@@ -1401,7 +1401,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       if (!this.isConnected || !this.#out || this.#forced()) return;
       const moving = stepMotion(this.#clock, now, (dt) => this.#step(dt, false));
       this.#paint();
-      if (moving) this.#frame = requestAnimationFrame((t) => this.#tick(t));
+      if (moving) this.#frame = requestMotionFrame((t) => this.#tick(t));
       else this.#afterStep();
     }
 
@@ -1942,7 +1942,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
 
     #applyForced(): void {
       const forced = this.#forced();
-      cancelAnimationFrame(this.#frame);
+      cancelMotionFrame(this.#frame);
       this.#frame = 0;
       if (!forced) {
         if (this.#out) {

@@ -23,12 +23,67 @@ export function deepActive(root: Root): Element | null {
   return active;
 }
 
-/** Runs `run` when the page is next idle (within 300 ms), or after 200 ms without `requestIdleCallback`; returns its cancel. */
+const motionFrames = new Set<number>();
+const idleWaiters = new Set<() => void>();
+let flushQueued = false;
+
+function flushIdleWaiters(): void {
+  flushQueued = false;
+  if (motionFrames.size > 0) return;
+  const waiting = Array.from(idleWaiters);
+  idleWaiters.clear();
+  for (const start of waiting) start();
+}
+
+function motionEnded(): void {
+  if (motionFrames.size > 0 || flushQueued || idleWaiters.size === 0) return;
+  flushQueued = true;
+  queueMicrotask(flushIdleWaiters);
+}
+
+/** `requestAnimationFrame` for a running motion: the kit's idle work waits until none is pending. */
+export function requestMotionFrame(callback: FrameRequestCallback): number {
+  const id = requestAnimationFrame((t) => {
+    motionFrames.delete(id);
+    try {
+      callback(t);
+    } finally {
+      motionEnded();
+    }
+  });
+  motionFrames.add(id);
+  return id;
+}
+
+export function cancelMotionFrame(id: number): void {
+  if (!id) return;
+  cancelAnimationFrame(id);
+  if (motionFrames.delete(id)) motionEnded();
+}
+
+/** Runs `run` when the page is next idle (within 300 ms) and no kit motion runs, or after 200 ms without `requestIdleCallback`; returns its cancel. */
 export function whenIdle(run: () => void): () => void {
-  if (typeof requestIdleCallback === 'function') {
-    const id = requestIdleCallback(run, { timeout: 300 });
-    return () => cancelIdleCallback(id);
-  }
-  const id = window.setTimeout(run, 200);
-  return () => window.clearTimeout(id);
+  let cancelIdle: (() => void) | null = null;
+  let cancelled = false;
+  const start = (): void => {
+    if (cancelled) return;
+    const go = (): void => {
+      if (motionFrames.size > 0) idleWaiters.add(start);
+      else run();
+    };
+    if (typeof requestIdleCallback === 'function') {
+      const id = requestIdleCallback(go, { timeout: 300 });
+      cancelIdle = () => cancelIdleCallback(id);
+    } else {
+      const id = window.setTimeout(go, 200);
+      cancelIdle = () => window.clearTimeout(id);
+    }
+  };
+  if (motionFrames.size > 0) idleWaiters.add(start);
+  else start();
+  return () => {
+    cancelled = true;
+    idleWaiters.delete(start);
+    cancelIdle?.();
+  };
 }
