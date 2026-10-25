@@ -7,7 +7,7 @@ test.use({ viewport: { width: 1900, height: 1100 } });
 // measuring state (`data-measure`) and the per-paint custom properties from outside, through spies installed before
 // the page runs.
 
-type Spy = { measures: Record<string, number>; props: Record<string, number>; click: { measures: number; props: Record<string, number>; lens: number } | null };
+type Spy = { measures: Record<string, number>; framed: Record<string, number>; props: Record<string, number>; click: { measures: number; props: Record<string, number>; lens: number } | null };
 declare global {
   interface Window {
     __spy: Spy;
@@ -15,11 +15,33 @@ declare global {
 }
 
 const SPY = () => {
-  const spy: Spy = { measures: {}, props: {}, click: null };
+  const spy: Spy = { measures: {}, framed: {}, props: {}, click: null };
   window.__spy = spy;
+  // Work inside an animation-frame callback or a resize observer's callback is work inside a frame.
+  let inFrame = 0;
+  const inside = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => {
+    inFrame += 1;
+    try {
+      run(...args);
+    } finally {
+      inFrame -= 1;
+    }
+  };
+  const raf = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = (callback) => raf(inside(callback));
+  const Observer = window.ResizeObserver;
+  window.ResizeObserver = class extends Observer {
+    constructor(callback: ResizeObserverCallback) {
+      super(inside(callback));
+    }
+  };
   const setAttribute = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function (name: string, value: string) {
-    if (name === 'data-measure') spy.measures[(this as Element).id] = (spy.measures[(this as Element).id] ?? 0) + 1;
+    if (name === 'data-measure') {
+      const id = (this as Element).id;
+      spy.measures[id] = (spy.measures[id] ?? 0) + 1;
+      if (inFrame > 0) spy.framed[id] = (spy.framed[id] ?? 0) + 1;
+    }
     return setAttribute.call(this, name, value);
   };
   const setProperty = CSSStyleDeclaration.prototype.setProperty;
@@ -44,6 +66,7 @@ const SPY = () => {
 };
 
 const measures = (page: Page, id: string) => page.evaluate((id) => window.__spy.measures[id] ?? 0, id);
+const framed = (page: Page, id: string) => page.evaluate((id) => window.__spy.framed[id] ?? 0, id);
 const clickWork = (page: Page) => page.waitForFunction(() => window.__spy.click !== null).then(() => page.evaluate(() => window.__spy.click!));
 const noIdleCallback = (page: Page) => page.addInitScript(() => Reflect.deleteProperty(window, 'requestIdleCallback'));
 
@@ -220,6 +243,36 @@ test.describe('a sheet measures while the page is idle', () => {
       expect(want - before).toBeGreaterThan(100);
     });
   }
+
+  test('a content size found once the sheet is open is measured on the idle page, not in the frame that reports it, and the sheet follows', async ({ page }) => {
+    await sheet(page);
+    await page.locator('#pop-trigger').click();
+    await rested(page);
+    const [was, before] = [await measures(page, 'pop'), (await fit(page)).height];
+    const inFrame = await framed(page, 'pop');
+    await page.addStyleTag({ content: '#pop-surface h2 { min-height: 240px !important; }' });
+    await expect.poll(() => measures(page, 'pop')).toBeGreaterThan(was);
+    await expect.poll(async () => (await fit(page)).height - before).toBeGreaterThan(100);
+    expect(await framed(page, 'pop')).toBe(inFrame);
+  });
+
+  test('a content size held until the height comes to rest is measured on the idle page too, and the sheet follows', async ({ page }) => {
+    await sheet(page);
+    await page.locator('#sup-trigger').click();
+    await expect(page.locator('#sup')).toHaveAttribute('data-phase', 'open');
+    await expect(page.locator('#sup')).not.toHaveAttribute('data-height', /./);
+    const [was, inFrame] = [await measures(page, 'sup'), await framed(page, 'sup')];
+    const height = () => page.evaluate(() => document.getElementById('sup-surface')!.getBoundingClientRect().height);
+    const before = await height();
+    await page.evaluate(() => {
+      document.getElementById('sup')!.setAttribute('detent', 'large');
+      document.querySelector<HTMLElement>('#sup-surface h2')!.style.minHeight = '300px';
+    });
+    await expect.poll(() => measures(page, 'sup')).toBeGreaterThan(was);
+    await expect(page.locator('#sup')).not.toHaveAttribute('data-height', /./);
+    await expect.poll(async () => (await height()) - before).toBeGreaterThan(40);
+    expect(await framed(page, 'sup')).toBe(inFrame);
+  });
 
   test('opened on the idle measure, the first control has focus', async ({ page }) => {
     await sheet(page, '&rm=1');

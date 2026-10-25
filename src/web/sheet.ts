@@ -164,6 +164,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     #premeasured = false;
     #cancelIdle: (() => void) | null = null;
     #cancelVerify: (() => void) | null = null;
+    #cancelRemeasure: (() => void) | null = null;
     /** What the open took from the idle work: once it settles and the page is idle, each is read again and corrected if it was stale. */
     #verify = { content: false, env: false, sample: false };
     #idleFull = false;
@@ -325,7 +326,8 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#frame = this.#followFrame = 0;
       this.#cancelIdle?.();
       this.#cancelVerify?.();
-      this.#cancelIdle = this.#cancelVerify = null;
+      this.#cancelRemeasure?.();
+      this.#cancelIdle = this.#cancelVerify = this.#cancelRemeasure = null;
       this.#verify = { content: false, env: false, sample: false };
       window.clearTimeout(this.#resampleTimer);
       this.#premeasured = this.#idleFull = this.#envFresh = false;
@@ -802,6 +804,8 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
     }
 
     #remeasure(): void {
+      this.#cancelRemeasure?.();
+      this.#cancelRemeasure = null;
       this.#maxContent = null;
       this.#contentKey = '';
       this.#premeasured = false;
@@ -844,7 +848,18 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       if (!changed || !shown || opened) return;
       // The observer reports the sheet's own measuring layout too, so remeasuring mid-move feeds itself: wait for rest.
       if (this.#heightMoving()) this.#remeasureHeld = true;
-      else this.#remeasure();
+      else this.#remeasureSoon();
+    }
+
+    /** Measures the content once the page is idle and no kit motion runs, so a size that settles with a motion forces no layout in its frame. */
+    #remeasureSoon(): void {
+      if (this.#cancelRemeasure) return;
+      this.#cancelRemeasure = whenIdle(() => {
+        this.#cancelRemeasure = null;
+        if (!this.#surface || !this.isConnected) return;
+        if (this.#heightMoving()) this.#remeasureHeld = true;
+        else this.#remeasure();
+      });
     }
 
     /** Measures the content now if a change waited for the height to come to rest. */
@@ -1142,6 +1157,8 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       this.#scrollTop = 0;
       this.#touchTop = null;
       this.#remeasureHeld = false;
+      this.#cancelRemeasure?.();
+      this.#cancelRemeasure = null;
       this.#clearInset();
       if (surface) {
         for (const name of Array.from(surface.style)) {
@@ -1441,8 +1458,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
       }
       if (this.#remeasureHeld && !this.#heightMoving()) {
         this.#remeasureHeld = false;
-        this.#remeasure();
-        return;
+        this.#remeasureSoon();
       }
       if (this.#morph) {
         this.#morph = null;
