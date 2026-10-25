@@ -13,7 +13,8 @@ import {
 import { presentationForm, type PresentationForm, type SurfaceKind } from '../kit/adaptive/presentation';
 import type { Rect, Size } from '../kit/geometry';
 import { menuBody, menuMaterial, type RoundedRect } from '../kit/menu';
-import { probeFramePeriod, POPOVER_GROWTH_TIMING, createGrowthState, createMotionClock, growthPhase, growthStateAt, heldGrowthState, stepGrowth, stepMotion, type GrowthPoint } from '../kit/morph';
+import { POPOVER_GROWTH_TIMING, createGrowthState, createMotionClock, growthPhase, growthStateAt, heldGrowthState, stepGrowth, stepMotion, type GrowthPoint } from '../kit/morph';
+import { probeFramePeriod } from './refresh';
 import {
   SHEET_SIZES,
   createSheetDrag,

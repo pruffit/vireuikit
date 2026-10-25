@@ -10,13 +10,12 @@ export const SPRING_STEP = 1 / 240;
 
 const RATES_HZ = [30, 48, 50, 60, 72, 75, 90, 100, 120, 144, 165, 180, 240];
 const SAMPLES_MAX = 16;
-const SAMPLES_MIN = 8;
+export const FRAME_SAMPLES_MIN = 8;
 const FRAME_MS_MAX = 50;
 
 const intervals: number[] = [];
 let period = 1 / 60;
 let lastObserved = Number.NaN;
-let probing = false;
 
 /** The page's refresh period, s: the median of recent frame intervals, snapped to a canonical rate when within 5 %. */
 export const framePeriod = (): number => period;
@@ -26,7 +25,7 @@ export function observeFrameInterval(ms: number): void {
   if (!(ms > 0) || ms > FRAME_MS_MAX) return;
   intervals.push(ms);
   if (intervals.length > SAMPLES_MAX) intervals.shift();
-  if (intervals.length < SAMPLES_MIN) return;
+  if (intervals.length < FRAME_SAMPLES_MIN) return;
   const sorted = [...intervals].sort((a, b) => a - b);
   const mid = sorted.length >> 1;
   const median = sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
@@ -40,21 +39,6 @@ export function resetFramePeriod(): void {
   intervals.length = 0;
   period = 1 / 60;
   lastObserved = Number.NaN;
-}
-
-/** Measures the refresh period over a few frames, once per page; the callbacks only record time. */
-export function probeFramePeriod(): void {
-  if (probing || typeof requestAnimationFrame !== 'function') return;
-  probing = true;
-  let left = SAMPLES_MIN + 1;
-  let last = Number.NaN;
-  const tick = (t: number): void => {
-    if (!Number.isNaN(last)) observeFrameInterval(t - last);
-    last = t;
-    left -= 1;
-    if (left > 0) requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
 }
 
 /** A motion's time in whole frames since its first one, at the period the page had then. */

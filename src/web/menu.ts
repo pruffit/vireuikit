@@ -17,7 +17,8 @@ import {
   type MenuState,
   type RoundedRect,
 } from '../kit/menu';
-import { probeFramePeriod, createGrowthState, createMotionClock, growthPhase, smoothstep, stepGrowth, stepMotion, type GrowthPhase, type GrowthPoint } from '../kit/morph';
+import { createGrowthState, createMotionClock, growthPhase, smoothstep, stepGrowth, stepMotion, type GrowthPhase, type GrowthPoint } from '../kit/morph';
+import { probeFramePeriod } from './refresh';
 import { segmentOf } from '../kit/adaptive/context';
 import { sizeTier } from '../kit/adaptive/input';
 import type { Rect, Size } from '../kit/geometry';

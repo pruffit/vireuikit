@@ -16,7 +16,8 @@ import {
   stepControlVisual,
   visualAtomState,
 } from '../kit/behavior/visual';
-import { probeFramePeriod, createMotionClock, stepMotion } from '../kit/morph';
+import { createMotionClock, stepMotion } from '../kit/morph';
+import { probeFramePeriod } from './refresh';
 import { pressResponse } from '../kit/response';
 import { BUTTON_SIZES, CONTROL_SIZES, hitSlop, iconButtonSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';

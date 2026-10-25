@@ -12,7 +12,8 @@ import {
   type ToolbarPlacement,
 } from '../kit/adaptive/toolbar';
 import { ATOM_AT_REST, atomBody, atomMaterial } from '../kit/atom';
-import { probeFramePeriod, createMotionClock, stepMotion, stepSpring, type Spring } from '../kit/morph';
+import { createMotionClock, stepMotion, stepSpring, type Spring } from '../kit/morph';
+import { probeFramePeriod } from './refresh';
 import { BUTTON_SIZES, hitSlop, iconButtonSize, type ControlSize } from '../kit/sizes';
 import {
   TOOLBAR_PLACE_TIMING,

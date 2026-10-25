@@ -14,7 +14,8 @@ import { hitTarget, sizeTier } from '../kit/adaptive/input';
 import { navigationForm, type NavigationForm, type NavigationFormKind } from '../kit/adaptive/navigation';
 import { ATOM_AT_REST, atomBody, atomMaterial } from '../kit/atom';
 import { menuMaterial } from '../kit/menu';
-import { probeFramePeriod, createMotionClock, stepMotion } from '../kit/morph';
+import { createMotionClock, stepMotion } from '../kit/morph';
+import { probeFramePeriod } from './refresh';
 import {
   aimNavMorph,
   cancelNavDrag,
