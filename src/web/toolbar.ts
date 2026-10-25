@@ -187,6 +187,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
     #remeasureFrame = 0;
     #wasMoving = false;
     #stepping = false;
+    #sweep = false;
     #rtl = false;
 
     #current: HTMLButtonElement | null = null;
@@ -906,6 +907,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       this.#placing = null;
       this.#compute(true);
       this.#placing = placing;
+      this.#sweep = true;
     }
 
     #appearNow(): number {
@@ -1164,7 +1166,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
       }
       for (const [key, capsule] of this.#capsules) {
         if (capsule.used) continue;
-        if (!moving && !this.#placing) {
+        if ((!moving && !this.#placing) || this.#sweep) {
           capsule.session?.destroy();
           capsule.el.remove();
           this.#capsules.delete(key);
@@ -1172,6 +1174,7 @@ export function createToolbarElementClass(options: ToolbarElementOptions = {}) {
           capsule.el.hidden = true;
         }
       }
+      this.#sweep = false;
     }
 
     /** Hands a lens only what changed: a moved box needs nothing, a new size rebuilds its filter and a new presence only writes it. While the toolbar moves the lens is in interim. */
