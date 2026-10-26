@@ -57,17 +57,21 @@ const VIEWPORT_MARGIN = 8;
 const TRIGGER = ':scope > button, :scope > vire-button > button, :scope > vire-icon-button > button';
 const ACTIVATION_KEYS = new Set(['Enter', ' ']);
 
-// Once the closing drop is the size of its trigger, the trigger's glyph and focus ring come into focus over this long, from this much.
-const RING_MS = 360;
-const HAND_INK = 0.9;
 // How long the closing drop takes to cover what is left of the way to its trigger once it is the trigger's size.
 const SLIDE_MS = 70;
+// How long the drop stays at its trigger before it hands the body back, so a frame presented late still shows it at rest.
+const REST_MS = 40;
+// Once the closing drop is the size of its trigger, its focus ring comes in over RING_MS and the glyph, which under the drop's lens is seen this strong and this out of focus (of 4 px), sharpens over GLYPH_MS; the motion's tail outlasts both.
+const HAND_INK = 0.6;
+const HAND_BLUR = 0.75;
+const RING_MS = 280;
+const GLYPH_MS = 160;
 // How long a menu takes to move to a size found stale while it is open.
 const RETARGET_MS = 220;
 // Within this many pixels of the box it lands on, the lens is given that box.
 const LENS_SNAP_PX = 1.5;
 
-type Carrier = HTMLElement & { setCarried?: (ink: number | null, ring?: number, bodyBack?: boolean) => void; restLens?: (probe?: boolean) => RestLens | null };
+type Carrier = HTMLElement & { setCarried?: (ink: number | null, ring?: number, bodyBack?: boolean, blur?: number) => void; restLens?: (probe?: boolean) => RestLens | null };
 
 type Lens = { geometry: VireGlassGeometry; morph: GlassMorph | null; material: VireGlassMaterial; materialKey: string };
 
@@ -915,24 +919,33 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#settle();
     }
 
+    /** Time as the springs count it, so what is timed with them ends with them when frames are dropped. */
+    #motionMs(): number {
+      const clock = this.#clock;
+      return Number.isNaN(clock.period) ? 0 : clock.frames * clock.period * 1000;
+    }
+
     /**
      * Closing, the trigger takes its body back the frame the drop is the size of its capsule, and the drop leaves: the
      * glyph is then drawn on the trigger itself, out of focus as it was under the glass, and comes into focus together
      * with the focus ring, while the drop's slow tail still runs. It all ends before the motion does.
      */
-    #closing(final: boolean, outgoing: number): { ink: number; ring: number; back: boolean } {
-      if (this.#state.open || !this.#from) return { ink: outgoing, ring: 1, back: false };
-      const now = performance.now();
-      if (!final && (this.#slideAt === null || now - this.#slideAt < SLIDE_MS)) return { ink: outgoing, ring: 0, back: false };
+    #closing(final: boolean, outgoing: number): { ink: number; ring: number; back: boolean; blur: number } {
+      if (this.#state.open || !this.#from) return { ink: outgoing, ring: 1, back: false, blur: 1 - outgoing };
+      const now = this.#motionMs();
+      if (!final && (this.#slideAt === null || now - this.#slideAt < SLIDE_MS + REST_MS)) return { ink: outgoing, ring: 0, back: false, blur: 1 - outgoing };
       this.#homeAt ??= now;
-      const k = final ? 1 : Math.min((now - this.#homeAt) / RING_MS, 1);
-      return { ink: HAND_INK + (1 - HAND_INK) * k, ring: k, back: true };
+      const elapsed = now - this.#homeAt;
+      const k = final ? 1 : Math.min(elapsed / RING_MS, 1);
+      const g = final ? 1 : smoothstep(0, 1, elapsed / GLYPH_MS);
+      const ink = HAND_INK * outgoing;
+      return { ink: ink + (1 - ink) * g, ring: k, back: true, blur: Math.max(HAND_BLUR, 1 - outgoing) * (1 - g) };
     }
 
     /** Once the closing drop is the size of its trigger, whatever is left of the way to it is covered over a moment, so the trigger takes its body back from a drop that is where it is. */
     #slide(box: RoundedRect): RoundedRect {
       const home = this.#from!;
-      const now = performance.now();
+      const now = this.#motionMs();
       if (this.#slideAt === null) {
         if (Math.max(Math.abs(box.width - home.width), Math.abs(box.height - home.height)) > 0.5) return box;
         this.#slideAt = now;
@@ -988,8 +1001,12 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       s.setProperty('--vk-tx', `${place(box.width / 2 + scale * (content.x + pad - box.width / 2)).toFixed(2)}px`);
       s.setProperty('--vk-ty', `${place(box.height / 2 + scale * (content.y + pad - box.height / 2) - CONTENT_RISE * row * (1 - inkIn)).toFixed(2)}px`);
       s.setProperty('--vk-s', scale.toFixed(3));
-      this.toggleAttribute('data-joined', f.outline !== undefined);
-      const clip = f.outline ? `polygon(${f.outline.map((p) => `${p.x.toFixed(1)}px ${p.y.toFixed(1)}px`).join(',')})` : null;
+      // At its trigger the drop leaves the join and brings its own lens into view over the wait, instead of the trigger's lens appearing at the handover.
+      const home = !this.#state.open && this.#slideAt !== null;
+      const outline = home ? undefined : f.outline;
+      this.toggleAttribute('data-joined', outline !== undefined);
+      this.#glass?.setAppear(home ? smoothstep(0, 1, (this.#motionMs() - this.#slideAt!) / (SLIDE_MS + REST_MS)) : 1);
+      const clip = outline ? `polygon(${outline.map((p) => `${p.x.toFixed(1)}px ${p.y.toFixed(1)}px`).join(',')})` : null;
       if (clip) s.setProperty('--vk-outline', clip);
       else s.removeProperty('--vk-outline');
       s.setProperty('--vk-ink-in', inkIn.toFixed(3));
@@ -1007,14 +1024,14 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       s.setProperty('--vk-body-lift', body.lift.toFixed(3));
       const closing = this.#closing(final, f.ink.outgoing);
       list.style.visibility = closing.back ? 'hidden' : '';
-      this.#liveCarrier()?.setCarried?.(closing.ink, closing.ring, closing.back);
+      this.#liveCarrier()?.setCarried?.(closing.ink, closing.ring, closing.back, closing.blur);
       if (closing.back) this.#unclipTrigger();
       else this.#clipTrigger(box);
       // The lens lands once the picture can no longer be told from where it ends, and the tail of the springs runs on with nothing left to change in it.
       const landed = near && f.activity < ACTIVITY_AT_REST && this.#retarget === null;
       this.#tint(this.#state.open || !final ? f.capsule : 1);
       const moving = !final && !landed && !closing.back && (!settled || !this.#state.open || this.#retarget !== null) && this.#forced() === null;
-      this.#pushGlass(box, f.morph, f.activity, f.capsule, moving, !this.#state.open && (final || closing.back), this.#state.open && f.capsule >= 0.95);
+      this.#pushGlass(box, f.morph, f.activity, f.capsule, moving, !this.#state.open && (final || closing.back), f.capsule >= 0.95);
     }
 
     /** Hands the lens only what changed: a new morph or material rebuilds its filter, a moved box needs nothing. */

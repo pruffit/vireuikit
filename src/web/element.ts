@@ -56,8 +56,8 @@ export interface VireControlElement extends HTMLElement {
   setMorph(morph: GlassMorph | null): void;
   /** A menu growing out of this control carries its body: its lens stays attached at presence 0 and it paints no
    *  body of its own, the glyph in focus by `ink` (1 sharp, 0 gone) and the focus ring drawn by `ring`. `bodyBack` returns the body with the
-   *  glyph still in that focus, and `null` ends it all. */
-  setCarried(ink: number | null, ring?: number, bodyBack?: boolean): void;
+   *  glyph still in that focus, `blur` (0 sharp, 1 out of focus) is its own when it is not 1 - `ink`, and `null` ends it all. */
+  setCarried(ink: number | null, ring?: number, bodyBack?: boolean, blur?: number): void;
   /** What the lens of this control is at rest: the material, box and backdrop a surface that shrinks into it ends on. Null without a lens. */
   restLens(probe?: boolean): RestLens | null;
 }
@@ -124,7 +124,7 @@ export function createControlElementClass(
       this.#glass?.setMorph(morph);
     }
 
-    setCarried(ink: number | null, ring = 1, bodyBack = false): void {
+    setCarried(ink: number | null, ring = 1, bodyBack = false, blur?: number): void {
       const bodyOut = ink !== null && !bodyBack;
       const handedOver = this.#bodyOut !== bodyOut;
       this.#bodyOut = bodyOut;
@@ -132,9 +132,11 @@ export function createControlElementClass(
       this.toggleAttribute('data-carried', bodyOut);
       if (this.#carried === null) {
         this.style.removeProperty('--vk-carry');
+        this.style.removeProperty('--vk-carry-blur');
         this.style.removeProperty('--vk-ring');
       } else {
         this.style.setProperty('--vk-carry', this.#carried.toFixed(3));
+        this.style.setProperty('--vk-carry-blur', Math.min(Math.max(blur ?? 1 - this.#carried, 0), 1).toFixed(3));
         this.style.setProperty('--vk-ring', Math.min(Math.max(ring, 0), 1).toFixed(3));
       }
       if (handedOver && this.#glassMode() !== 'touch') {
@@ -158,6 +160,7 @@ export function createControlElementClass(
       if (!this.#glass || !control) return null;
       const body = atomBody(VIREGLASS_CONTROL_MATERIAL, visualAtomState(this.#visual, this.#state), this.#presentation?.frost ?? false);
       const sample = this.#sample ?? (probe ? this.#glass.probe() : null);
+      if (probe && !this.#sample && sample) this.#probed = sample;
       return { material: this.#atomMaterial().material, geometry: this.#geometry(control), body, sample: sample! };
     }
 

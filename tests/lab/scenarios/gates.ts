@@ -19,7 +19,7 @@ export const LIMITS = {
   tickMs: 20,
   /** Pop: the mean ΔE between two consecutive frames in the region of an element whose box did not move between them. */
   popMean: 1.2,
-  /** Hole: the ink of a trigger that is alone in its place may fall to this fraction of its ink at rest. */
+  /** Hole: the ink of a trigger that is alone in its place, glyphs out of focus included, may fall to this fraction of its ink at rest. */
   holeInk: 0.5,
   /** Converge: how far, in mean ΔE over the region, a motion may turn away from the picture it settles to after it has come closer to it. */
   convergeBounce: 3,
@@ -205,8 +205,26 @@ export function ink(image: Image, region: Rect): number {
   return n;
 }
 
+/** The ink of a region as the sum of how far its pixels stand out from the median colour beyond a floor: a glyph out of focus keeps it, an absent one has none. */
+export function inkMass(image: Image, region: Rect): number {
+  const { x0, y0, x1, y1 } = clip(region, image);
+  const lab: [number, number, number][] = [];
+  for (let y = y0; y < y1; y += 1) {
+    for (let x = x0; x < x1; x += 1) {
+      const i = (y * image.width + x) * 4;
+      lab.push(labOf(image.data[i]!, image.data[i + 1]!, image.data[i + 2]!));
+    }
+  }
+  if (lab.length === 0) return 0;
+  const m: Lab3 = [medianOf(lab.map((c) => c[0])), medianOf(lab.map((c) => c[1])), medianOf(lab.map((c) => c[2]))];
+  let sum = 0;
+  for (const c of lab) sum += Math.max(0, Math.hypot(c[0] - m[0], c[1] - m[1], c[2] - m[2]) - INK_FLOOR);
+  return sum;
+}
+
 type Lab3 = [number, number, number];
 const INK_DE = 14;
+const INK_FLOOR = 3;
 
 /** A frame within three of a stall of the compositor, or presented less than half a frame after one, carries the ticks of the stall and is catching up: it is not one tick of the motion, and the pop gate judges it against the last frame before the stall instead. */
 const stalled = (frames: Frames, j: number): boolean => {
@@ -280,7 +298,7 @@ export function hole(frames: Frames, spec: HoleSpec): GateResult {
   const rest = frames.before(rec.input);
   const home = boxesAt(rec, spec.target, frames.t(rest))[0];
   if (!home || home.hidden) return { gate: 'hole', verdict: 'skip', line: `no box of "${spec.target}" at rest`, numbers: {}, flagged: [] };
-  const base = ink(frames.at(rest), home);
+  const base = inkMass(frames.at(rest), home);
   if (base === 0) return { gate: 'hole', verdict: 'skip', line: 'the trigger has no ink at rest', numbers: {}, flagged: [] };
   const tol = spec.tol ?? 8;
   const flagged: number[] = [];
@@ -294,7 +312,7 @@ export function hole(frames: Frames, spec: HoleSpec): GateResult {
     const away = !surface || surface.hidden || (Math.abs(surface.w - target.w) <= tol && Math.abs(surface.h - target.h) <= tol && Math.abs(surface.x - target.x) <= tol && Math.abs(surface.y - target.y) <= tol);
     if (!away) continue;
     checked += 1;
-    const ratio = ink(frames.at(j), target) / base;
+    const ratio = inkMass(frames.at(j), target) / base;
     series.push({ index: j, t: frames.t(j) - rec.input, value: ratio });
     if (ratio < LIMITS.holeInk) flagged.push(j);
     if (ratio < worst.ratio) Object.assign(worst, { ratio, t: frames.t(j) - rec.input });
