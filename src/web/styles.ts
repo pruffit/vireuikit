@@ -41,12 +41,12 @@ ${BODY}{appearance:none;-webkit-appearance:none;box-sizing:border-box;margin:0;b
  display:inline-flex;align-items:center;justify-content:center;gap:8px;position:relative;
  height:var(--vk-height);min-width:var(--vk-height);padding:0 var(--vk-pad-x);border-radius:var(--vk-radius);
  -webkit-text-fill-color:color-mix(in srgb,currentColor calc((1 - var(--vk-press)*.55)*var(--vk-carry)*100%),transparent);
- text-shadow:0 0 calc((var(--vk-press)*var(--vk-defocus) + var(--vk-carry-blur)*4)*1px) color-mix(in srgb,currentColor calc(var(--vk-carry)*100%),transparent);
+ text-shadow:0 0 calc((var(--vk-press)*var(--vk-defocus) + var(--vk-carry-blur,0)*4)*1px) color-mix(in srgb,currentColor calc(var(--vk-carry)*100%),transparent);
  background:transparent;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-tap-highlight-color:transparent;
  transform:scale(calc(1 + var(--vk-press)*var(--vk-grow)))}
 vire-icon-button[data-vk]>button{padding:0;width:var(--vk-height)}
 ${BODY}>svg{width:var(--vk-icon);height:var(--vk-icon);flex:none;
- opacity:calc((1 - var(--vk-press)*.45)*var(--vk-carry));filter:blur(calc((var(--vk-press)*var(--vk-defocus) + var(--vk-carry-blur)*4)*1px))}
+ opacity:calc((1 - var(--vk-press)*.45)*var(--vk-carry));filter:blur(calc((var(--vk-press)*var(--vk-defocus) + var(--vk-carry-blur,0)*4)*1px))}
 ${BODY}:disabled{cursor:default}
 ${HOST}[data-disabled]>button{-webkit-text-fill-color:color-mix(in srgb,currentColor 40%,transparent)}
 ${HOST}[data-disabled]>button>svg{opacity:.4}
