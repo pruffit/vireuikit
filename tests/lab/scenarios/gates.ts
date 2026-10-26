@@ -221,7 +221,7 @@ function lastOut(rec: Recording, surface: string, frames: Frames, j: number): nu
 
 const stalled = (frames: Frames, j: number): boolean => {
   if (frames.t(j) - frames.t(j - 1) < 8) return true;
-  for (let back = 0; back < 3 && j - back >= 1; back += 1) {
+  for (let back = 0; back < 3 && j - back >= 2; back += 1) {
     const gap = frames.t(j - back) - frames.t(j - back - 1 < 0 ? 0 : j - back - 1);
     if (gap > LIMITS.frameGap || gap < 8) return true;
   }
