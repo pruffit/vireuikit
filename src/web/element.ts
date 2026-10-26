@@ -1,7 +1,7 @@
-import { VIREGLASS_CONTROL_MATERIAL, type BackdropSample, type VireGlassMaterial } from 'vireglass';
+import { VIREGLASS_CONTROL_MATERIAL, type BackdropSample, type VireGlassGeometry, type VireGlassMaterial } from 'vireglass';
 import type { GlassMorph } from 'vireglass/dom';
 import { presentationFor, sameA11y, type A11yMode, type A11yOverride, type Presentation } from '../kit/a11y';
-import { atomBody, atomMaterial, type VireUIKitAtomKind } from '../kit/atom';
+import { atomBody, atomMaterial, type AtomBody, type VireUIKitAtomKind } from '../kit/atom';
 import { hitTarget, hoversWith, sizeTier } from '../kit/adaptive/input';
 import {
   CONTROL_IDLE,
@@ -53,10 +53,15 @@ export interface VireControlElement extends HTMLElement {
   a11y: A11yOverride;
   sample: BackdropSample | null;
   setMorph(morph: GlassMorph | null): void;
-  /** A menu growing out of this control carries its body: no lens and no body of its own, the glyph in
-   *  focus by `ink` (1 sharp, 0 gone). `null` takes the body back. */
-  setCarried(ink: number | null): void;
+  /** A menu growing out of this control carries its body: its lens stays attached at presence 0 and it paints no
+   *  body of its own, the glyph in focus by `ink` (1 sharp, 0 gone) and the focus ring drawn by `ring`. `bodyBack` returns the body with the
+   *  glyph still in that focus, and `null` ends it all. */
+  setCarried(ink: number | null, ring?: number, bodyBack?: boolean): void;
+  /** What the lens of this control is at rest: the material, box and backdrop a surface that shrinks into it ends on. Null without a lens. */
+  restLens(probe?: boolean): RestLens | null;
 }
+
+export type RestLens = { material: VireGlassMaterial; geometry: VireGlassGeometry; body: AtomBody; sample: BackdropSample };
 
 export type ControlElementOptions = { nonce?: string | undefined };
 
@@ -89,6 +94,7 @@ export function createControlElementClass(
     #morph: GlassMorph | null = null;
     #sample: BackdropSample | null = null;
     #carried: number | null = null;
+    #bodyOut = false;
     #hadStyle = { host: false, control: false };
 
     get a11y(): A11yOverride {
@@ -114,15 +120,28 @@ export function createControlElementClass(
       this.#glass?.setMorph(morph);
     }
 
-    setCarried(ink: number | null): void {
-      const handedOver = (this.#carried === null) !== (ink === null);
+    setCarried(ink: number | null, ring = 1, bodyBack = false): void {
+      const bodyOut = ink !== null && !bodyBack;
+      const handedOver = this.#bodyOut !== bodyOut;
+      this.#bodyOut = bodyOut;
       this.#carried = ink === null ? null : Math.min(Math.max(ink, 0), 1);
-      this.toggleAttribute('data-carried', this.#carried !== null);
-      if (this.#carried === null) this.style.removeProperty('--vk-carry');
-      else this.style.setProperty('--vk-carry', this.#carried.toFixed(3));
-      // No lens at all while the surface grown from this control is out; a new one comes with the body. Held in interim
-      // instead, it would end itself after two seconds and bake mid-use.
-      if (handedOver && this.#mode) this.#reattachGlass(this.#mode);
+      this.toggleAttribute('data-carried', bodyOut);
+      if (this.#carried === null) {
+        this.style.removeProperty('--vk-carry');
+        this.style.removeProperty('--vk-ring');
+      } else {
+        this.style.setProperty('--vk-carry', this.#carried.toFixed(3));
+        this.style.setProperty('--vk-ring', Math.min(Math.max(ring, 0), 1).toFixed(3));
+      }
+      if (handedOver && this.#glassMode() !== 'touch') this.#glass?.setAppear(bodyOut ? 0 : 1);
+    }
+
+    restLens(probe = true): RestLens | null {
+      const control = this.#control;
+      if (!this.#glass || !control) return null;
+      const body = atomBody(VIREGLASS_CONTROL_MATERIAL, visualAtomState(this.#visual, this.#state), this.#presentation?.frost ?? false);
+      const sample = this.#sample ?? (probe ? this.#glass.probe() : null);
+      return { material: this.#atomMaterial().material, geometry: this.#geometry(control), body, sample: sample! };
     }
 
     connectedCallback(): void {
@@ -153,6 +172,7 @@ export function createControlElementClass(
       this.#state = CONTROL_IDLE;
       this.#suppressClick = false;
       this.#carried = null;
+      this.#bodyOut = false;
       for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-size', 'data-carried']) this.removeAttribute(name);
       for (const name of Array.from(this.style)) if (name.startsWith('--vk-')) this.style.removeProperty(name);
       if (!this.#hadStyle.host && this.getAttribute('style') === '') this.removeAttribute('style');
@@ -435,7 +455,7 @@ export function createControlElementClass(
 
     #reattachGlass(mode: A11yMode): void {
       const control = this.#control;
-      const want = this.#presentation?.glass === true && control !== null && this.#carried === null;
+      const want = this.#presentation?.glass === true && control !== null;
       const key = want ? `${this.#glassMode()}|${JSON.stringify(mode)}|${this.#size()}` : '';
       if (key === this.#glassKey) return;
       this.#dropGlass();
@@ -460,7 +480,7 @@ export function createControlElementClass(
           if (!session) return;
           this.#glass = session;
           if (this.#morph) session.setMorph(this.#morph);
-          if (this.#carried !== null) session.setAppear(0);
+          if (this.#bodyOut) session.setAppear(0);
           if (this.#sample !== sample) session.setSample(this.#sample);
           this.#lastMaterialKey = atom.key;
           this.#pushMaterial();
