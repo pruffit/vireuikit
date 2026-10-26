@@ -17,6 +17,12 @@ export const LIMITS = {
   frameGap: 26,
   /** Pop: the mean ΔE between two consecutive frames in the region of an element whose box did not move between them. */
   popMean: 1.2,
+  /** Pop: how long after a surface has left its target's place the target's glyph and focus ring come into focus, which is a ramp of its own and may change the picture faster than an element at rest. */
+  handoverMs: 450,
+  /** Pop: the frame in which a surface has handed its place back to its target, the mean ΔE it may change by in a frame. */
+  popHandover: 3,
+  /** Hole and together: a motion's first moments, in which a surface tightens inside its trigger's box and the trigger's glyphs go out of focus, are not judged. */
+  contractionMs: 160,
   /** Hole: the ink of a trigger that is alone in its place may fall to this fraction of its ink at rest. */
   holeInk: 0.5,
   /** Converge: how far, in mean ΔE over the region, a motion may turn away from the picture it settles to after it has come closer to it. */
@@ -206,11 +212,20 @@ export function ink(image: Image, region: Rect): number {
 type Lab3 = [number, number, number];
 const INK_DE = 14;
 
-/** A frame that was presented after the compositor stalled, or less than half a frame after one that was, carries the ticks of the stall: it is not one tick of the motion. */
+/** A frame within three of a stall of the compositor, or presented less than half a frame after one, carries the ticks of the stall and is catching up: it is not one tick of the motion. */
+/** The time of the last frame at or before `j` in which the surface was out. */
+function lastOut(rec: Recording, surface: string, frames: Frames, j: number): number {
+  for (let k = j; k >= 0; k -= 1) if (boxesAt(rec, surface, frames.t(k))[0]?.hidden === false) return frames.t(k);
+  return Number.NEGATIVE_INFINITY;
+}
+
 const stalled = (frames: Frames, j: number): boolean => {
-  const gap = frames.t(j) - frames.t(j - 1);
-  const before = j > 1 ? frames.t(j - 1) - frames.t(j - 2) : 0;
-  return gap > LIMITS.frameGap || gap < 8 || (j > 1 && (before > LIMITS.frameGap || before < 8));
+  if (frames.t(j) - frames.t(j - 1) < 8) return true;
+  for (let back = 0; back < 3 && j - back >= 1; back += 1) {
+    const gap = frames.t(j - back) - frames.t(j - back - 1 < 0 ? 0 : j - back - 1);
+    if (gap > LIMITS.frameGap || gap < 8) return true;
+  }
+  return false;
 };
 
 export type PopSpec = { keys: string[]; pad?: number; /** A surface that grows out of the element: a frame in which it is out is not judged, since it changes the region by being there; the frame in which it has left, against the one before, is. */ surface?: string };
@@ -243,7 +258,8 @@ export function pop(frames: Frames, spec: PopSpec): GateResult {
         checked += 1;
         const c = regionChange(frames.at(j - 1), frames.at(j), pad(b, spec.pad ?? 4), LIMITS.changed);
         series.push({ index: j, t: frames.t(j) - rec.input, value: c.mean });
-        if (c.mean > LIMITS.popMean) flagged.push(j);
+        const left = spec.surface !== undefined && frames.t(j) - lastOut(rec, spec.surface, frames, j) < LIMITS.handoverMs;
+        if (c.mean > (left ? LIMITS.popHandover : LIMITS.popMean)) flagged.push(j);
         if (c.mean > worst.mean) Object.assign(worst, { mean: c.mean, t: frames.t(j) - rec.input, key: key, gap: frames.t(j) - frames.t(j - 1) });
       });
     }
@@ -284,6 +300,8 @@ export function hole(frames: Frames, spec: HoleSpec): GateResult {
     const surface = boxesAt(rec, spec.surface, frames.t(j))[0];
     const away = !surface || surface.hidden || (Math.abs(surface.w - target.w) <= tol && Math.abs(surface.h - target.h) <= tol && Math.abs(surface.x - target.x) <= tol && Math.abs(surface.y - target.y) <= tol);
     if (!away) continue;
+    // The drop tightens inside the trigger's box for the first moments of a motion, while its glyphs go out of focus.
+    if (rec.motion.some((m) => frames.t(j) >= m.start && frames.t(j) < m.start + LIMITS.contractionMs)) continue;
     checked += 1;
     const ratio = ink(frames.at(j), target) / base;
     series.push({ index: j, t: frames.t(j) - rec.input, value: ratio });
@@ -663,7 +681,6 @@ function ringPixels(b: Box, image: Image, width: number): number[] {
 }
 
 const RING_PX = 3;
-const CONTRACTION_MS = 160;
 
 /** A label is never drawn without its body: where the trigger shows at least a fifth of its ink at rest, the rim of its box (the 90th percentile of the pixels along its edge) differs from the page behind it by at least `bodyKept` of what it does at rest. */
 export function together(frames: Frames, spec: TogetherSpec): GateResult {
@@ -690,7 +707,7 @@ export function together(frames: Frames, spec: TogetherSpec): GateResult {
     const b = boxesAt(rec, spec.key, frames.t(j))[0];
     if (!b || b.hidden || !away(rec, spec.surface, b, frames.t(j), 4)) continue;
     // The drop tightens inside the trigger's box for the first moments of a motion, and its body is then not on the box's edge.
-    if (rec.motion.some((m) => frames.t(j) >= m.start && frames.t(j) < m.start + CONTRACTION_MS)) continue;
+    if (rec.motion.some((m) => frames.t(j) >= m.start && frames.t(j) < m.start + LIMITS.contractionMs)) continue;
     const image = frames.at(j);
     if (ink(image, b) / inkRest < 0.2) continue;
     checked += 1;
