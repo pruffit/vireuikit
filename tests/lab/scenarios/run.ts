@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Browser, Page } from '@playwright/test';
 import { openCase } from '../helpers';
 import { installProbe, record, type Layout, sampleAt, sleep, warmUp, type RecordContext, type Recording, type Track } from './capture';
-import { Frames, converge, ghost, highlight, hole, pop, scrollbar, seam, shape, state, vanish, type GateName, type GateResult, type ConvergeSpec, type GhostSpec, type ScrollbarSpec, type HoleSpec, type PopSpec, type SeamSpec, type ShapeSpec, type StateSpec, type VanishSpec } from './gates';
+import { Frames, box, converge, landing, together, ghost, highlight, hole, pop, scrollbar, seam, shape, state, vanish, type GateName, type GateResult, type BoxSpec, type LandingSpec, type TogetherSpec, type ConvergeSpec, type GhostSpec, type ScrollbarSpec, type HoleSpec, type PopSpec, type SeamSpec, type ShapeSpec, type StateSpec, type VanishSpec } from './gates';
 import { contactSheet, slug, viewOf, writeMetrics } from './report';
 
 export type Gates = {
@@ -17,6 +17,9 @@ export type Gates = {
   state?: StateSpec;
   highlight?: StateSpec;
   ghost?: GhostSpec;
+  landing?: LandingSpec;
+  box?: BoxSpec;
+  together?: TogetherSpec;
 };
 
 /** A finding of the acceptance issue a gate is expected to fail on the code as it is: the row is labelled, and goes green when it is fixed and the label removed. */
@@ -87,6 +90,9 @@ export function judge(rec: Recording, gates: Gates, states?: string): GateResult
   if (gates.state) results.push(state(frames, gates.state));
   if (gates.highlight) results.push(highlight(frames, gates.highlight));
   if (gates.ghost) results.push(ghost(frames, gates.ghost));
+  if (gates.landing) results.push(landing(frames, gates.landing));
+  if (gates.box) results.push(box(frames, gates.box));
+  if (gates.together) results.push(together(frames, gates.together));
   if (states) {
     const rest = frames.before(rec.input);
     const count = sampleAt(rec.samples, frames.t(rest))?.boxes[states]?.filter((b) => !b.hidden).length ?? 0;
@@ -122,7 +128,7 @@ export async function play(browser: Browser, baseURL: string, sc: Scenario, shee
     await installProbe(page);
     await (sc.open ? sc.open(page) : openLab(page, sc.query));
     await sc.prepare?.(page);
-    const wantsBackdrop = Boolean((sc.gates.shape && sc.gates.shape.ref !== 'rest'));
+    const wantsBackdrop = Boolean(((sc.gates.shape && sc.gates.shape.ref !== 'rest') || sc.gates.together));
     const rec = await record({
       name: sc.name,
       page,

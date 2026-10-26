@@ -1,4 +1,5 @@
 import type { Browser, BrowserContext, CDPSession, Page } from '@playwright/test';
+import type { RenderStats } from 'vireglass/dom';
 import type { Rect } from './color';
 
 /** One tracked element at one frame: its box, the radius it declares (clamped to the box) and whether it is drawn at all. */
@@ -23,6 +24,8 @@ export type Recording = {
   backdrops: { mark: string | null; png: Buffer }[];
   pageErrors: string[];
   scrollers: Scroller[];
+  /** The core's work counters over the scenario (`renderStats`), or null on a page that has none. */
+  stats: RenderStats | null;
 };
 
 /** A scroll container found inside a kit surface: where its content is, how wide the platform's scrollbar is, and what its styles say about the bar. */
@@ -161,6 +164,7 @@ export async function record(o: RecordOptions): Promise<Recording> {
     shots.push({ t: e.metadata.timestamp! * 1000, png: Buffer.from(e.data, 'base64') });
     void cdp.send('Page.screencastFrameAck', { sessionId: e.sessionId }).catch(() => undefined);
   });
+  await page.evaluate(() => (window as unknown as { __lab?: { resetRenderStats?(): void } }).__lab?.resetRenderStats?.());
   await startSampler(page, o.track);
   await cdp.send('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
   await sleep(START_STILL_MS);
@@ -220,6 +224,7 @@ export async function record(o: RecordOptions): Promise<Recording> {
         return out;
       }, o.scrollers)
     : [];
+  const stats = await page.evaluate(() => (window as unknown as { __lab?: { renderStats?(): RenderStats } }).__lab?.renderStats?.() ?? null);
   const scn = await page.evaluate(() => {
     const s = (window as unknown as { __scn: Scn }).__scn;
     s.stop = true;
@@ -239,7 +244,7 @@ export async function record(o: RecordOptions): Promise<Recording> {
       open = null;
     }
   }
-  return { name: o.name, viewport: o.viewport, shots, input, motion, marks, samples: scn.samples, backdrops, pageErrors, scrollers };
+  return { name: o.name, viewport: o.viewport, shots, input, motion, marks, samples: scn.samples, backdrops, pageErrors, scrollers, stats };
 }
 
 /** The sample taken in the frame at or before `t`. */

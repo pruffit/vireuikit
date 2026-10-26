@@ -23,7 +23,7 @@ const menu: Scenario[] = [
     query: 'view=menu',
     owner: 'chrome=1&view=menu',
     viewport: { width: 520, height: 520 },
-    track: { trigger: '#more vire-icon-button:not([data-carried]) > button', trigHost: '#more > vire-icon-button', list: '#more > [popover]' },
+    track: { trigger: '#more vire-icon-button:not([data-carried]) > button', trigHost: '#more > vire-icon-button', list: '#more > [popover]', rows: '#more > [popover] > button' },
     view: ['trigger', 'list'],
     async act(ctx) {
       await ctx.page.locator('#more-trigger').click();
@@ -32,7 +32,16 @@ const menu: Scenario[] = [
       await ctx.quiet();
       await ctx.page.locator('#more-trigger').click();
     },
-    gates: { seam: { keys: ['trigger', 'trigHost', 'list'] }, shape: { keys: ['trigger'] } },
+    gates: {
+      seam: { keys: ['trigger', 'trigHost', 'list'] },
+      shape: { keys: ['trigger'] },
+      pop: { keys: ['trigHost'], surface: 'list' },
+      hole: { target: 'trigHost', surface: 'list' },
+      ghost: { surface: 'list', target: 'trigHost', part: 'rows' },
+      together: { key: 'trigHost', surface: 'list' },
+      box: { key: 'trigHost' },
+      landing: {},
+    },
   },
 ];
 

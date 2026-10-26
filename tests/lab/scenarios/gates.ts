@@ -41,7 +41,7 @@ export const LIMITS = {
 } as const;
 
 export type Verdict = 'pass' | 'fail' | 'skip';
-export type GateName = 'seam' | 'pop' | 'hole' | 'converge' | 'vanish' | 'shape' | 'state' | 'highlight' | 'ghost' | 'scrollbar';
+export type GateName = 'landing' | 'box' | 'together' | 'seam' | 'pop' | 'hole' | 'converge' | 'vanish' | 'shape' | 'state' | 'highlight' | 'ghost' | 'scrollbar';
 export type GateResult = {
   gate: GateName;
   verdict: Verdict;
@@ -204,7 +204,14 @@ export function ink(image: Image, region: Rect): number {
 type Lab3 = [number, number, number];
 const INK_DE = 14;
 
-export type PopSpec = { keys: string[]; pad?: number };
+export type PopSpec = { keys: string[]; pad?: number; /** A surface that grows out of the element: frames in which it is out, bigger than the element, are not judged, since it changes the region by being there. */ surface?: string };
+
+/** The surface is closed, or back at the size and place of the target. */
+function away(rec: Recording, surface: string | undefined, target: Box, t: number, tol = 8): boolean {
+  if (!surface) return true;
+  const s = boxesAt(rec, surface, t)[0];
+  return !s || s.hidden || (Math.abs(s.w - target.w) <= tol && Math.abs(s.h - target.h) <= tol && Math.abs(s.x - target.x) <= tol && Math.abs(s.y - target.y) <= tol);
+}
 
 /**
  * A change that comes at once, in the middle of a motion, in a place where nothing moves: the region of an element
@@ -223,7 +230,7 @@ export function pop(frames: Frames, spec: PopSpec): GateResult {
       const before = boxesAt(rec, key, frames.t(j - 1));
       now.forEach((b, i) => {
         const p = before[i];
-        if (!p || b.hidden || p.hidden || Math.abs(b.x - p.x) > 0.3 || Math.abs(b.y - p.y) > 0.3 || Math.abs(b.w - p.w) > 0.3 || Math.abs(b.h - p.h) > 0.3) return;
+        if (!p || b.hidden || p.hidden || frames.t(j) - frames.t(j - 1) > LIMITS.frameGap || !away(rec, spec.surface, b, frames.t(j)) || !away(rec, spec.surface, p, frames.t(j - 1)) || Math.abs(b.x - p.x) > 0.3 || Math.abs(b.y - p.y) > 0.3 || Math.abs(b.w - p.w) > 0.3 || Math.abs(b.h - p.h) > 0.3) return;
         checked += 1;
         const c = regionChange(frames.at(j - 1), frames.at(j), pad(b, spec.pad ?? 4), LIMITS.changed);
         series.push({ index: j, t: frames.t(j) - rec.input, value: c.mean });
@@ -577,6 +584,113 @@ export function ghost(frames: Frames, spec: GhostSpec): GateResult {
     verdict: flagged.length > 0 ? 'fail' : 'pass',
     line: `${checked} frames with the surface at the size of its target; worst +${ms(worst.t)}: ${f2(worst.share * 100)}% of the part's pixels differ from the settled target; ${flagged.length} frames over ${LIMITS.ghostShare * 100}%`,
     numbers: { frames: checked, worstSharePct: +f2(worst.share * 100), worstAtMs: Math.round(worst.t), framesOver: flagged.length },
+    flagged,
+    series,
+  };
+}
+
+export type LandingSpec = { max?: Partial<Record<'landedBlend' | 'probesAtLand' | 'syncSwaps', number>> };
+
+/** The core's own counters over the scenario: a motion lands in its last frame, so no landing blends, probes the backdrop or swaps a filter in its own task. */
+export function landing(frames: Frames, spec: LandingSpec): GateResult {
+  const stats = frames.rec.stats;
+  if (!stats) return { gate: 'landing', verdict: 'skip', line: 'the page has no render stats', numbers: {}, flagged: [] };
+  const max = { landedBlend: 0, probesAtLand: 0, syncSwaps: 0, ...spec.max };
+  const over = (Object.keys(max) as (keyof typeof max)[]).filter((k) => stats[k] > max[k]);
+  return {
+    gate: 'landing',
+    verdict: over.length > 0 ? 'fail' : 'pass',
+    line: `landedExact ${stats.landedExact}, landedBlend ${stats.landedBlend}, probesAtLand ${stats.probesAtLand}, syncSwaps ${stats.syncSwaps} (limits ${max.landedBlend}, ${max.probesAtLand}, ${max.syncSwaps}); probes ${stats.probes}, full bakes ${stats.fullBakes}, filter swaps ${stats.filterSwaps}`,
+    numbers: { landedExact: stats.landedExact, landedBlend: stats.landedBlend, probesAtLand: stats.probesAtLand, syncSwaps: stats.syncSwaps },
+    flagged: [],
+  };
+}
+
+export type BoxSpec = { key: string; tol?: number };
+
+/** A trigger does not move or change size while a surface grows out of it and returns: its box in every frame is the box it had at rest. */
+export function box(frames: Frames, spec: BoxSpec): GateResult {
+  const rec = frames.rec;
+  const tol = spec.tol ?? 0.5;
+  const rest = frames.before(rec.input);
+  const home = boxesAt(rec, spec.key, frames.t(rest))[0];
+  if (!home || home.hidden) return { gate: 'box', verdict: 'skip', line: `no box of "${spec.key}" at rest`, numbers: {}, flagged: [] };
+  const flagged: number[] = [];
+  const worst = { d: 0, t: 0 };
+  for (let j = rest + 1; j < frames.length; j += 1) {
+    const b = boxesAt(rec, spec.key, frames.t(j))[0];
+    if (!b || b.hidden) continue;
+    const d = Math.max(Math.abs(b.x - home.x), Math.abs(b.y - home.y), Math.abs(b.w - home.w), Math.abs(b.h - home.h));
+    if (d > tol) flagged.push(j);
+    if (d > worst.d) Object.assign(worst, { d, t: frames.t(j) - rec.input });
+  }
+  return {
+    gate: 'box',
+    verdict: flagged.length > 0 ? 'fail' : 'pass',
+    line: `worst +${ms(worst.t)}: ${f2(worst.d)} px from the box at rest (limit ${tol}); ${flagged.length} frames over`,
+    numbers: { worstPx: +f2(worst.d), worstAtMs: Math.round(worst.t), framesOver: flagged.length },
+    flagged,
+  };
+}
+
+export type TogetherSpec = { key: string; surface?: string };
+
+/** Pixels of a rounded box that lie within `width` of its edge, as indices into the image data: the rim and the body's edge, where a label is not. */
+function ringPixels(b: Box, image: Image, width: number): number[] {
+  const out: number[] = [];
+  const hx = b.w / 2;
+  const hy = b.h / 2;
+  const r = Math.min(b.r, hx, hy);
+  const { x0, y0, x1, y1 } = clip(b, image);
+  for (let y = y0; y < y1; y += 1) {
+    for (let x = x0; x < x1; x += 1) {
+      const qx = Math.abs(x + 0.5 - (b.x + hx)) - (hx - r);
+      const qy = Math.abs(y + 0.5 - (b.y + hy)) - (hy - r);
+      const d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
+      if (d < 0 && d >= -width) out.push((y * image.width + x) * 4);
+    }
+  }
+  return out;
+}
+
+const RING_PX = 3;
+
+/** A label is never drawn without its body: where the trigger shows at least a fifth of its ink at rest, the edge of its box differs from the page behind it by at least half of what it does at rest. */
+export function together(frames: Frames, spec: TogetherSpec): GateResult {
+  const rec = frames.rec;
+  const backdrop = rec.backdrops[0];
+  const rest = frames.before(rec.input);
+  const home = boxesAt(rec, spec.key, frames.t(rest))[0];
+  if (!backdrop || !home || home.hidden) return { gate: 'together', verdict: 'skip', line: 'no backdrop reference, or no box at rest', numbers: {}, flagged: [] };
+  const reference = decodePng(backdrop.png);
+  const bodyOf = (image: Image, b: Box): number => {
+    const px = ringPixels(b, image, RING_PX);
+    return px.length === 0 ? 0 : px.reduce((sum, i) => sum + deltaE(image, i, reference, i), 0) / px.length;
+  };
+  const inkRest = ink(frames.at(rest), home);
+  const bodyRest = bodyOf(frames.at(rest), home);
+  if (inkRest === 0 || bodyRest < 1) return { gate: 'together', verdict: 'skip', line: 'the trigger has no ink or no body at rest', numbers: {}, flagged: [] };
+  const flagged: number[] = [];
+  const series: NonNullable<GateResult['series']> = [];
+  const worst = { body: Infinity, t: 0 };
+  let checked = 0;
+  for (let j = rest + 1; j < frames.length; j += 1) {
+    const b = boxesAt(rec, spec.key, frames.t(j))[0];
+    if (!b || b.hidden || !away(rec, spec.surface, b, frames.t(j))) continue;
+    const image = frames.at(j);
+    if (ink(image, b) / inkRest < 0.2) continue;
+    checked += 1;
+    const body = bodyOf(image, b) / bodyRest;
+    series.push({ index: j, t: frames.t(j) - rec.input, value: body });
+    if (body < 0.5) flagged.push(j);
+    if (body < worst.body) Object.assign(worst, { body, t: frames.t(j) - rec.input });
+  }
+  if (checked === 0) return { gate: 'together', verdict: 'skip', line: 'the label was never drawn after the input', numbers: {}, flagged: [] };
+  return {
+    gate: 'together',
+    verdict: flagged.length > 0 ? 'fail' : 'pass',
+    line: `${checked} frames with the label drawn; the least body at +${ms(worst.t)}: ${Math.round(worst.body * 100)}% of the edge's difference from the page at rest; ${flagged.length} frames under 50%`,
+    numbers: { frames: checked, leastBodyPct: Math.round(worst.body * 100), leastAtMs: Math.round(worst.t), framesWithout: flagged.length },
     flagged,
     series,
   };
