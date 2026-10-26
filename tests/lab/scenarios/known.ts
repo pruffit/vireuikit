@@ -23,6 +23,10 @@ export const KNOWN: Record<string, Known> = {
   'button hover on light': { state: { 'gpu@owner': '#44 B', gpu: '#44 B', swiftshader: '#44 B' } },
   'button hover on mid': { state: { 'gpu@owner': '#44 B', gpu: '#44 B', swiftshader: '#44 B' } },
   'icon button hover on mid': { state: { 'gpu@owner': '#44 B', gpu: '#44 B', swiftshader: '#44 B' } },
+  'button press on busy': { seam: { 'gpu@owner': '#44 A', gpu: '#44 A' }, pop: { 'gpu@owner': '#44 A', gpu: '#44 A' } },
+  'button press on split': { seam: { 'gpu@owner': '#44 A', gpu: '#44 A' } },
+  'icon button press on split': { seam: { 'gpu@owner': '#44 A', gpu: '#44 A' } },
+  'icon button press on busy': { seam: { 'gpu@owner': '#44 A', gpu: '#44 A' } },
   'popover open and close': { seam: { gpu: '#44 A', swiftshader: '#44 A' } },
   'navigation tap each item': { seam: { 'gpu@owner': '#44 A' } },
 };

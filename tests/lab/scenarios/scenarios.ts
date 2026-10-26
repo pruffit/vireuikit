@@ -468,7 +468,7 @@ const atoms: Scenario[] = BACKDROPS.flatMap((backdrop) =>
           await ctx.mark('press');
           await page.mouse.up();
         },
-        gates: { state: { key: 'atom', at: 'press' }, shape: { keys: ['atom'], ref: 'rest' }, seam: { keys: ['atom'] }, pop: { keys: ['atom'] } },
+        gates: { state: { key: 'atom', at: 'press' }, shape: { keys: ['atom'], ref: 'rest' }, seam: { keys: ['atom'] }, pop: { keys: ['atom'] }, landing: {} },
       },
     ];
   }),

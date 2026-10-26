@@ -5,6 +5,7 @@ import { atomBody, atomMaterial, type AtomBody, type VireUIKitAtomKind } from '.
 import { hitTarget, hoversWith, sizeTier } from '../kit/adaptive/input';
 import {
   CONTROL_IDLE,
+  controlTargets,
   stepControl,
   type ControlEvent,
   type ControlState,
@@ -23,7 +24,7 @@ import { pressResponse } from '../kit/response';
 import { BUTTON_SIZES, CONTROL_SIZES, hitSlop, iconButtonSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { effectiveInput, watchPointerInput } from './environment';
-import { attachControlGlass, type GlassSession } from './glass';
+import { attachControlGlass, moveGlass, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
 type GlassMode = 'present' | 'touch' | 'off';
@@ -95,6 +96,7 @@ export function createControlElementClass(
     #sample: BackdropSample | null = null;
     #carried: number | null = null;
     #bodyOut = false;
+    #running = false;
     #hadStyle = { host: false, control: false };
 
     get a11y(): A11yOverride {
@@ -453,6 +455,7 @@ export function createControlElementClass(
       this.#glass = null;
       this.#glassKey = '';
       this.#lastMaterialKey = '';
+      this.#running = false;
     }
 
     #reattachGlass(mode: A11yMode): void {
@@ -508,19 +511,46 @@ export function createControlElementClass(
       };
     }
 
-    #pushMaterial(): void {
+    /** The material the springs are running to, which a lens in motion is told so that its maps are ready when they stop. */
+    #prepareRest(): void {
+      const t = controlTargets(this.#state);
+      const snap = (v: number) => Math.round(v * MATERIAL_STEPS) / MATERIAL_STEPS;
+      this.#glass?.prepare({ geometry: this.#geometry(this.#control!), material: atomMaterial(VIREGLASS_CONTROL_MATERIAL, kind, { pressed: snap(t.pressed), hovered: snap(t.hovered), selected: 0, disabled: t.disabled }) });
+    }
+
+    #restKey(): string {
+      const t = controlTargets(this.#state);
+      const snap = (v: number) => Math.round(v * MATERIAL_STEPS) / MATERIAL_STEPS;
+      return `${snap(t.pressed)}|${snap(t.hovered)}|${t.disabled}`;
+    }
+
+    #pushMaterial(moving = false): void {
       const glass = this.#glass;
       if (!glass) return;
       const { material, key, pressed } = this.#atomMaterial();
-      if (key === this.#lastMaterialKey) return;
+      if (key === this.#lastMaterialKey) {
+        if ((!moving || key === this.#restKey()) && this.#running) {
+          this.#running = false;
+          glass.land();
+        }
+        return;
+      }
       this.#lastMaterialKey = key;
-      glass.setMaterial(material);
+      if (moving && !this.#running) {
+        this.#running = true;
+        glass.setInterim(true);
+        this.#prepareRest();
+      }
+      // The lens lands once its material is the one the springs are running to: what is left of them is below what a step of it shows.
+      moveGlass(glass, moving && key !== this.#restKey(), () => glass.setMaterial(material));
+      if (!moving || key === this.#restKey()) this.#running = false;
       if (this.#glassMode() === 'touch' && this.#forced()) glass.setAppear(pressed);
     }
 
     #render(immediate = false): void {
       if (immediate && this.#forced()) settleControlVisual(this.#visual, this.#state);
-      this.#paint();
+      this.#paint(!(immediate && this.#forced()));
+      if (this.#running) this.#prepareRest();
       if (this.#frame || (immediate && this.#forced())) return;
       this.#clock = createMotionClock();
       this.#frame = requestMotionFrame((t) => this.#tick(t));
@@ -531,11 +561,11 @@ export function createControlElementClass(
       if (!this.isConnected) return;
       const instant = this.#presentation?.instantSprings ?? false;
       const moving = stepMotion(this.#clock, now, (dt) => stepControlVisual(this.#visual, dt, this.#state, instant));
-      this.#paint();
+      this.#paint(moving);
       if (moving) this.#frame = requestMotionFrame((t) => this.#tick(t));
     }
 
-    #paint(): void {
+    #paint(moving = false): void {
       const v = this.#visual;
       const set = (name: string, value: number) => this.style.setProperty(name, value.toFixed(3));
       set('--vk-press', v.pressed.x);
@@ -548,7 +578,7 @@ export function createControlElementClass(
       this.toggleAttribute('data-hovered', this.#state.hovered);
       this.toggleAttribute('data-focus', this.#state.focused);
       this.toggleAttribute('data-disabled', this.#state.disabled);
-      this.#pushMaterial();
+      this.#pushMaterial(moving);
     }
   };
 }
