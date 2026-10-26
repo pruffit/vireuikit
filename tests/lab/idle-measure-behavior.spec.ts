@@ -53,7 +53,8 @@ const SPY = () => {
   document.addEventListener(
     'click',
     () => {
-      const lensCalls = () => ((window as unknown as { __lenses?: { calls: unknown[] }[] }).__lenses ?? []).reduce((n, l) => n + l.calls.length, 0);
+      // The surface's lens: the trigger's own stays attached while the surface is out, and is the control's to keep.
+      const lensCalls = () => ((window as unknown as { __lenses?: { id: string; calls: unknown[] }[] }).__lenses ?? []).filter((l) => !/trigger/.test(l.id)).reduce((n, l) => n + l.calls.length, 0);
       const was = { measures: { ...spy.measures }, props: { ...spy.props }, lens: lensCalls() };
       requestAnimationFrame(() => {
         const props: Record<string, number> = {};
@@ -86,7 +87,7 @@ export function attachGlass(el, opts) {
   return {
     update() { note(undefined); },
     setMorph(m) { note(m); },
-    setAppear() {}, setSample() {}, setInterim() {}, setAccent() {}, setNeighbourGlow() {},
+    setAppear() {}, setSample() {}, setInterim() {}, prepare() {}, land() { return "exact"; }, whenPrepared() { return Promise.resolve(); }, setMaterial() {}, setAccent() {}, setNeighbourGlow() {},
     destroy() {},
   };
 }`;

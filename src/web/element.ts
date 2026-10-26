@@ -18,7 +18,7 @@ import {
   visualAtomState,
 } from '../kit/behavior/visual';
 import { createMotionClock, stepMotion } from '../kit/morph';
-import { cancelMotionFrame, requestMotionFrame } from './dom';
+import { cancelMotionFrame, requestMotionFrame, whenIdle } from './dom';
 import { probeFramePeriod } from './refresh';
 import { pressResponse } from '../kit/response';
 import { BUTTON_SIZES, CONTROL_SIZES, hitSlop, iconButtonSize, type ControlSize } from '../kit/sizes';
@@ -97,6 +97,8 @@ export function createControlElementClass(
     #carried: number | null = null;
     #bodyOut = false;
     #running = false;
+    #probed: BackdropSample | null = null;
+    #cancelReread: (() => void) | null = null;
     #hadStyle = { host: false, control: false };
 
     get a11y(): A11yOverride {
@@ -135,7 +137,18 @@ export function createControlElementClass(
         this.style.setProperty('--vk-carry', this.#carried.toFixed(3));
         this.style.setProperty('--vk-ring', Math.min(Math.max(ring, 0), 1).toFixed(3));
       }
-      if (handedOver && this.#glassMode() !== 'touch') this.#glass?.setAppear(bodyOut ? 0 : 1);
+      if (handedOver && this.#glassMode() !== 'touch') {
+        // Hidden or shown again, the lens keeps the backdrop it was read over: reading it inside this frame is what a click must not do.
+        if (this.#glass && !this.#sample && this.#probed) this.#glass.setSample(this.#probed);
+        this.#glass?.setAppear(bodyOut ? 0 : 1);
+        if (!bodyOut && !this.#sample && this.#probed) {
+          this.#cancelReread?.();
+          this.#cancelReread = whenIdle(() => {
+            this.#cancelReread = null;
+            this.#glass?.setSample(this.#sample);
+          });
+        }
+      }
       // While the menu carries the body the pointer's comings and goings are not the control's: it is as hovered as it was when the menu came out, and finds out where the pointer is when it is handed back.
       if (handedOver && !bodyOut && this.#state.hovered && !this.matches(':hover')) this.#dispatch({ type: 'leave' });
     }
@@ -488,6 +501,7 @@ export function createControlElementClass(
           if (this.#bodyOut) session.setAppear(0);
           if (this.#sample !== sample) session.setSample(this.#sample);
           this.#lastMaterialKey = atom.key;
+          this.#probed = this.#sample ?? session.probe();
           this.#pushMaterial();
           if (this.#glassMode() === 'touch' && this.#forced()) session.setAppear(this.#atomMaterial().pressed);
           this.dispatchEvent(new CustomEvent('vire-glass-ready'));

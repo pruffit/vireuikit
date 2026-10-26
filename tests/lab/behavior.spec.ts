@@ -231,7 +231,7 @@ test.describe('glass and its absence', () => {
     expect(await log(page)).toEqual(['click:play']);
   });
 
-  test('a control that gets its lens back after carrying a surface builds one filter for it, in the material it shows', async ({ page }) => {
+  test('a control that carries a surface keeps its lens, and takes its body back with no probe, bake or filter of its own', async ({ page }) => {
     await openCase(page, 'view=sandbox&glass=1');
     await page.locator('#share button').hover();
     await page.waitForTimeout(600);
@@ -246,12 +246,10 @@ test.describe('glass and its absence', () => {
       host.setCarried(1);
       window.__lab.resetRenderStats();
       host.setCarried(null);
+      (window as unknown as { __at: unknown }).__at = window.__lab.renderStats();
     });
-    await expect.poll(async () => (await lens()).length).toBe(1);
-    await page.waitForTimeout(200);
-    const stats = await page.evaluate(() => window.__lab.renderStats());
-    expect(stats.filterSwaps).toBe(1);
-    expect(stats.fullBakes).toBeLessThanOrEqual(2);
+    const stats = await page.evaluate(() => (window as unknown as { __at: ReturnType<typeof window.__lab.renderStats> }).__at);
+    expect(stats).toMatchObject({ filterSwaps: 0, fullBakes: 0, probes: 0 });
     expect(await lens()).toEqual(hovered);
   });
 

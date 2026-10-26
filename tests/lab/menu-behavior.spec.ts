@@ -496,6 +496,8 @@ type Frame = {
   radius: number;
   ink: number;
   carried: boolean;
+  /** The surface has handed the trigger back and is not drawn. */
+  left: boolean;
   phase: string | null;
   /** The trigger's own lens, body and rim as rendered. */
   triggerLens: string;
@@ -525,6 +527,7 @@ async function record(page: Page, id = 'more'): Promise<void> {
         radius: parseFloat(getComputedStyle(list).borderTopLeftRadius),
         ink: ink === '' ? 1 : Number(ink),
         carried: carrier?.hasAttribute('data-carried') ?? false,
+        left: getComputedStyle(list).visibility === 'hidden',
         phase: menu.getAttribute('data-phase'),
         triggerLens: button ? getComputedStyle(button).backdropFilter : 'none',
         triggerBody: button ? getComputedStyle(button).backgroundColor : 'rgba(0, 0, 0, 0)',
@@ -624,6 +627,7 @@ test.describe('growth', () => {
     expect(Math.min(...closing.map((f) => Math.max(f.w, f.h)))).toBeLessThanOrEqual(trigger.height * 1.3);
     expect(near(end.x, trigger.x) && near(end.y, trigger.y) && near(end.w, trigger.width) && near(end.h, trigger.height)).toBe(true);
     for (const f of closing) if (f.h < menu.h * 0.65) expect(f.ink).toBeLessThan(0.1);
+    expect(closing.some((f) => f.left)).toBe(true);
   });
 
   test('canary: a menu that pops open without growing fails it', async ({ page }) => {
@@ -664,7 +668,7 @@ test.describe('one body', () => {
   for (const glass of ['1', 'touch']) {
     test(`while the menu grows, is out and retracts, the trigger draws no lens, body or rim (glass=${glass})`, async ({ page }) => {
       const { opening, closing } = await openAndClose(page, `view=menu&glass=${glass}`);
-      const out = [...opening, ...closing];
+      const out = [...opening, ...closing].filter((f) => !f.left);
       expect(out.length).toBeGreaterThan(10);
       for (const f of out) {
         expect(f.carried).toBe(true);
@@ -712,7 +716,7 @@ test.describe('one body', () => {
     await expect(page.locator('#more')).toHaveAttribute('data-phase', 'open');
     await expect(host).toHaveAttribute('data-carried', '');
     expect(await background()).toBe('rgba(0, 0, 0, 0)');
-    expect(await lensBlur()).toBeNaN();
+    expect(await button.evaluate((el) => getComputedStyle(el).backdropFilter)).toBe('none');
     expect(await button.evaluate((el) => getComputedStyle(el, '::after').visibility)).toBe('hidden');
     expect(await host.evaluate((el) => Number(getComputedStyle(el).getPropertyValue('--vk-carry')))).toBe(0);
     await page.keyboard.press('Escape');
@@ -764,7 +768,7 @@ export function attachGlass(el, opts) {
     update() { note(undefined); },
     setMorph(m) { note(m); },
     setAppear(t) { rec.appear = t; },
-    setSample() {}, setInterim() {}, setAccent() {}, setNeighbourGlow() {},
+    setSample() {}, setInterim() {}, prepare() {}, land() { return "exact"; }, whenPrepared() { return Promise.resolve(); }, setMaterial() {}, setAccent() {}, setNeighbourGlow() {},
     destroy() {},
   };
 }`;

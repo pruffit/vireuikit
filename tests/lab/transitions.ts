@@ -22,6 +22,8 @@ export type Transition = {
   created: number;
   /** False where the landing has nothing to bake: the shape it returns to is the one the lens still holds the maps of. */
   rebakes?: boolean;
+  /** The surface announces where it lands (`prepare`) and lands in its last frame: the landing is exact, with no probe, blend or swap of its own. */
+  prepares?: boolean;
 };
 
 const VIEW = { width: 1500, height: 1000 };
@@ -130,6 +132,7 @@ export const TRANSITIONS: Transition[] = [
     surfaces: '#more > [popover], #more vire-icon-button > button',
     active: "document.getElementById('more').getAttribute('data-phase') === 'moving'",
     created: 0,
+    prepares: true,
     run: (page) => page.locator('#more-trigger').click(),
   },
   {
@@ -137,7 +140,8 @@ export const TRANSITIONS: Transition[] = [
     query: 'view=menu',
     surfaces: '#more > [popover], #more vire-icon-button > button',
     active: "document.getElementById('more').getAttribute('data-phase') === 'moving'",
-    created: 1,
+    created: 0,
+    prepares: true,
     async prepare(page) {
       await page.locator('#more-trigger').click();
       await page.waitForFunction(() => document.getElementById('more')!.getAttribute('data-phase') === 'open');

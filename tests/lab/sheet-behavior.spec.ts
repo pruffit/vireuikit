@@ -1724,7 +1724,7 @@ export function attachGlass(el, opts) {
     update() { note(undefined); },
     setMorph(m) { note(m); },
     setAppear(t) { rec.appear = t; },
-    setSample() {}, setInterim() {}, setAccent() {}, setNeighbourGlow() {},
+    setSample() {}, setInterim() {}, prepare() {}, land() { return "exact"; }, whenPrepared() { return Promise.resolve(); }, setMaterial() {}, setAccent() {}, setNeighbourGlow() {},
     destroy() { rec.alive = false; },
   };
 }`;
@@ -1747,7 +1747,8 @@ test.describe('one glass surface per open surface', () => {
     await page.locator('#pop-trigger').click();
     await resting(page, 'pop');
     expect(await lenses(page, 'pop')).toEqual(['pop-surface']);
-    expect(await page.evaluate(() => (window as unknown as { __lenses: { id: string; alive: boolean }[] }).__lenses.filter((l) => l.id === 'pop-trigger' && l.alive).length)).toBe(0);
+    // The trigger's lens stays attached at presence 0; what counts is that none is drawn.
+    expect(await page.evaluate(() => (window as unknown as { __lenses: { id: string; appear: number }[] }).__lenses.filter((l) => l.id === 'pop-trigger').every((l) => l.appear === 0))).toBe(true);
     await page.keyboard.press('Escape');
     await closed(page, 'pop');
     await expect.poll(() => lenses(page, 'pop')).toEqual(['pop-trigger']);
@@ -1777,7 +1778,7 @@ test.describe('one glass surface per open surface', () => {
     await resting(page, 'dlg');
     await expect.poll(() => alive('dlg-surface')).toBe(0);
     expect(await lenses(page, 'dlg')).toEqual([]);
-    expect(await alive('dlg-trigger')).toBe(0);
+    expect(await page.evaluate(() => (window as unknown as { __lenses: { id: string; appear: number }[] }).__lenses.filter((l) => l.id === 'dlg-trigger').every((l) => l.appear === 0))).toBe(true);
   });
 
   test('the lens is handed the box of the surface on every size', async ({ page }) => {
@@ -1794,14 +1795,14 @@ test.describe('one glass surface per open surface', () => {
     expect(last.cornerRadius).toBe(28);
   });
 
-  test('canary: a trigger that cannot let go of its lens while the surface is out fails the count', async ({ page }) => {
+  test('canary: a trigger that keeps its lens present while the surface is out fails the count', async ({ page }) => {
     await stubGlass(page);
-    // The trigger's lens reports itself alive whatever the kit does to it, as a trigger that never destroyed it would.
+    // The trigger's lens reports itself present whatever the kit does to it, as a trigger that never took its presence away would.
     await page.addInitScript(() => {
       const all: { id: string }[] = [];
       (window as unknown as { __lenses: unknown[] }).__lenses = all;
       all.push = (rec) => {
-        if (rec.id === 'pop-trigger') Object.defineProperty(rec, 'alive', { get: () => true, set: () => undefined });
+        if (rec.id === 'pop-trigger') Object.defineProperty(rec, 'appear', { get: () => 1, set: () => undefined });
         return Array.prototype.push.call(all, rec);
       };
     });

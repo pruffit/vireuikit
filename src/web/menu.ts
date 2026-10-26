@@ -666,7 +666,8 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         this.#natural = now;
         const from = this.#toNow();
         this.#place(false);
-        this.#retarget = { from, at: performance.now() };
+        // Reduced motion has no motion to carry the change in: the menu is at its new size at once.
+        this.#retarget = this.#presentation?.instantSprings ? null : { from, at: performance.now() };
         this.#prepareDestination(true);
         this.#run();
       });

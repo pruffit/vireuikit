@@ -593,7 +593,7 @@ export function attachGlass(el, opts) {
   return {
     update() { rec.updates += 1; },
     setMorph() { rec.updates += 1; },
-    setAppear() {}, setSample() {}, setInterim() {}, setAccent() {}, setNeighbourGlow() {},
+    setAppear() {}, setSample() {}, setInterim() {}, prepare() {}, land() { return "exact"; }, whenPrepared() { return Promise.resolve(); }, setMaterial() {}, setAccent() {}, setNeighbourGlow() {},
     destroy() { rec.alive = false; },
   };
 }`;

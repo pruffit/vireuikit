@@ -484,7 +484,7 @@ export function attachGlass(el, opts) {
     update() { note(undefined); },
     setMorph(m) { note(m); },
     setAppear(t) { rec.appear = t; rec.appears.push(t); },
-    setSample(s) { rec.sample = s; }, setInterim() {}, setAccent() {}, setNeighbourGlow() {},
+    setSample(s) { rec.sample = s; }, setInterim() {}, prepare() {}, land() { return "exact"; }, whenPrepared() { return Promise.resolve(); }, setMaterial() {}, setAccent() {}, setNeighbourGlow() {},
     destroy() { rec.alive = false; },
   };
 }`;
