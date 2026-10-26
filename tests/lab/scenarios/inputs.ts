@@ -49,3 +49,30 @@ export async function wheelScroll(page: Page, at: Point, total: number, speed = 
     await sleep(16);
   }
 }
+
+export type ClickOptions = {
+  /** How long the pointer rests on the target before it goes down. */
+  hover?: number;
+  /** How long the button stays down. */
+  hold?: number;
+  /** A slip of this many px between down and up. */
+  drift?: number;
+  /** The speed of the approach, px/s. */
+  speed?: number;
+};
+
+/** A mouse click as a hand makes it: the approach, a rest on the target, down, a hold, an optional slip, up. */
+export async function click(page: Page, at: Point, o: ClickOptions = {}): Promise<void> {
+  await walk(page, { x: at.x + 70, y: at.y + 40 }, at, o.speed ?? 800);
+  await sleep(o.hover ?? 150);
+  await page.mouse.down();
+  await sleep((o.hold ?? 90) / 2);
+  if (o.drift) {
+    for (let step = 1; step <= 3; step += 1) {
+      await page.mouse.move(at.x + (o.drift * step) / 3, at.y + (o.drift * step) / 6);
+      await sleep(8);
+    }
+  }
+  await sleep((o.hold ?? 90) / 2);
+  await page.mouse.up();
+}

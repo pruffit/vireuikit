@@ -1,7 +1,9 @@
 import type { Page } from '@playwright/test';
 import { sleep } from './capture';
-import { centerOf, drag, tap, walk, wheelScroll, type Point } from './inputs';
-import type { Scenario } from './run';
+import { centerOf, click, drag, tap, walk, wheelScroll, type Point } from './inputs';
+import type { Project } from './adapter';
+import { KNOWN } from './known';
+import type { Profile, Scenario } from './run';
 
 const AWAY: Point = { x: 4, y: 4 };
 
@@ -16,11 +18,12 @@ const navTargets = (page: Page) =>
 
 const menu: Scenario[] = [
   {
-    known: { seam: '#44 A' },
+
     name: 'menu open, close, open again',
     query: 'view=menu',
+    owner: 'chrome=1&view=menu',
     viewport: { width: 520, height: 520 },
-    track: { trigger: '#more vire-icon-button:not([data-carried]) > button', list: '#more > [popover]' },
+    track: { trigger: '#more vire-icon-button:not([data-carried]) > button', trigHost: '#more > vire-icon-button', list: '#more > [popover]' },
     view: ['trigger', 'list'],
     async act(ctx) {
       await ctx.page.locator('#more-trigger').click();
@@ -29,24 +32,24 @@ const menu: Scenario[] = [
       await ctx.quiet();
       await ctx.page.locator('#more-trigger').click();
     },
-    gates: { seam: { keys: ['trigger', 'list'] }, shape: { keys: ['trigger'] } },
+    gates: { seam: { keys: ['trigger', 'trigHost', 'list'] }, shape: { keys: ['trigger'] } },
   },
 ];
 
 const popover: Scenario[] = [
   {
-    known: { seam: '#44 A' },
+
     name: 'popover open and close',
     query: 'view=sheet&w=700&h=720',
     viewport: { width: 760, height: 790 },
-    track: { trigger: '#pop > vire-button:not([data-carried]) > button', surface: '#pop > [popover]' },
+    track: { trigger: '#pop > vire-button:not([data-carried]) > button', trigHost: '#pop > vire-button', surface: '#pop > [popover]' },
     view: ['trigger', 'surface'],
     async act(ctx) {
       await ctx.page.locator('#pop-trigger').click();
       await ctx.quiet();
       await ctx.page.locator('#pop-close').click();
     },
-    gates: { seam: { keys: ['trigger', 'surface'] }, shape: { keys: ['trigger'] } },
+    gates: { seam: { keys: ['trigger', 'trigHost', 'surface'] }, shape: { keys: ['trigger'] } },
   },
 ];
 
@@ -54,10 +57,11 @@ const GRABBER = { surface: 'surface', target: 'trigHost', part: 'grabber' };
 const SHEET = 'view=sheet&w=390&h=720&detents=medium';
 const sheetCase = {
   query: SHEET,
+  owner: 'chrome=1&view=sheet',
   viewport: { width: 450, height: 780 },
   track: { trigger: '#sup > vire-button:not([data-carried]) > button', trigHost: '#sup > vire-button', surface: '#sup > [popover]', grabber: '#sup [data-vk-grabber]' },
   view: ['trigger', 'surface'],
-  gates: { seam: { keys: ['trigger', 'surface'] }, shape: { keys: ['trigger'] } },
+  gates: { seam: { keys: ['trigger', 'trigHost', 'surface'] }, shape: { keys: ['trigger'] } },
 } satisfies Partial<Scenario>;
 
 const openSheet = async (page: Page) => {
@@ -69,9 +73,9 @@ const openSheet = async (page: Page) => {
 const sheet: Scenario[] = [
   {
     ...sheetCase,
-    known: { seam: '#44 A', ghost: '#44 D' },
+
     name: 'sheet grow and collapse into its trigger',
-    gates: { ...sheetCase.gates, ghost: GRABBER },
+    gates: { ...sheetCase.gates, ghost: GRABBER, pop: { keys: ['trigHost'] }, hole: { target: 'trigHost', surface: 'surface' } },
     async act(ctx) {
       await ctx.page.locator('#sup-trigger').click();
       await ctx.quiet();
@@ -80,8 +84,9 @@ const sheet: Scenario[] = [
   },
   {
     ...sheetCase,
-    known: { seam: '#44 A' },
+
     name: 'sheet drag between detents',
+    owner: 'chrome=1&view=sheet&detents=medium',
     prepare: openSheet,
     async act(ctx) {
       const { page } = ctx;
@@ -94,12 +99,14 @@ const sheet: Scenario[] = [
   },
   {
     ...sheetCase,
+
     name: 'sheet scroll its content',
-    gates: {},
+    gates: { scrollbar: { within: '#sup', at: 'scrolled' } },
     prepare: openSheet,
     async act(ctx) {
       const body = (await ctx.page.locator('#sup > [popover]').boundingBox())!;
       await wheelScroll(ctx.page, { x: body.x + body.width / 2, y: body.y + body.height * 0.7 }, 400);
+      await ctx.mark('scrolled');
       await ctx.quiet(800);
       await wheelScroll(ctx.page, { x: body.x + body.width / 2, y: body.y + body.height * 0.7 }, -400);
     },
@@ -107,9 +114,10 @@ const sheet: Scenario[] = [
 ];
 
 popover.push({
-  known: { seam: '#44 A', ghost: '#44 D' },
+
     name: 'popover as a bottom sheet, grow and collapse',
   query: 'view=sheet&w=390&h=720',
+  owner: 'chrome=1&view=sheet',
   viewport: { width: 450, height: 780 },
   track: { trigger: '#pop > vire-button:not([data-carried]) > button', trigHost: '#pop > vire-button', surface: '#pop > [popover]', grabber: '#pop [data-vk-grabber]' },
   view: ['trigger', 'surface'],
@@ -118,30 +126,73 @@ popover.push({
     await ctx.quiet();
     await ctx.page.locator('#pop-close').click();
   },
-  gates: { seam: { keys: ['trigger', 'surface'] }, shape: { keys: ['trigger'] }, ghost: GRABBER },
+  gates: { seam: { keys: ['trigger', 'trigHost', 'surface'] }, shape: { keys: ['trigger'] }, ghost: GRABBER, pop: { keys: ['trigHost'] }, hole: { target: 'trigHost', surface: 'surface' } },
 });
 
+const adaptiveCase = (id: 'sheet' | 'popover', label: string): Scenario => ({
+  name: `adaptive ${label} grow and collapse`,
+  query: 'view=adaptive',
+  owner: 'chrome=1&view=adaptive',
+  viewport: { width: 1000, height: 900 },
+  track: { trigger: `#${id} > vire-button:not([data-carried]) > button`, trigHost: `#${id} > vire-button`, surface: `#${id} > [popover], #${id} > dialog`, grabber: `#${id} [data-vk-grabber]` },
+  view: ['trigHost', 'surface'],
+  async act(ctx) {
+    await ctx.page.locator(`#${id}-trigger`).click();
+    await ctx.quiet();
+    await ctx.page.evaluate((close) => document.getElementById(close)!.click(), `${id}-close`);
+  },
+  gates: { seam: { keys: ['trigger', 'trigHost', 'surface'] }, shape: { keys: ['trigger'] }, ghost: { surface: 'surface', target: 'trigHost', part: 'grabber' }, pop: { keys: ['trigHost'] }, hole: { target: 'trigHost', surface: 'surface' } },
+});
+
+const adaptive: Scenario[] = [adaptiveCase('sheet', 'sheet'), adaptiveCase('popover', 'popover')];
+
 const TOOLBAR = 'view=toolbar&w=420&h=400&toolbar-placement=top&spacer=0';
+const resizeToolbar = (page: Page, w: number, h: number) => page.evaluate(([a, b]) => window.__lab.toolbar!.resize(a!, b!), [w, h] as const);
 const TB_ITEM = 'vire-toolbar [data-group] > :is(vire-icon-button, vire-button) > button';
 const TB_MORE = 'vire-toolbar > vire-menu[data-vk-more] > vire-icon-button';
 const toolbar: Scenario[] = [
   {
-    known: { seam: '#44 A' },
+
     name: 'toolbar collapse into its button and expand',
     query: TOOLBAR,
+    owner: 'chrome=1&view=toolbar',
     viewport: { width: 480, height: 460 },
     track: { more: TB_MORE, capsule: 'vire-toolbar > [data-vk-capsule]', item: TB_ITEM },
     view: ['more', 'capsule', 'item'],
     async act(ctx) {
-      await ctx.page.evaluate(() => window.__lab.toolbar!.resize(300, 400));
+      await resizeToolbar(ctx.page, 300, 400);
+      await ctx.mark('layout1');
       await ctx.quiet();
-      await ctx.page.evaluate(() => window.__lab.toolbar!.resize(420, 400));
+      await resizeToolbar(ctx.page, 420, 400);
+      await ctx.mark('layout2');
     },
-    gates: { seam: { keys: ['more', 'capsule'] }, shape: { keys: ['more'] } },
+    layouts: [
+      { mark: 'layout1', apply: (p) => resizeToolbar(p, 300, 400) },
+      { mark: 'layout2', apply: (p) => resizeToolbar(p, 420, 400) },
+    ],
+    ownerAs: {
+      async act(ctx) {
+        await resizeToolbar(ctx.page, 700, 720);
+        await ctx.mark('layout1');
+        await ctx.quiet();
+        await resizeToolbar(ctx.page, 390, 720);
+        await ctx.mark('layout2');
+        await ctx.quiet();
+        await resizeToolbar(ctx.page, 700, 720);
+        await ctx.mark('layout3');
+      },
+      layouts: [
+        { mark: 'layout1', apply: (p) => resizeToolbar(p, 700, 720) },
+        { mark: 'layout2', apply: (p) => resizeToolbar(p, 390, 720) },
+        { mark: 'layout3', apply: (p) => resizeToolbar(p, 700, 720) },
+      ],
+    },
+    gates: { seam: { keys: ['more', 'capsule'] }, shape: { keys: ['more', 'capsule'], during: true } },
   },
   {
     name: 'toolbar change of place',
     query: TOOLBAR,
+    owner: 'chrome=1&view=toolbar',
     viewport: { width: 480, height: 460 },
     track: { capsule: 'vire-toolbar > [data-vk-capsule]', item: TB_ITEM },
     view: ['capsule'],
@@ -153,8 +204,10 @@ const toolbar: Scenario[] = [
     gates: { seam: { keys: ['capsule'] } },
   },
   {
+
     name: 'toolbar hover each button',
     query: TOOLBAR,
+    owner: 'chrome=1&view=toolbar',
     viewport: { width: 480, height: 460 },
     track: { item: TB_ITEM, capsule: 'vire-toolbar > [data-vk-capsule]' },
     view: ['item', 'capsule'],
@@ -177,9 +230,10 @@ const toolbar: Scenario[] = [
 
 const nav: Scenario[] = [
   {
-    known: { vanish: '#44 C' },
+
     name: 'navigation drag the lens across all items and back',
     query: 'view=nav&w=390&h=720',
+    owner: 'chrome=1&view=nav',
     viewport: { width: 450, height: 780 },
     track: { items: NAV_ITEMS, lens: 'vire-nav > [data-vk-lens]', bar: 'vire-nav > nav' },
     view: ['bar', 'lens'],
@@ -194,6 +248,7 @@ const nav: Scenario[] = [
   {
     name: 'navigation tap each item',
     query: 'view=nav&w=390&h=720',
+    owner: 'chrome=1&view=nav',
     viewport: { width: 450, height: 780 },
     track: { items: NAV_ITEMS, lens: 'vire-nav > [data-vk-lens]', bar: 'vire-nav > nav' },
     view: ['bar', 'lens'],
@@ -209,6 +264,7 @@ const nav: Scenario[] = [
   {
     name: 'navigation tap each item by touch',
     query: 'view=nav&w=390&h=720',
+    owner: 'chrome=1&view=nav',
     viewport: { width: 450, height: 780 },
     touch: true,
     track: { items: NAV_ITEMS, lens: 'vire-nav > [data-vk-lens]', bar: 'vire-nav > nav' },
@@ -223,9 +279,10 @@ const nav: Scenario[] = [
     gates: { vanish: { key: 'items', label: (i) => NAV_NAMES[i] ?? `#${i}` }, seam: { keys: ['bar', 'lens'] } },
   },
   {
-    known: { seam: '#44 A' },
+
     name: 'navigation tap during a form morph',
     query: 'view=nav&w=390&h=720',
+    owner: 'chrome=1&view=nav',
     viewport: { width: 1000, height: 780 },
     track: { items: NAV_ITEMS, lens: 'vire-nav > [data-vk-lens]', bar: 'vire-nav > nav' },
     view: ['bar', 'lens'],
@@ -244,9 +301,10 @@ const nav: Scenario[] = [
     gates: { seam: { keys: ['bar', 'lens'] } },
   },
   {
-    known: { seam: '#44 A' },
+
     name: 'navigation resize bar, rail, sidebar and back',
     query: 'view=nav&w=390&h=720',
+    owner: 'chrome=1&view=nav',
     viewport: { width: 1340, height: 820 },
     track: { bar: 'vire-nav > nav', lens: 'vire-nav > [data-vk-lens]', accessory: 'vire-nav > [data-accessory]' },
     view: ['bar', 'lens', 'accessory'],
@@ -261,6 +319,7 @@ const nav: Scenario[] = [
   {
     name: 'navigation hover each item',
     query: 'view=nav&w=390&h=720',
+    owner: 'chrome=1&view=nav',
     viewport: { width: 450, height: 780 },
     track: { items: NAV_ITEMS, bar: 'vire-nav > nav' },
     view: ['bar'],
@@ -281,6 +340,58 @@ const nav: Scenario[] = [
   },
 ];
 
+const navClicks = (name: string, act: Scenario['act']): Scenario => ({
+  name,
+  query: 'view=nav&w=390&h=720',
+  owner: 'chrome=1&view=nav',
+  viewport: { width: 450, height: 780 },
+  track: { items: NAV_ITEMS, lens: 'vire-nav > [data-vk-lens]', bar: 'vire-nav > nav' },
+  view: ['bar', 'lens'],
+  act,
+  gates: { vanish: { key: 'items', label: (i) => NAV_NAMES[i] ?? `#${i}` }, seam: { keys: ['bar', 'lens'] }, converge: { keys: ['bar'] } },
+});
+
+const navClick: Scenario[] = [
+  navClicks('navigation click each item at normal speed', async (ctx) => {
+    const targets = await navTargets(ctx.page);
+    for (const p of [...targets.slice(1), ...targets.slice(0, 1)]) {
+      await click(ctx.page, p);
+      await ctx.quiet(1600);
+    }
+  }),
+  navClicks('navigation click different items 250 ms apart', async (ctx) => {
+    const targets = await navTargets(ctx.page);
+    for (const k of [2, 0, 3, 1, 2]) {
+      const began = Date.now();
+      await click(ctx.page, targets[k]!, { hover: 20, hold: 70, speed: 1800 });
+      await sleep(Math.max(0, 250 - (Date.now() - began)));
+    }
+  }),
+  navClicks('navigation click the selected item', async (ctx) => {
+    const targets = await navTargets(ctx.page);
+    await click(ctx.page, targets[2]!);
+    await ctx.quiet(1600);
+    await click(ctx.page, targets[2]!);
+    await ctx.quiet(1600);
+    await click(ctx.page, targets[2]!, { hover: 40 });
+  }),
+  navClicks('navigation click while the selection is still moving', async (ctx) => {
+    const targets = await navTargets(ctx.page);
+    await click(ctx.page, targets[3]!, { hover: 60 });
+    await sleep(90);
+    await click(ctx.page, targets[1]!, { hover: 20, hold: 60, speed: 1800 });
+    await sleep(90);
+    await click(ctx.page, targets[2]!, { hover: 20, hold: 60, speed: 1800 });
+  }),
+  navClicks('navigation click each item with a slip of a few px', async (ctx) => {
+    const targets = await navTargets(ctx.page);
+    for (const [n, p] of [...targets.slice(1), ...targets.slice(0, 1)].entries()) {
+      await click(ctx.page, p, { drift: 3 + (n % 4) });
+      await ctx.quiet(1600);
+    }
+  }),
+];
+
 const BACKDROPS = ['light', 'dark', 'busy', 'mid', 'split'] as const;
 const ATOMS = [
   { id: 'play', label: 'button' },
@@ -291,6 +402,7 @@ const atoms: Scenario[] = BACKDROPS.flatMap((backdrop) =>
   ATOMS.flatMap(({ id, label }): Scenario[] => {
     const base = {
       query: `view=sandbox&backdrop=${backdrop}&split=%23${id}`,
+      owner: `chrome=1&view=sandbox&backdrop=${backdrop}&split=%23${id}`,
       viewport: { width: 800, height: 320 },
       track: { atom: `#${id} > button` },
       view: ['atom'],
@@ -299,7 +411,6 @@ const atoms: Scenario[] = BACKDROPS.flatMap((backdrop) =>
       {
         ...base,
         name: `${label} hover on ${backdrop}`,
-        known: { state: '#44 B' },
         async act(ctx) {
           const { page } = ctx;
           await page.mouse.move(AWAY.x, AWAY.y);
@@ -308,7 +419,7 @@ const atoms: Scenario[] = BACKDROPS.flatMap((backdrop) =>
           await ctx.mark('hover');
           await walk(page, await centerOf(page.locator(`#${id} > button`)), AWAY, 500);
         },
-        gates: { state: { key: 'atom', at: 'hover' }, shape: { keys: ['atom'], ref: 'rest' } },
+        gates: { state: { key: 'atom', at: 'hover' }, ...(backdrop === 'split' ? {} : { highlight: { key: 'atom', at: 'hover' } }), shape: { keys: ['atom'], ref: 'rest' } },
       },
       {
         ...base,
@@ -330,4 +441,15 @@ const atoms: Scenario[] = BACKDROPS.flatMap((backdrop) =>
   }),
 );
 
-export const SCENARIOS: Scenario[] = [...menu, ...popover, ...sheet, ...toolbar, ...nav, ...atoms];
+export const SCENARIOS: Scenario[] = [...menu, ...popover, ...sheet, ...adaptive, ...toolbar, ...nav, ...navClick, ...atoms];
+
+/** A maximised Chrome window on a 1920 × 1080 screen at 100 % scale. */
+export const OWNER_VIEWPORT = { width: 1920, height: 960 };
+
+const withKnown = (s: Scenario, profile: Profile): Scenario => ({ ...s, profile, known: KNOWN[s.name.replace(/ @owner$/, '')] ?? {} });
+
+export function scenariosFor(project: Project): Scenario[] {
+  if (project === 'swiftshader') return SCENARIOS.map((s) => withKnown(s, 'swiftshader'));
+  const owner = SCENARIOS.filter((s) => s.owner).map((s) => ({ ...s, ...s.ownerAs, name: `${s.name} @owner`, query: s.owner!, viewport: OWNER_VIEWPORT }));
+  return [...owner.map((s) => withKnown(s, 'gpu@owner')), ...SCENARIOS.map((s) => withKnown(s, 'gpu'))];
+}

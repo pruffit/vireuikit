@@ -63,7 +63,7 @@ export async function openCase(page: Page, query: string, path = '/'): Promise<v
 const BOOT_MS = Number(process.env.VIREUIKIT_LAB_BOOT_MS ?? 30_000);
 
 async function bootCase(page: Page, query: string, path: string): Promise<void> {
-  await page.goto(`${path}?chrome=0&${query}`);
+  await page.goto(`${path}?${/(^|&)chrome=/.test(query) ? '' : 'chrome=0&'}${query}`);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1', undefined, { timeout: BOOT_MS });
   await page.waitForFunction(() => {
     if (window.__lab && !window.__lab.upgraded) return true;

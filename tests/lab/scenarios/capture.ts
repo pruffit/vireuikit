@@ -1,4 +1,4 @@
-import type { BrowserContext, CDPSession, Page } from '@playwright/test';
+import type { Browser, BrowserContext, CDPSession, Page } from '@playwright/test';
 import type { Rect } from './color';
 
 /** One tracked element at one frame: its box, the radius it declares (clamped to the box) and whether it is drawn at all. */
@@ -19,10 +19,14 @@ export type Recording = {
   /** Named instants the scenario set: the moment a state is meant to have settled, say. */
   marks: Record<string, number>;
   samples: Sample[];
-  /** The page behind the kit's elements, for the shape gate. */
-  backdrop: Buffer | null;
+  /** The page behind the kit's elements, for the shape gate: as it is at the start, and again after each layout change the scenario marked. */
+  backdrops: { mark: string | null; png: Buffer }[];
   pageErrors: string[];
+  scrollers: Scroller[];
 };
+
+/** A scroll container found inside a kit surface: where its content is, how wide the platform's scrollbar is, and what its styles say about the bar. */
+export type Scroller = { name: string; x: number; y: number; w: number; h: number; gutter: number; scrollbarWidth: string; webkit: string };
 
 export type Track = Record<string, string>;
 export type RecordContext = {
@@ -84,15 +88,43 @@ async function startSampler(page: Page, track: Track): Promise<void> {
 
 const HIDE = 'vire-button,vire-icon-button,vire-menu,vire-nav,vire-toolbar,vire-popover,vire-sheet,[popover],dialog,[data-scn-hide]{visibility:hidden!important}';
 
-/** The page as it is behind the kit: the same case in a second page, every kit element hidden. */
-async function backdropOf(context: BrowserContext, open: (page: Page) => Promise<void>, viewport: { width: number; height: number }): Promise<Buffer> {
+/** A layout change a scenario makes (a resize, say): `apply` repeats it on the page the backdrop is read from, and the scenario marks the instant it makes it. */
+export type Layout = { mark: string; apply: (page: Page) => Promise<void> };
+
+/** The page as it is behind the kit: the same case in a second page, every kit element hidden, read again after each layout change. */
+async function backdropsOf(context: BrowserContext, open: (page: Page) => Promise<void>, viewport: { width: number; height: number }, layouts: Layout[]): Promise<Recording['backdrops']> {
   const page = await context.newPage();
+  const frame = () => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   try {
     await page.setViewportSize(viewport);
     await open(page);
     await page.addStyleTag({ content: HIDE });
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    return await page.screenshot({ type: 'png' });
+    await frame();
+    const out: Recording['backdrops'] = [{ mark: null, png: await page.screenshot({ type: 'png' }) }];
+    for (const layout of layouts) {
+      await layout.apply(page);
+      await sleep(1200);
+      await frame();
+      out.push({ mark: layout.mark, png: await page.screenshot({ type: 'png' }) });
+    }
+    return out;
+  } finally {
+    await page.close();
+  }
+}
+
+const warmed = new WeakSet<Browser>();
+
+/** The first seconds of a GPU process compile shaders and stall frames; one throw-away page with a filter and a moving backdrop pays that before anything is recorded. */
+export async function warmUp(browser: Browser): Promise<void> {
+  if (warmed.has(browser)) return;
+  warmed.add(browser);
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  try {
+    await page.setContent(
+      '<body style="margin:0;background:linear-gradient(135deg,#f6e6c4,#223)"><svg width="0" height="0"><filter id="f"><feTurbulence baseFrequency=".02" numOctaves="2"/><feDisplacementMap in="SourceGraphic" scale="20"/></filter></svg><div id="a" style="position:absolute;left:100px;top:100px;width:300px;height:200px;border-radius:40px;backdrop-filter:blur(12px) saturate(1.4);filter:url(#f);background:rgba(255,255,255,.25)"></div><script>let n=0;(function f(){n+=1;document.getElementById("a").style.transform="translate("+(n%300)+"px,"+(n%120)+"px)";requestAnimationFrame(f)})()</script>',
+    );
+    await sleep(2000);
   } finally {
     await page.close();
   }
@@ -107,6 +139,9 @@ export type RecordOptions = {
   act: (ctx: RecordContext) => Promise<void>;
   /** Wanted by the shape gate: opens the same case in another page, to read it with the kit's elements hidden. */
   backdrop?: (page: Page) => Promise<void>;
+  layouts?: Layout[];
+  /** A selector: every element inside it that scrolls is read at the end of the scenario. */
+  scrollers?: string;
 };
 
 /**
@@ -119,7 +154,7 @@ export async function record(o: RecordOptions): Promise<Recording> {
   const pageErrors: string[] = [];
   const onError = (e: Error) => pageErrors.push(e.message);
   page.on('pageerror', onError);
-  const backdrop = o.backdrop ? await backdropOf(o.context, o.backdrop, o.viewport) : null;
+  const backdrops = o.backdrop ? await backdropsOf(o.context, o.backdrop, o.viewport, o.layouts ?? []) : [];
   const cdp: CDPSession = await o.context.newCDPSession(page);
   const shots: Shot[] = [];
   cdp.on('Page.screencastFrame', (e) => {
@@ -161,6 +196,30 @@ export async function record(o: RecordOptions): Promise<Recording> {
     await cdp.send('Page.stopScreencast').catch(() => undefined);
     page.off('pageerror', onError);
   }
+  const scrollers = o.scrollers
+    ? await page.evaluate((root) => {
+        const out: Scroller[] = [];
+        for (const host of document.querySelectorAll(root)) {
+          for (const el of [host as HTMLElement, ...host.querySelectorAll<HTMLElement>('*')]) {
+            const cs = getComputedStyle(el);
+            if (!/auto|scroll/.test(cs.overflowY) || el.scrollHeight <= el.clientHeight + 1) continue;
+            const b = el.getBoundingClientRect();
+            const bar = getComputedStyle(el, '::-webkit-scrollbar');
+            out.push({
+              name: `${el.localName}${el.id ? `#${el.id}` : ''}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).join('.')}` : ''}`,
+              x: b.x + el.clientLeft,
+              y: b.y + el.clientTop,
+              w: el.clientWidth,
+              h: el.clientHeight,
+              gutter: el.offsetWidth - el.clientWidth - el.clientLeft * 2,
+              scrollbarWidth: cs.scrollbarWidth,
+              webkit: `${bar.display}/${bar.width}`,
+            });
+          }
+        }
+        return out;
+      }, o.scrollers)
+    : [];
   const scn = await page.evaluate(() => {
     const s = (window as unknown as { __scn: Scn }).__scn;
     s.stop = true;
@@ -180,7 +239,7 @@ export async function record(o: RecordOptions): Promise<Recording> {
       open = null;
     }
   }
-  return { name: o.name, viewport: o.viewport, shots, input, motion, marks, samples: scn.samples, backdrop, pageErrors };
+  return { name: o.name, viewport: o.viewport, shots, input, motion, marks, samples: scn.samples, backdrops, pageErrors, scrollers };
 }
 
 /** The sample taken in the frame at or before `t`. */

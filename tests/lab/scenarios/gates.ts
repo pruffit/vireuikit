@@ -1,5 +1,6 @@
 import { clip, deltaE, labOf, pad, regionChange, union, type Rect } from './color';
-import { sampleAt, type Box, type Recording } from './capture';
+import { deltaOf } from './delta';
+import { sampleAt, type Box, type Recording, type Scroller } from './capture';
 import { decodePng, type Image } from './png';
 
 /** Every number a gate judges by, with where it comes from (docs/design.md, "Scenario recordings"). */
@@ -12,6 +13,14 @@ export const LIMITS = {
   seamMean: 0.15,
   /** Seam: the share of the region that may differ between the settled frame and the last one. */
   seamDrift: 0.004,
+  /** Seam: the frame that presents a motion's last tick is compared with the one before it only when they are neighbours, at most this many ms apart; across a dropped frame the step holds motion. */
+  frameGap: 26,
+  /** Pop: the mean ΔE between two consecutive frames in the region of an element whose box did not move between them. */
+  popMean: 1.2,
+  /** Hole: the ink of a trigger that is alone in its place may fall to this fraction of its ink at rest. */
+  holeInk: 0.5,
+  /** Converge: how far, in mean ΔE over the region, a motion may turn away from the picture it settles to after it has come closer to it. */
+  convergeBounce: 3,
   /** Vanish: the ink of an item may fall to this fraction of its ink at rest. */
   inkKept: 0.5,
   /** Shape: a pixel outside the radius differing from the backdrop by more than this counts as drawn. */
@@ -22,10 +31,17 @@ export const LIMITS = {
   ghostShare: 0.05,
   /** State: the mean ΔE of the element's region between rest and the state that must be seen. */
   stateMean: 2.3,
+  /** State: or the 95th percentile of the ΔE of the changed pixels, when at least `stateRim` of the region changed: a thin rim moves the mean little and is seen. */
+  stateP95: 8,
+  stateRim: 0.01,
+  /** State: or the 95th percentile of the relative luminance step of the changed pixels, over the same share: a step that is small in ΔE is large on a dark surface. */
+  stateWeber: 0.08,
+  /** Highlight: the share of the corners of the changed pixels' capsule that the state may paint. */
+  highlightCorners: 0.36,
 } as const;
 
 export type Verdict = 'pass' | 'fail' | 'skip';
-export type GateName = 'seam' | 'vanish' | 'shape' | 'state' | 'ghost';
+export type GateName = 'seam' | 'pop' | 'hole' | 'converge' | 'vanish' | 'shape' | 'state' | 'highlight' | 'ghost' | 'scrollbar';
 export type GateResult = {
   gate: GateName;
   verdict: Verdict;
@@ -79,18 +95,39 @@ const f3 = (v: number) => v.toFixed(3);
 
 export type SeamSpec = { keys: string[]; pad?: number };
 
+type Region = { name: string; rect: Rect };
+
+/** One region per element of every key (its boxes at the motion's start and end), and the union of them all: a small element's pop is not diluted by the area of a large one beside it. */
+function regionsOf(rec: Recording, keys: string[], t0: number, t1: number, by: number): Region[] {
+  const out: Region[] = [];
+  for (const key of keys) {
+    const a = boxesAt(rec, key, t0);
+    const z = boxesAt(rec, key, t1);
+    for (let i = 0; i < Math.max(a.length, z.length); i += 1) {
+      const u = union(visible([a[i], z[i]].filter((b): b is Box => b !== undefined)));
+      if (u) out.push({ name: a.length > 1 || z.length > 1 ? `${key}[${i}]` : key, rect: pad(u, by) });
+    }
+  }
+  const all = union(keys.flatMap((key) => [...visible(boxesAt(rec, key, t1)), ...visible(boxesAt(rec, key, t0))]));
+  if (all && out.length > 1) out.push({ name: 'all', rect: pad(all, by) });
+  return out;
+}
+
 /**
- * From the frame that presents a motion's last tick, nothing inside the element's region may change from the frame before
- * (through 1.5 s after it, or until the next motion starts): the motion ends on the picture it settles to. Reports the worst frame-to-frame step and the total drift.
+ * From the frame that presents a motion's last tick, nothing inside an element's region may change from the frame before
+ * (through 1.5 s after it, or until the next motion starts): the motion ends on the picture it settles to. Every
+ * element of the scenario is judged in its own region. Reports the worst frame-to-frame step and the total drift.
  */
 export function seam(frames: Frames, spec: SeamSpec): GateResult {
   const rec = frames.rec;
   const quiet = 1500;
-  const worst = { t: 0, mean: 0, share: 0 };
-  const flagged: number[] = [];
+  const worst = { t: 0, mean: 0, share: 0, region: '' };
+  const flagged = new Set<number>();
   const series: NonNullable<GateResult['series']> = [];
+  const hot = new Map<string, number>();
   let drift = 0;
   let driftAt = 0;
+  let driftRegion = '';
   let evaluated = 0;
   let pairs = 0;
   let firstLate = '';
@@ -98,42 +135,49 @@ export function seam(frames: Frames, spec: SeamSpec): GateResult {
     const next = rec.motion[k + 1]?.start ?? Infinity;
     const until = Math.min(segment.end + quiet, next);
     if (until - segment.end < 300) return;
-    const boxes = spec.keys.flatMap((key) => [...visible(boxesAt(rec, key, segment.end)), ...visible(boxesAt(rec, key, segment.start))]);
-    const region = union(boxes);
-    if (!region) return;
-    const area = pad(region, spec.pad ?? 20);
+    const regions = regionsOf(rec, spec.keys, segment.start, segment.end, spec.pad ?? 20);
+    if (regions.length === 0) return;
     const first = frames.from(segment.end);
     evaluated += 1;
-    const settled = first;
-    let last = settled;
+    let last = first;
     for (let j = Math.max(first, 1); j < frames.length && frames.t(j) <= until; j += 1) {
+      if (j === first && frames.t(j) - frames.t(j - 1) > LIMITS.frameGap) continue;
       pairs += 1;
-      const c = regionChange(frames.at(j - 1), frames.at(j), area, LIMITS.changed);
       const after = frames.t(j) - segment.end;
-      series.push({ index: j, t: after, value: c.mean });
-      if (c.share > LIMITS.seamShare || c.mean > LIMITS.seamMean) {
-        flagged.push(j);
-        if (!firstLate) firstLate = `first step at +${ms(after)}`;
+      let step = 0;
+      for (const region of regions) {
+        const c = regionChange(frames.at(j - 1), frames.at(j), region.rect, LIMITS.changed);
+        step = Math.max(step, c.mean);
+        if (c.share > LIMITS.seamShare || c.mean > LIMITS.seamMean) {
+          flagged.add(j);
+          hot.set(region.name, (hot.get(region.name) ?? 0) + 1);
+          if (!firstLate) firstLate = `first step at +${ms(after)} in ${region.name}`;
+        }
+        if (c.share > worst.share || (c.share === worst.share && c.mean > worst.mean)) Object.assign(worst, { t: after, mean: c.mean, share: c.share, region: region.name });
       }
-      if (c.share > worst.share || (c.share === worst.share && c.mean > worst.mean)) Object.assign(worst, { t: after, mean: c.mean, share: c.share });
+      series.push({ index: j, t: after, value: step });
       last = j;
     }
-    if (last > settled) {
-      const d = regionChange(frames.at(settled), frames.at(last), area, LIMITS.changed);
-      if (d.share >= drift) {
-        drift = d.share;
-        driftAt = frames.t(last) - segment.end;
+    if (last > first) {
+      for (const region of regions) {
+        const d = regionChange(frames.at(first), frames.at(last), region.rect, LIMITS.changed);
+        if (d.share >= drift) {
+          drift = d.share;
+          driftAt = frames.t(last) - segment.end;
+          driftRegion = region.name;
+        }
       }
     }
   });
   if (evaluated === 0) return { gate: 'seam', verdict: 'skip', line: 'no motion with a region to watch', numbers: {}, flagged: [] };
-  const bad = flagged.length > 0 || drift > LIMITS.seamDrift;
+  const bad = flagged.size > 0 || drift > LIMITS.seamDrift;
+  const where = [...hot.entries()].map(([name, n]) => `${name} ${n}`).join(', ');
   return {
     gate: 'seam',
     verdict: bad ? 'fail' : 'pass',
-    line: `${pairs} steps after ${evaluated} motion(s); worst +${ms(worst.t)}: mean ΔE ${f3(worst.mean)}, ${f3(worst.share * 100)}% changed; drift ${f3(drift * 100)}%${firstLate ? `; ${firstLate}` : ''}`,
-    numbers: { motions: evaluated, steps: pairs, worstAtMs: Math.round(worst.t), worstMeanDE: +f3(worst.mean), worstSharePct: +f3(worst.share * 100), flaggedSteps: flagged.length, driftPct: +f3(drift * 100), driftAtMs: Math.round(driftAt) },
-    flagged,
+    line: `${pairs} steps after ${evaluated} motion(s); worst +${ms(worst.t)} in ${worst.region}: mean ΔE ${f3(worst.mean)}, ${f3(worst.share * 100)}% changed; drift ${f3(drift * 100)}%${drift > 0 ? ` in ${driftRegion}` : ''}${firstLate ? `; ${firstLate}` : ''}${where ? `; steps over the limit per region: ${where}` : ''}`,
+    numbers: { motions: evaluated, steps: pairs, worstAtMs: Math.round(worst.t), worstRegion: worst.region, worstMeanDE: +f3(worst.mean), worstSharePct: +f3(worst.share * 100), flaggedSteps: flagged.size, driftPct: +f3(drift * 100), driftAtMs: Math.round(driftAt) },
+    flagged: [...flagged],
     series,
   };
 }
@@ -159,6 +203,171 @@ export function ink(image: Image, region: Rect): number {
 
 type Lab3 = [number, number, number];
 const INK_DE = 14;
+
+export type PopSpec = { keys: string[]; pad?: number };
+
+/**
+ * A change that comes at once, in the middle of a motion, in a place where nothing moves: the region of an element
+ * whose box is the same in two consecutive frames must not change between them by more than `popMean`. It is what a
+ * body, a label or a grabber swapped in one frame does, and what the seam gate cannot see because it only looks after the motion's end.
+ */
+export function pop(frames: Frames, spec: PopSpec): GateResult {
+  const rec = frames.rec;
+  const flagged: number[] = [];
+  const series: NonNullable<GateResult['series']> = [];
+  const worst = { mean: 0, t: 0, key: '', gap: 0 };
+  let checked = 0;
+  for (let j = 1; j < frames.length; j += 1) {
+    for (const key of spec.keys) {
+      const now = boxesAt(rec, key, frames.t(j));
+      const before = boxesAt(rec, key, frames.t(j - 1));
+      now.forEach((b, i) => {
+        const p = before[i];
+        if (!p || b.hidden || p.hidden || Math.abs(b.x - p.x) > 0.3 || Math.abs(b.y - p.y) > 0.3 || Math.abs(b.w - p.w) > 0.3 || Math.abs(b.h - p.h) > 0.3) return;
+        checked += 1;
+        const c = regionChange(frames.at(j - 1), frames.at(j), pad(b, spec.pad ?? 4), LIMITS.changed);
+        series.push({ index: j, t: frames.t(j) - rec.input, value: c.mean });
+        if (c.mean > LIMITS.popMean) flagged.push(j);
+        if (c.mean > worst.mean) Object.assign(worst, { mean: c.mean, t: frames.t(j) - rec.input, key: key, gap: frames.t(j) - frames.t(j - 1) });
+      });
+    }
+  }
+  if (checked === 0) return { gate: 'pop', verdict: 'skip', line: 'no element stood still between two frames', numbers: {}, flagged: [] };
+  return {
+    gate: 'pop',
+    verdict: flagged.length > 0 ? 'fail' : 'pass',
+    line: `${checked} still regions in consecutive frames; worst +${ms(worst.t)} in ${worst.key} (${ms(worst.gap)} after the frame before): mean ΔE ${f2(worst.mean)}; ${flagged.length} steps over ${LIMITS.popMean}`,
+    numbers: { checked, worstMeanDE: +f2(worst.mean), worstAtMs: Math.round(worst.t), worstKey: worst.key, steps: flagged.length },
+    flagged: [...new Set(flagged)],
+    series,
+  };
+}
+
+export type HoleSpec = { target: string; surface: string; tol?: number };
+
+/**
+ * A trigger that is alone in its place (its surface closed, or back at its size) shows its label: the ink of its box
+ * is at least half of what it is at rest. The pill that has arrived with no label on it, and the gap before the
+ * button follows, are a hole. Judged by the ink of the box, which the vanish gate defines.
+ */
+export function hole(frames: Frames, spec: HoleSpec): GateResult {
+  const rec = frames.rec;
+  const rest = frames.before(rec.input);
+  const home = boxesAt(rec, spec.target, frames.t(rest))[0];
+  if (!home || home.hidden) return { gate: 'hole', verdict: 'skip', line: `no box of "${spec.target}" at rest`, numbers: {}, flagged: [] };
+  const base = ink(frames.at(rest), home);
+  if (base === 0) return { gate: 'hole', verdict: 'skip', line: 'the trigger has no ink at rest', numbers: {}, flagged: [] };
+  const tol = spec.tol ?? 8;
+  const flagged: number[] = [];
+  const series: NonNullable<GateResult['series']> = [];
+  const worst = { ratio: 1, t: 0 };
+  let checked = 0;
+  for (let j = rest + 1; j < frames.length; j += 1) {
+    const target = boxesAt(rec, spec.target, frames.t(j))[0];
+    if (!target || target.hidden) continue;
+    const surface = boxesAt(rec, spec.surface, frames.t(j))[0];
+    const away = !surface || surface.hidden || (Math.abs(surface.w - target.w) <= tol && Math.abs(surface.h - target.h) <= tol && Math.abs(surface.x - target.x) <= tol && Math.abs(surface.y - target.y) <= tol);
+    if (!away) continue;
+    checked += 1;
+    const ratio = ink(frames.at(j), target) / base;
+    series.push({ index: j, t: frames.t(j) - rec.input, value: ratio });
+    if (ratio < LIMITS.holeInk) flagged.push(j);
+    if (ratio < worst.ratio) Object.assign(worst, { ratio, t: frames.t(j) - rec.input });
+  }
+  if (checked === 0) return { gate: 'hole', verdict: 'skip', line: 'the trigger was never alone in its place', numbers: {}, flagged: [] };
+  return {
+    gate: 'hole',
+    verdict: flagged.length > 0 ? 'fail' : 'pass',
+    line: `${checked} frames with the surface closed or back at the trigger; the least ink at +${ms(worst.t)}: ${Math.round(worst.ratio * 100)}% of its ink at rest; ${flagged.length} frames under ${LIMITS.holeInk * 100}%`,
+    numbers: { frames: checked, leastInkPct: Math.round(worst.ratio * 100), leastAtMs: Math.round(worst.t), framesEmpty: flagged.length },
+    flagged,
+    series,
+  };
+}
+
+export type ConvergeSpec = { keys: string[]; pad?: number };
+
+/**
+ * A motion goes to the picture it settles to and stays on the way: the distance (mean ΔE over the elements' region)
+ * between a frame and the settled picture of that motion falls, and any rise after it has fallen is the picture
+ * turning back, as a selection that leaves one item, starts on another and comes back, or two indicators that trade places.
+ */
+export function converge(frames: Frames, spec: ConvergeSpec): GateResult {
+  const rec = frames.rec;
+  const series: NonNullable<GateResult['series']> = [];
+  const flagged: number[] = [];
+  const worst = { rise: 0, t: 0 };
+  let evaluated = 0;
+  rec.motion.forEach((segment, k) => {
+    const next = rec.motion[k + 1]?.start ?? Infinity;
+    const until = Math.min(segment.end + 1500, next);
+    if (until - segment.end < 300) return;
+    const regions = regionsOf(rec, spec.keys, segment.start, segment.end, spec.pad ?? 8);
+    const region = regions.find((r) => r.name === 'all') ?? regions[0];
+    if (!region) return;
+    const settled = frames.before(until);
+    if (frames.t(settled) < segment.end) return;
+    const from = frames.from(segment.start - 40);
+    evaluated += 1;
+    let least = Infinity;
+    for (let j = from; j < settled; j += 1) {
+      const d = regionChange(frames.at(j), frames.at(settled), region.rect, LIMITS.changed).mean;
+      series.push({ index: j, t: frames.t(j) - rec.input, value: d });
+      if (d < least) least = d;
+      else if (d - least > LIMITS.convergeBounce) flagged.push(j);
+      if (least < Infinity && d - least > worst.rise) Object.assign(worst, { rise: d - least, t: frames.t(j) - rec.input });
+    }
+  });
+  if (evaluated === 0) return { gate: 'converge', verdict: 'skip', line: 'no motion with a region to watch', numbers: {}, flagged: [] };
+  return {
+    gate: 'converge',
+    verdict: flagged.length > 0 ? 'fail' : 'pass',
+    line: `${evaluated} motion(s); the picture turned back from its settled one by up to ${f2(worst.rise)} ΔE (at +${ms(worst.t)}); ${flagged.length} frames over ${LIMITS.convergeBounce}`,
+    numbers: { motions: evaluated, worstRiseDE: +f2(worst.rise), worstAtMs: Math.round(worst.t), framesOver: flagged.length },
+    flagged,
+    series,
+  };
+}
+
+export type ScrollbarSpec = { at?: string };
+
+const bareBar = (s: Scroller): boolean => s.scrollbarWidth === 'none' || /^none\//.test(s.webkit) || /\/0(px)?$/.test(s.webkit);
+
+/**
+ * What scrolls inside a kit surface shows the kit's own indicator, never the platform's. Judged from the container's
+ * styles (`scrollbar-width: none`, or `::-webkit-scrollbar` with no display) and from its pixels: the gutter the
+ * platform's bar takes at the container's edge, in a frame while it was scrolled, differs from the content beside it.
+ */
+export function scrollbar(frames: Frames, spec: ScrollbarSpec): GateResult {
+  const rec = frames.rec;
+  if (rec.scrollers.length === 0) return { gate: 'scrollbar', verdict: 'skip', line: 'nothing scrolled inside the surface', numbers: {}, flagged: [] };
+  const mark = spec.at ? rec.marks[spec.at] : undefined;
+  const j = mark === undefined ? frames.length - 1 : frames.before(mark);
+  const img = frames.at(j);
+  const found = rec.scrollers.map((s) => {
+    let drawn = 0;
+    let total = 0;
+    if (s.gutter > 2) {
+      for (let y = Math.ceil(s.y); y < Math.floor(s.y + s.h); y += 1) {
+        for (let x = Math.ceil(s.x + s.w); x < Math.floor(s.x + s.w + s.gutter); x += 1) {
+          const i = (y * img.width + x) * 4;
+          const k = (y * img.width + (x - Math.floor(s.gutter) - 4)) * 4;
+          total += 1;
+          if (deltaE(img, i, img, k) > LIMITS.cornerDrawn) drawn += 1;
+        }
+      }
+    }
+    return { s, platform: !bareBar(s), drawn: total ? drawn / total : 0 };
+  });
+  const bad = found.filter((f) => f.platform);
+  return {
+    gate: 'scrollbar',
+    verdict: bad.length > 0 ? 'fail' : 'pass',
+    line: found.map((f) => `${f.s.name}: scrollbar-width ${f.s.scrollbarWidth}, ::-webkit-scrollbar ${f.s.webkit}, gutter ${f.s.gutter} px (${f2(f.drawn * 100)}% of it drawn unlike the content beside it) -> ${f.platform ? 'the platform bar' : 'no platform bar'}`).join('; '),
+    numbers: { scrollers: found.length, platformBars: bad.length, gutterPx: Math.max(0, ...found.map((f) => f.s.gutter)), gutterDrawnPct: +f2(Math.max(0, ...found.map((f) => f.drawn)) * 100) },
+    flagged: bad.length > 0 ? [j] : [],
+  };
+}
 
 export type VanishSpec = { key: string; label?: (index: number) => string };
 
@@ -206,12 +415,16 @@ export function vanish(frames: Frames, spec: VanishSpec): GateResult {
   };
 }
 
+const sameSize = (a: Box, b: Box | undefined): boolean => b !== undefined && Math.abs(a.w - b.w) < 0.5 && Math.abs(a.h - b.h) < 0.5;
+
 export type ShapeSpec = {
   keys: string[];
   /** `capsule` (the default) expects the radius to be half the short side whatever the element declares; `declared` takes what it declares. */
   expect?: 'capsule' | 'declared';
   /** What the corners are compared with: the page behind the kit (the default), or the frame before the input, for an element that sits on glass of its own. */
   ref?: 'backdrop' | 'rest';
+  /** Also judges the frames inside the kit's motions, in which an element whose box is the same size as one frame before is the shape drawn in it: a capsule that is square while it moves is seen. */
+  during?: boolean;
 };
 
 /** Pixels in the corners of a box, outside the arc of its radius and clear of the arc by `clear`, as indices into the image data. */
@@ -246,25 +459,27 @@ export function cornerPixels(box: Box, image: Image, clear: number): number[] {
 /** Judged outside the kit's motions: while one runs, an element's box is not the shape drawn in it. The corners of a rounded element show the backdrop, not glass: outside the radius a frame differs from the page behind it by little. */
 export function shape(frames: Frames, spec: ShapeSpec): GateResult {
   const rec = frames.rec;
-  if (spec.ref !== 'rest' && !rec.backdrop) return { gate: 'shape', verdict: 'skip', line: 'no backdrop reference', numbers: {}, flagged: [] };
+  if (spec.ref !== 'rest' && rec.backdrops.length === 0) return { gate: 'shape', verdict: 'skip', line: 'no backdrop reference', numbers: {}, flagged: [] };
   const rest = frames.before(rec.input);
-  const reference = spec.ref === 'rest' ? frames.at(rest) : decodePng(rec.backdrop!);
+  const backdrops = rec.backdrops.map((b) => ({ at: b.mark === null ? -Infinity : (rec.marks[b.mark] ?? Infinity), image: spec.ref === 'rest' ? null : decodePng(b.png) }));
+  const referenceAt = (t: number): Image => (spec.ref === 'rest' ? frames.at(rest) : [...backdrops].reverse().find((b) => b.at <= t)!.image!);
   const radiusOf = (b: Box): number => (spec.expect === 'declared' ? b.r : Math.min(b.w, b.h) / 2);
   const flagged: number[] = [];
   const series: NonNullable<GateResult['series']> = [];
   let worst = { share: 0, t: 0, r: 0 };
   let checked = 0;
   for (let j = spec.ref === 'rest' ? rest + 1 : 0; j < frames.length; j += 1) {
-    if (rec.motion.some((m) => frames.t(j) >= m.start && frames.t(j) < m.end)) continue;
+    const moving = rec.motion.some((m) => frames.t(j) >= m.start && frames.t(j) < m.end);
+    if (moving && !spec.during) continue;
     const img = frames.at(j);
-    const boxes = spec.keys.flatMap((key) => boxesAt(rec, key, frames.t(j))).filter((b) => !b.hidden).map((b) => ({ ...b, r: radiusOf(b) })).filter((b) => b.r >= 6);
+    const boxes = spec.keys.flatMap((key) => boxesAt(rec, key, frames.t(j)).filter((b, i) => !moving || sameSize(b, boxesAt(rec, key, frames.t(j) - 17)[i]))).filter((b) => !b.hidden).map((b) => ({ ...b, r: radiusOf(b) })).filter((b) => b.r >= 6);
     if (boxes.length === 0) continue;
     let drawn = 0;
     let total = 0;
     for (const box of boxes) {
       for (const i of cornerPixels(box, img, Math.min(6, box.r * 0.2))) {
         total += 1;
-        if (deltaE(img, i, reference, i) > LIMITS.cornerDrawn) drawn += 1;
+        if (deltaE(img, i, referenceAt(frames.t(j)), i) > LIMITS.cornerDrawn) drawn += 1;
       }
     }
     if (total === 0) continue;
@@ -287,22 +502,45 @@ export function shape(frames: Frames, spec: ShapeSpec): GateResult {
 
 export type StateSpec = { key: string; index?: number; at: string };
 
-/** The state is seen: the element's region at the mark differs from its region at rest by more than a just noticeable ΔE. */
-export function state(frames: Frames, spec: StateSpec): GateResult {
+const stateBox = (frames: Frames, spec: StateSpec): { error: string } | { error?: undefined; rest: number; target: number; box: Box } => {
   const rec = frames.rec;
   const rest = frames.before(rec.input);
   const mark = rec.marks[spec.at];
-  if (mark === undefined) return { gate: 'state', verdict: 'skip', line: `no mark "${spec.at}"`, numbers: {}, flagged: [] };
-  const target = frames.before(mark);
+  if (mark === undefined) return { error: `no mark "${spec.at}"` };
   const box = boxesAt(rec, spec.key, frames.t(rest))[spec.index ?? 0];
-  if (!box || box.hidden) return { gate: 'state', verdict: 'skip', line: `no box of "${spec.key}"`, numbers: {}, flagged: [] };
-  const c = regionChange(frames.at(rest), frames.at(target), box, LIMITS.changed);
+  if (!box || box.hidden) return { error: `no box of "${spec.key}"` } as const;
+  return { rest, target: frames.before(mark), box } as const;
+};
+
+/** The state is seen: the element's region at the mark differs from its region at rest by a mean ΔE of a just noticeable difference, or, over at least 1 % of it, by a clear ΔE or a clear relative luminance step at the 95th percentile of the changed pixels, which is what a thin rim does and what a dark surface shows. */
+export function state(frames: Frames, spec: StateSpec): GateResult {
+  const at = stateBox(frames, spec);
+  if (at.error !== undefined) return { gate: 'state', verdict: 'skip', line: at.error, numbers: {}, flagged: [] };
+  const c = deltaOf(frames.at(at.rest), frames.at(at.target), pad(at.box, 2), LIMITS.changed);
+  const byMean = c.mean >= LIMITS.stateMean;
+  const byRim = c.p95 >= LIMITS.stateP95 && c.share >= LIMITS.stateRim;
+  const byWeber = c.weber >= LIMITS.stateWeber && c.share >= LIMITS.stateRim;
   return {
     gate: 'state',
-    verdict: c.mean >= LIMITS.stateMean ? 'pass' : 'fail',
-    line: `${spec.at}: mean ΔE ${f2(c.mean)} over ${Math.round(box.w)}×${Math.round(box.h)} px (needs ${LIMITS.stateMean}), ${f2(c.share * 100)}% of pixels over ΔE ${LIMITS.changed}, peak ${f2(c.max)}`,
-    numbers: { meanDE: +f2(c.mean), sharePct: +f2(c.share * 100), peakDE: +f2(c.max) },
-    flagged: [target],
+    verdict: byMean || byRim || byWeber ? 'pass' : 'fail',
+    line: `${spec.at}: mean ΔE ${f2(c.mean)} (needs ${LIMITS.stateMean}) or p95 of the changed ${f2(c.p95)} over ${f2(c.share * 100)}% of ${Math.round(at.box.w)}×${Math.round(at.box.h)} px (needs ${LIMITS.stateP95} over ${LIMITS.stateRim * 100}%), peak ${f2(c.max)}, relative luminance step p95 ${f3(c.weber)} (needs ${LIMITS.stateWeber})`,
+    numbers: { meanDE: +f2(c.mean), p95DE: +f2(c.p95), weber95: +f3(c.weber), sharePct: +f2(c.share * 100), peakDE: +f2(c.max), by: byMean ? 'mean' : byRim ? 'rim' : byWeber ? 'relative' : 'none' },
+    flagged: [at.target],
+  };
+}
+
+/** What a state paints is the element's own shape: the pixels it changes, boxed, leave the corners of a capsule on that box alone. A hover that lights a rectangle inside a capsule paints them. */
+export function highlight(frames: Frames, spec: StateSpec): GateResult {
+  const at = stateBox(frames, spec);
+  if (at.error !== undefined) return { gate: 'highlight', verdict: 'skip', line: at.error, numbers: {}, flagged: [] };
+  const c = deltaOf(frames.at(at.rest), frames.at(at.target), pad(at.box, 6), LIMITS.changed);
+  if (c.corners === null || !c.box) return { gate: 'highlight', verdict: 'skip', line: `${spec.at}: nothing changed, or too little to have a corner (${c.changed} px)`, numbers: { changedPx: c.changed }, flagged: [] };
+  return {
+    gate: 'highlight',
+    verdict: c.corners > LIMITS.highlightCorners ? 'fail' : 'pass',
+    line: `${spec.at}: the changed pixels fill ${Math.round(c.box.w)}×${Math.round(c.box.h)} px and paint ${f2(c.corners * 100)}% of the corners outside a capsule on it (limit ${LIMITS.highlightCorners * 100}%)`,
+    numbers: { cornersPct: +f2(c.corners * 100), boxW: Math.round(c.box.w), boxH: Math.round(c.box.h) },
+    flagged: [at.target],
   };
 }
 

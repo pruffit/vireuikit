@@ -85,6 +85,7 @@ figcaption{font:10px/1.25 ui-monospace,monospace;padding:1px 3px;background:#fff
 
 export function writeMetrics(dir: string, rec: Recording, results: GateResult[]): void {
   mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'samples.json'), JSON.stringify(rec.samples.map((s) => ({ t: Math.round((s.t - rec.input) * 10) / 10, boxes: Object.fromEntries(Object.entries(s.boxes).map(([k, v]) => [k, v.map((b) => [Math.round(b.x * 10) / 10, Math.round(b.y * 10) / 10, Math.round(b.w * 10) / 10, Math.round(b.h * 10) / 10, Math.round(b.r * 10) / 10, b.hidden ? 1 : 0])])) }))));
   const rel = (t: number) => Math.round((t - rec.input) * 10) / 10;
   writeFileSync(
     join(dir, 'metrics.json'),

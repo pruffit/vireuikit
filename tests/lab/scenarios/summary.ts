@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { GateName } from './gates';
 import type { Outcome } from './run';
 
-const GATES: GateName[] = ['seam', 'vanish', 'shape', 'state', 'ghost'];
+const GATES: GateName[] = ['seam', 'pop', 'hole', 'converge', 'vanish', 'shape', 'state', 'highlight', 'ghost', 'scrollbar'];
 
 function cell(out: Outcome, gate: GateName): string {
   const rs = out.results.filter((r) => r.gate === gate);
