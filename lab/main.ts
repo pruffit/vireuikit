@@ -356,7 +356,7 @@ window.__lab = {
   input: effectiveInput,
   define: () => defineVireElements(),
   upgraded: upgrade,
-  renderStats: () => counters?.renderStats() ?? { probes: 0, fullBakes: 0, reducedBakes: 0, filterSwaps: 0, mainThreadBakes: 0, workerBakes: 0 },
+  renderStats: () => counters?.renderStats() ?? { probes: 0, fullBakes: 0, reducedBakes: 0, filterSwaps: 0, mainThreadBakes: 0, workerBakes: 0, landedExact: 0, landedBlend: 0, probesAtLand: 0, syncSwaps: 0 },
   resetRenderStats: () => counters?.resetRenderStats(),
   sample,
   probe: (selector) => {

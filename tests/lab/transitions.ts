@@ -5,7 +5,7 @@ import { nextFrame, openCase } from './helpers';
 // them (`motion-behavior.spec.ts`, in CI) and the frame gate times their frames (`perf.spec.ts`, local, with a GPU).
 // One list, so the two cannot drift apart: what is counted is what is timed.
 
-export type Stats = { probes: number; fullBakes: number; reducedBakes: number; filterSwaps: number; mainThreadBakes: number; workerBakes: number };
+export type Stats = import('vireglass/dom').RenderStats;
 
 export type Transition = {
   name: string;
