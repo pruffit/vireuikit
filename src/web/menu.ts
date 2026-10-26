@@ -58,8 +58,10 @@ const TRIGGER = ':scope > button, :scope > vire-button > button, :scope > vire-i
 const ACTIVATION_KEYS = new Set(['Enter', ' ']);
 
 // Once the closing drop is the size of its trigger, the trigger's glyph and focus ring come into focus over this long, from this much.
-const RING_MS = 480;
+const RING_MS = 360;
 const HAND_INK = 0.9;
+// How long the closing drop takes to cover what is left of the way to its trigger once it is the trigger's size.
+const SLIDE_MS = 70;
 // How long a menu takes to move to a size found stale while it is open.
 const RETARGET_MS = 220;
 // Within this many pixels of the box it lands on, the lens is given that box.
@@ -147,6 +149,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #rest: RestLens | null = null;
     #homeAt: number | null = null;
     #tintAt = -1;
+    #slideAt: number | null = null;
     /** The box the lens is to land on, as `prepare` was told. */
     #dest: VireGlassGeometry | null = null;
     /** A size found stale while open: the box the menu was drawn at, and when it began to move to the new one. */
@@ -598,6 +601,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#readySince = null;
       this.#inSince = null;
       this.#homeAt = null;
+      this.#slideAt = null;
       clearTimeout(this.#inertTimer);
       list.inert = false;
       this.#trigger!.setAttribute('aria-expanded', 'true');
@@ -810,6 +814,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#rest = null;
       this.#retarget = null;
       this.#homeAt = null;
+      this.#slideAt = null;
       this.#tintAt = -1;
       this.#dest = null;
       this.#from = this.#to = this.#anchor = this.#region = null;
@@ -914,13 +919,26 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
      * glyph is then drawn on the trigger itself, out of focus as it was under the glass, and comes into focus together
      * with the focus ring, while the drop's slow tail still runs. It all ends before the motion does.
      */
-    #closing(box: RoundedRect, final: boolean, outgoing: number): { ink: number; ring: number; back: boolean } {
-      const home = this.#from;
-      if (this.#state.open || !home) return { ink: outgoing, ring: 1, back: false };
-      if (this.#homeAt === null && !final && Math.max(box.width - home.width, box.height - home.height) > 0.5) return { ink: outgoing, ring: 0, back: false };
-      this.#homeAt ??= performance.now();
-      const k = final ? 1 : Math.min((performance.now() - this.#homeAt) / RING_MS, 1);
+    #closing(final: boolean, outgoing: number): { ink: number; ring: number; back: boolean } {
+      if (this.#state.open || !this.#from) return { ink: outgoing, ring: 1, back: false };
+      const now = performance.now();
+      if (!final && (this.#slideAt === null || now - this.#slideAt < SLIDE_MS)) return { ink: outgoing, ring: 0, back: false };
+      this.#homeAt ??= now;
+      const k = final ? 1 : Math.min((now - this.#homeAt) / RING_MS, 1);
       return { ink: HAND_INK + (1 - HAND_INK) * k, ring: k, back: true };
+    }
+
+    /** Once the closing drop is the size of its trigger, whatever is left of the way to it is covered over a moment, so the trigger takes its body back from a drop that is where it is. */
+    #slide(box: RoundedRect): RoundedRect {
+      const home = this.#from!;
+      const now = performance.now();
+      if (this.#slideAt === null) {
+        if (Math.max(Math.abs(box.width - home.width), Math.abs(box.height - home.height)) > 0.5) return box;
+        this.#slideAt = now;
+      }
+      const e = smoothstep(0, 1, (now - this.#slideAt) / SLIDE_MS);
+      const mix = (a: number, b: number) => a + (b - a) * e;
+      return { x: mix(box.x, home.x), y: mix(box.y, home.y), width: mix(box.width, home.width), height: mix(box.height, home.height), radius: mix(box.radius, home.radius) };
     }
 
     /** The box the menu is drawn at: its place, or the way from the size it was drawn at to a size found stale while it is open. */
@@ -955,7 +973,8 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const near = this.#state.open && inkIn === 1 && [f.box.x - to.x, f.box.y - to.y, f.box.width - to.width, f.box.height - to.height].every((d) => Math.abs(d) <= LENS_SNAP_PX);
       this.setAttribute('data-phase', settled || near ? 'open' : 'moving');
       // Over the last pixel or two the box is where it lands: the text laid out in it would otherwise move by fractions of a pixel, which is seen as its edges changing.
-      const box = near ? to : f.box;
+      let box = near ? to : f.box;
+      if (!this.#state.open && this.#from) box = this.#slide(box);
       const content = near ? { x: 0, y: 0 } : f.content;
       this.toggleAttribute('data-sharp', inkIn === 1);
       this.#setBox(box);
@@ -985,7 +1004,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       s.setProperty('--vk-body-alpha', body.alpha.toFixed(3));
       s.setProperty('--vk-body-white', body.white.toFixed(3));
       s.setProperty('--vk-body-lift', body.lift.toFixed(3));
-      const closing = this.#closing(box, final, f.ink.outgoing);
+      const closing = this.#closing(final, f.ink.outgoing);
       list.style.visibility = closing.back ? 'hidden' : '';
       this.#liveCarrier()?.setCarried?.(closing.ink, closing.ring, closing.back);
       if (closing.back) this.#unclipTrigger();

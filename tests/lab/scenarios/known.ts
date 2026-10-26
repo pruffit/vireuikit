@@ -7,7 +7,6 @@ import type { Known } from './run';
  * the GPU profiles is stale and fails the run, so the entry goes with the fix.
  */
 export const KNOWN: Record<string, Known> = {
-  'menu open, close, open again': { seam: { 'gpu@owner': '#44 A', gpu: '#44 A', swiftshader: '#44 A' } },
   'popover as a bottom sheet, grow and collapse': { seam: { 'gpu@owner': '#44 A', gpu: '#44 A', swiftshader: '#44 A' }, pop: { 'gpu@owner': '#44 A', gpu: '#44 A', swiftshader: '#44 A' }, ghost: { 'gpu@owner': '#44 D', gpu: '#44 D', swiftshader: '#44 D' } },
   'sheet grow and collapse into its trigger': { seam: { 'gpu@owner': '#44 A', gpu: '#44 A', swiftshader: '#44 A' }, pop: { 'gpu@owner': '#44 A', gpu: '#44 A', swiftshader: '#44 A' }, hole: { 'gpu@owner': '#44 A', gpu: '#44 A', swiftshader: '#44 A' }, ghost: { 'gpu@owner': '#44 D', gpu: '#44 D', swiftshader: '#44 D' } },
   'sheet drag between detents': { seam: { 'gpu@owner': '#44 A', gpu: '#44 A', swiftshader: '#44 A' } },

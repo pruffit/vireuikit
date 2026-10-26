@@ -213,13 +213,13 @@ const stalled = (frames: Frames, j: number): boolean => {
   return gap > LIMITS.frameGap || gap < 8 || (j > 1 && (before > LIMITS.frameGap || before < 8));
 };
 
-export type PopSpec = { keys: string[]; pad?: number; /** A surface that grows out of the element: frames in which it is out, bigger than the element, are not judged, since it changes the region by being there. */ surface?: string };
+export type PopSpec = { keys: string[]; pad?: number; /** A surface that grows out of the element: a frame in which it is out is not judged, since it changes the region by being there; the frame in which it has left, against the one before, is. */ surface?: string };
 
-/** The surface is closed, or back at the size and place of the target. */
+/** The surface is closed, or back at the size and place of the target within `tol`; with a negative `tol`, only closed. */
 function away(rec: Recording, surface: string | undefined, target: Box, t: number, tol = 8): boolean {
   if (!surface) return true;
   const s = boxesAt(rec, surface, t)[0];
-  return !s || s.hidden || (Math.abs(s.w - target.w) <= tol && Math.abs(s.h - target.h) <= tol && Math.abs(s.x - target.x) <= tol && Math.abs(s.y - target.y) <= tol);
+  return !s || s.hidden || (tol >= 0 && Math.abs(s.w - target.w) <= tol && Math.abs(s.h - target.h) <= tol && Math.abs(s.x - target.x) <= tol && Math.abs(s.y - target.y) <= tol);
 }
 
 /**
@@ -239,7 +239,7 @@ export function pop(frames: Frames, spec: PopSpec): GateResult {
       const before = boxesAt(rec, key, frames.t(j - 1));
       now.forEach((b, i) => {
         const p = before[i];
-        if (!p || b.hidden || p.hidden || stalled(frames, j) || !away(rec, spec.surface, b, frames.t(j), 1.5) || !away(rec, spec.surface, p, frames.t(j - 1), 1.5) || Math.abs(b.x - p.x) > 0.3 || Math.abs(b.y - p.y) > 0.3 || Math.abs(b.w - p.w) > 0.3 || Math.abs(b.h - p.h) > 0.3) return;
+        if (!p || b.hidden || p.hidden || stalled(frames, j) || !away(rec, spec.surface, b, frames.t(j), -1) || Math.abs(b.x - p.x) > 0.3 || Math.abs(b.y - p.y) > 0.3 || Math.abs(b.w - p.w) > 0.3 || Math.abs(b.h - p.h) > 0.3) return;
         checked += 1;
         const c = regionChange(frames.at(j - 1), frames.at(j), pad(b, spec.pad ?? 4), LIMITS.changed);
         series.push({ index: j, t: frames.t(j) - rec.input, value: c.mean });
@@ -663,6 +663,7 @@ function ringPixels(b: Box, image: Image, width: number): number[] {
 }
 
 const RING_PX = 3;
+const CONTRACTION_MS = 160;
 
 /** A label is never drawn without its body: where the trigger shows at least a fifth of its ink at rest, the rim of its box (the 90th percentile of the pixels along its edge) differs from the page behind it by at least `bodyKept` of what it does at rest. */
 export function together(frames: Frames, spec: TogetherSpec): GateResult {
@@ -688,6 +689,8 @@ export function together(frames: Frames, spec: TogetherSpec): GateResult {
   for (let j = rest + 1; j < frames.length; j += 1) {
     const b = boxesAt(rec, spec.key, frames.t(j))[0];
     if (!b || b.hidden || !away(rec, spec.surface, b, frames.t(j), 4)) continue;
+    // The drop tightens inside the trigger's box for the first moments of a motion, and its body is then not on the box's edge.
+    if (rec.motion.some((m) => frames.t(j) >= m.start && frames.t(j) < m.start + CONTRACTION_MS)) continue;
     const image = frames.at(j);
     if (ink(image, b) / inkRest < 0.2) continue;
     checked += 1;

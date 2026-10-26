@@ -36,7 +36,7 @@ const menu: Scenario[] = [
       seam: { keys: ['trigger', 'trigHost', 'list'] },
       shape: { keys: ['trigger'] },
       pop: { keys: ['trigHost'], surface: 'list' },
-      hole: { target: 'trigHost', surface: 'list' },
+      hole: { target: 'trigHost', surface: 'list', tol: 4 },
       ghost: { surface: 'list', target: 'trigHost', part: 'rows' },
       together: { key: 'trigHost', surface: 'list' },
       box: { key: 'trigHost' },
@@ -44,6 +44,30 @@ const menu: Scenario[] = [
     },
   },
 ];
+
+menu.push({
+  name: 'menu from a button, open and close',
+  query: 'view=menu',
+  owner: 'chrome=1&view=menu',
+  viewport: { width: 520, height: 520 },
+  track: { trigger: '#sort vire-button:not([data-carried]) > button', trigHost: '#sort > vire-button', list: '#sort > [popover]', rows: '#sort > [popover] > button' },
+  view: ['trigHost', 'list'],
+  async act(ctx) {
+    await ctx.page.locator('#sort-trigger').click();
+    await ctx.quiet();
+    await ctx.page.keyboard.press('Escape');
+  },
+  gates: {
+    seam: { keys: ['trigger', 'trigHost', 'list'] },
+    shape: { keys: ['trigger'] },
+    pop: { keys: ['trigHost'], surface: 'list' },
+    hole: { target: 'trigHost', surface: 'list', tol: 4 },
+    ghost: { surface: 'list', target: 'trigHost', part: 'rows' },
+    together: { key: 'trigHost', surface: 'list' },
+    box: { key: 'trigHost' },
+    landing: {},
+  },
+});
 
 const popover: Scenario[] = [
   {
@@ -428,7 +452,7 @@ const atoms: Scenario[] = BACKDROPS.flatMap((backdrop) =>
           await ctx.mark('hover');
           await walk(page, await centerOf(page.locator(`#${id} > button`)), AWAY, 500);
         },
-        gates: { state: { key: 'atom', at: 'hover' }, ...(backdrop === 'split' ? {} : { highlight: { key: 'atom', at: 'hover' } }), shape: { keys: ['atom'], ref: 'rest' } },
+        gates: { state: { key: 'atom', at: 'hover' }, ...(backdrop === 'split' ? {} : { highlight: { key: 'atom', at: 'hover' } }), shape: { keys: ['atom'], ref: 'rest' }, seam: { keys: ['atom'] }, pop: { keys: ['atom'] } },
       },
       {
         ...base,
@@ -444,7 +468,7 @@ const atoms: Scenario[] = BACKDROPS.flatMap((backdrop) =>
           await ctx.mark('press');
           await page.mouse.up();
         },
-        gates: { state: { key: 'atom', at: 'press' } },
+        gates: { state: { key: 'atom', at: 'press' }, shape: { keys: ['atom'], ref: 'rest' }, seam: { keys: ['atom'] }, pop: { keys: ['atom'] } },
       },
     ];
   }),
