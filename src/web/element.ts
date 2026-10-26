@@ -135,7 +135,8 @@ export function createControlElementClass(
         this.style.removeProperty('--vk-carry-blur');
         this.style.removeProperty('--vk-ring');
       } else {
-        this.style.setProperty('--vk-carry', this.#carried.toFixed(3));
+        // A label is drawn twice (fill and shadow), so its strength is the one in which the two add up to `ink`.
+        this.style.setProperty('--vk-carry', (kind === 'button' ? 1 - Math.sqrt(1 - this.#carried) : this.#carried).toFixed(3));
         this.style.setProperty('--vk-carry-blur', Math.min(Math.max(blur ?? 1 - this.#carried, 0), 1).toFixed(3));
         this.style.setProperty('--vk-ring', Math.min(Math.max(ring, 0), 1).toFixed(3));
       }

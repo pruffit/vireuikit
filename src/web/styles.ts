@@ -41,7 +41,7 @@ ${BODY}{appearance:none;-webkit-appearance:none;box-sizing:border-box;margin:0;b
  display:inline-flex;align-items:center;justify-content:center;gap:8px;position:relative;
  height:var(--vk-height);min-width:var(--vk-height);padding:0 var(--vk-pad-x);border-radius:var(--vk-radius);
  -webkit-text-fill-color:color-mix(in srgb,currentColor calc((1 - var(--vk-press)*.55)*var(--vk-carry)*100%),transparent);
- text-shadow:0 0 calc((var(--vk-press)*var(--vk-defocus) + var(--vk-carry-blur)*4)*1px) color-mix(in srgb,currentColor calc(var(--vk-carry)*min(1,(var(--vk-press)*var(--vk-defocus) + var(--vk-carry-blur)*4)*2)*100%),transparent);
+ text-shadow:0 0 calc((var(--vk-press)*var(--vk-defocus) + var(--vk-carry-blur)*4)*1px) color-mix(in srgb,currentColor calc(var(--vk-carry)*100%),transparent);
  background:transparent;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-tap-highlight-color:transparent;
  transform:scale(calc(1 + var(--vk-press)*var(--vk-grow)))}
 vire-icon-button[data-vk]>button{padding:0;width:var(--vk-height)}
