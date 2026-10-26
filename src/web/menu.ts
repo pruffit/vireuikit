@@ -65,7 +65,8 @@ const REST_MS = 40;
 const HAND_INK = 0.6;
 const HAND_BLUR = 0.75;
 const RING_MS = 280;
-const GLYPH_MS = 160;
+const GLYPH_MS = 240;
+const BLUR_ENDS = 0.6;
 // How long a menu takes to move to a size found stale while it is open.
 const RETARGET_MS = 220;
 // Within this many pixels of the box it lands on, the lens is given that box.
@@ -937,9 +938,11 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#homeAt ??= now;
       const elapsed = now - this.#homeAt;
       const k = final ? 1 : Math.min(elapsed / RING_MS, 1);
+      // The platform draws a blur under about a pixel as none, so it ends early and the strength follows over what is left of the ramp.
       const g = final ? 1 : smoothstep(0, 1, elapsed / GLYPH_MS);
+      const sharp = final ? 1 : Math.min(g / BLUR_ENDS, 1);
       const ink = HAND_INK * outgoing;
-      return { ink: ink + (1 - ink) * g, ring: k, back: true, blur: Math.max(HAND_BLUR, 1 - outgoing) * (1 - g) };
+      return { ink: ink + (1 - ink) * g * g, ring: k, back: true, blur: Math.max(HAND_BLUR, 1 - outgoing) * (1 - sharp) ** 2 };
     }
 
     /** Once the closing drop is the size of its trigger, whatever is left of the way to it is covered over a moment, so the trigger takes its body back from a drop that is where it is. */
