@@ -1,4 +1,4 @@
-import { VIREGLASS_CONTROL_MATERIAL, type BackdropSample, type VireGlassMorph } from 'vireglass';
+import { VIREGLASS_CONTROL_MATERIAL, type BackdropSample, type VireGlassGeometry, type VireGlassMaterial, type VireGlassMorph } from 'vireglass';
 import type { GlassMorph } from 'vireglass/dom';
 import { presentationFor, sameA11y, type A11yMode, type A11yOverride, type Presentation } from '../kit/a11y';
 import {
@@ -17,7 +17,7 @@ import {
   type MenuState,
   type RoundedRect,
 } from '../kit/menu';
-import { createGrowthState, createMotionClock, growthPhase, smoothstep, stepGrowth, stepMotion, type GrowthPhase, type GrowthPoint } from '../kit/morph';
+import { createGrowthState, createMotionClock, growthPhase, heldGrowthState, smoothstep, stepGrowth, stepMotion, type GrowthPhase, type GrowthPoint } from '../kit/morph';
 import { probeFramePeriod } from './refresh';
 import { segmentOf } from '../kit/adaptive/context';
 import { sizeTier } from '../kit/adaptive/input';
@@ -26,7 +26,8 @@ import { CONTROL_SIZES, menuSize, type ControlSize } from '../kit/sizes';
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { effectiveInput, viewportSegments, watchPointerInput, watchViewport } from './environment';
 import { cancelMotionFrame, deepActive, dropEmptyStyle, requestMotionFrame, rootsOf, whenIdle, type Root } from './dom';
-import { attachControlGlass, glassMorph, landGlass, moveGlass, type GlassFrame, type GlassSession } from './glass';
+import type { RestLens } from './element';
+import { attachControlGlass, glassMorph, moveGlass, type GlassFrame, type GlassSession } from './glass';
 import { ensureStyles } from './styles';
 
 const FORCE_ATTRIBUTE = 'data-vire-force-state';
@@ -40,8 +41,12 @@ const FORCED: Record<string, GrowthPhase | null> = {
 const FORCED_PHASE = /^-?\d*\.?\d+( -?\d*\.?\d+){1,5}$/;
 const GLASS_ON = new Set(['', 'present', 'touch']);
 const MATERIAL_STEPS = 10;
+// The medium counts as at rest below this activity: the last step of its tail is then taken while the surface still moves, not as its last frame.
+const ACTIVITY_AT_REST = 0.15;
 // The rows are this much larger while the lens still holds them out of focus.
 const CONTENT_MAGNIFY = 0.6;
+// From here the content is in focus as far as the eye can tell, and is drawn as sharp.
+const CONTENT_SHARP = 0.99;
 // The content is fully opaque from here (styles: opacity is the ink three times over).
 const CONTENT_DRAWN = 0.34;
 // How much of the light of the lit body goes to the halo, besides the drop's own.
@@ -52,7 +57,17 @@ const VIEWPORT_MARGIN = 8;
 const TRIGGER = ':scope > button, :scope > vire-button > button, :scope > vire-icon-button > button';
 const ACTIVATION_KEYS = new Set(['Enter', ' ']);
 
-type Carrier = HTMLElement & { setCarried?: (ink: number | null) => void };
+// Once the closing drop is the size of its trigger, the trigger's glyph and focus ring come into focus over this long, from this much.
+const RING_MS = 480;
+const HAND_INK = 0.9;
+// How long a menu takes to move to a size found stale while it is open.
+const RETARGET_MS = 220;
+// Within this many pixels of the box it lands on, the lens is given that box.
+const LENS_SNAP_PX = 1.5;
+
+type Carrier = HTMLElement & { setCarried?: (ink: number | null, ring?: number, bodyBack?: boolean) => void; restLens?: (probe?: boolean) => RestLens | null };
+
+type Lens = { geometry: VireGlassGeometry; morph: GlassMorph | null; material: VireGlassMaterial; materialKey: string };
 
 export interface VireMenuElement extends HTMLElement {
   a11y: A11yOverride;
@@ -69,6 +84,9 @@ export interface VireMenuElement extends HTMLElement {
 export type MenuElementOptions = { nonce?: string | undefined };
 
 let ids = 0;
+
+/** The open box on whole pixels, so text drawn on the growth's transform and text laid out in the box land on the same ones. */
+const wholePixels = (r: Rect, radius: number): RoundedRect => ({ x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height), radius });
 
 // Both stay the author's: a native disabled item cannot take focus, an aria-disabled one can (WAI-ARIA APG).
 const nativelyDisabled = (item: Element) => item.hasAttribute('disabled');
@@ -119,6 +137,20 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #lastLens = { material: '', morph: '', geometry: '' };
     #sample: BackdropSample | null = null;
     #held: BackdropSample | null = null;
+    /** What the trigger shows by now, with the backdrop it was read over when the menu came out: hover may have moved it since. */
+    #refreshRest(): void {
+      const fresh = this.#liveCarrier()?.restLens?.(false);
+      if (fresh && this.#rest) this.#rest = { ...fresh, sample: this.#rest.sample };
+    }
+
+    /** The trigger's lens as it was when the menu came out: what the drop closes into. */
+    #rest: RestLens | null = null;
+    #homeAt: number | null = null;
+    #tintAt = -1;
+    /** The box the lens is to land on, as `prepare` was told. */
+    #dest: VireGlassGeometry | null = null;
+    /** A size found stale while open: the box the menu was drawn at, and when it began to move to the new one. */
+    #retarget: { from: RoundedRect; at: number } | null = null;
     #anchorEl: Element | null = null;
     #buttonRect: Rect | null = null;
     #clip: { el: HTMLElement; had: string } | null = null;
@@ -140,8 +172,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     set sample(next: BackdropSample | null) {
       this.#sample = next;
       if (!this.#glass) return;
-      if (this.#out) this.#holdSample();
-      else this.#glass.setSample(next);
+      if (this.#out) {
+        this.#holdSample();
+        this.#prepareDestination();
+      } else this.#glass.setSample(next);
     }
 
     get open(): boolean {
@@ -157,7 +191,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       const was = this.#liveCarrier();
       this.#anchorEl = next;
       if (!this.#out) return;
-      if (was !== this.#liveCarrier()) was?.setCarried?.(null);
+      if (was !== this.#liveCarrier()) {
+        was?.setCarried?.(null);
+        this.#rest = this.#liveCarrier()?.restLens?.() ?? null;
+      }
       this.#follow();
     }
 
@@ -228,9 +265,11 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#from = this.#to = this.#anchor = this.#region = null;
       this.#natural = null;
       this.#held = null;
+      this.#rest = null;
+      this.#retarget = null;
       this.#readySince = null;
       this.#inSince = null;
-      for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-contrast', 'data-size', 'data-phase', 'data-joined', 'data-arrived', 'data-measure']) {
+      for (const name of ['data-vk', 'data-surface', 'data-glass', 'data-frost', 'data-contrast', 'data-size', 'data-phase', 'data-joined', 'data-arrived', 'data-sharp', 'data-measure']) {
         this.removeAttribute(name);
       }
       for (const name of Array.from(this.style)) if (name.startsWith('--vk-')) this.style.removeProperty(name);
@@ -242,7 +281,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     attributeChangedCallback(name: string): void {
       if (!this.#list) return;
       if (name === FORCE_ATTRIBUTE) this.#applyForced();
-      else if (name === 'corner') this.#out && this.#place();
+      else if (name === 'corner') this.#out && this.#replace();
       else this.#refreshMode(true);
     }
 
@@ -531,7 +570,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       if (e?.target instanceof Node && this.#list?.contains(e.target)) return;
       this.#placeFrame = requestAnimationFrame(() => {
         this.#placeFrame = 0;
-        if (this.#out) this.#place();
+        if (this.#out) this.#replace();
       });
     }
 
@@ -558,10 +597,12 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#state = step.state;
       this.#readySince = null;
       this.#inSince = null;
+      this.#homeAt = null;
       clearTimeout(this.#inertTimer);
       list.inert = false;
       this.#trigger!.setAttribute('aria-expanded', 'true');
       this.#comeOut();
+      this.#prepareDestination(true);
       this.#run();
       this.#applyFocus(step.focus);
     }
@@ -581,6 +622,8 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#inertTimer = window.setTimeout(() => {
         if (this.#list && !this.#state.open && this.#out) this.#list.inert = true;
       });
+      this.#refreshRest();
+      this.#prepareDestination(true);
       this.#run();
     }
 
@@ -593,6 +636,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         if (this.#out || !list || this.#list !== list || !this.isConnected) return;
         this.#natural = this.#measure();
         this.#premeasured = true;
+        this.#prepareIdle();
       });
     }
 
@@ -600,7 +644,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #invalidate(): void {
       this.#natural = null;
       this.#premeasured = false;
-      if (this.#out) this.#place();
+      if (this.#out) this.#replace();
       else this.#premeasureSoon();
     }
 
@@ -616,13 +660,19 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         const was = this.#natural;
         if (was && Math.abs(now.width - was.width) < 1 && Math.abs(now.height - was.height) < 1) return;
         this.#natural = now;
-        this.#place();
+        const from = this.#toNow();
+        this.#place(false);
+        this.#retarget = { from, at: performance.now() };
+        this.#prepareDestination(true);
+        this.#run();
       });
     }
 
     #comeOut(): void {
       const list = this.#list!;
       const wasOut = this.#out;
+      // Read before the list is in the top layer, which the probe would see.
+      if (!wasOut) this.#rest = this.#liveCarrier()?.restLens?.() ?? null;
       if (!list.matches(':popover-open')) list.showPopover();
       this.#out = true;
       if (!wasOut && !this.#premeasured) this.#natural = null;
@@ -658,21 +708,30 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       return natural;
     }
 
+    #layout(natural: Size) {
+      const trigger = this.#triggerBox();
+      const { viewport, segments } = viewportSegments();
+      const region = segmentOf(trigger, segments) ?? viewport;
+      return { trigger, region, placement: menuPlacement(trigger, natural, region, { corner: this.#corner(), margin: VIEWPORT_MARGIN }) };
+    }
+
+    #replace(): void {
+      this.#place();
+      this.#prepareDestination();
+    }
+
     #place(paint = true): void {
       const list = this.#list!;
       const spec = menuSize(this.#size());
       this.#natural ??= this.#measure();
+      const { trigger, region, placement } = this.#layout(this.#natural);
       const natural = this.#natural;
-      const trigger = this.#triggerBox();
-      const { viewport, segments } = viewportSegments();
-      const region = segmentOf(trigger, segments) ?? viewport;
       this.#region = region;
-      const placement = menuPlacement(trigger, natural, region, { corner: this.#corner(), margin: VIEWPORT_MARGIN });
       this.#from = trigger;
       this.#buttonRect = this.#anchorButton()?.getBoundingClientRect() ?? trigger;
-      this.#to = { ...placement.rect, radius: spec.radius };
+      this.#to = wholePixels(placement.rect, spec.radius);
       this.#anchor = placement.anchor;
-      list.style.setProperty('--vk-content-w', `${placement.rect.width - 2 * spec.padding}px`);
+      list.style.setProperty('--vk-content-w', `${this.#to.width - 2 * spec.padding}px`);
       list.toggleAttribute('data-scroll', placement.rect.height < natural.height);
       if (paint) this.#paint();
     }
@@ -686,6 +745,9 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         sample = glass.probe();
       }
       this.#held = sample;
+      this.#tintAt = -1;
+      // Colours change at once in a lens that is moving, and ease in one that is not: the drop is coming out.
+      if (!paint) glass.setInterim(true);
       glass.setSample(sample);
       if (paint) this.#paint();
     }
@@ -703,7 +765,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
     #run(): void {
       const instant = this.#presentation?.instantSprings ?? false;
       if (instant) stepGrowth(this.#growth, 0, this.#state.open, true);
-      this.#paint();
+      this.#paint(instant);
       if (instant) {
         this.#settle();
         return;
@@ -717,9 +779,9 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#frame = 0;
       if (!this.isConnected || this.#forced()) return;
       const instant = this.#presentation?.instantSprings ?? false;
-      const moving = stepMotion(this.#clock, now, (dt) => stepGrowth(this.#growth, dt, this.#state.open, instant));
-      this.#paint();
-      if (moving) this.#frame = requestMotionFrame((t) => this.#tick(t));
+      const growing = stepMotion(this.#clock, now, (dt) => stepGrowth(this.#growth, dt, this.#state.open, instant));
+      this.#paint(!growing && this.#retarget === null);
+      if (growing || this.#retarget) this.#frame = requestMotionFrame((t) => this.#tick(t));
       else this.#settle();
     }
 
@@ -730,22 +792,29 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
         return;
       }
       const list = this.#list!;
-      if (this.#glass) landGlass(this.#glass);
+      this.#glass?.land();
       // The list's own toggle event fires here, once the growth has run back; aria-expanded turned false as it began.
       if (list.matches(':popover-open')) list.hidePopover();
       clearTimeout(this.#inertTimer);
       list.inert = false;
       list.removeAttribute('data-scroll');
       for (const name of Array.from(list.style)) if (name.startsWith('--vk-')) list.style.removeProperty(name);
+      list.style.removeProperty('visibility');
       this.removeAttribute('data-phase');
+      this.removeAttribute('data-sharp');
       this.removeAttribute('data-joined');
       this.removeAttribute('data-arrived');
       this.#unshine();
       this.#out = false;
       this.#held = null;
+      this.#rest = null;
+      this.#retarget = null;
+      this.#homeAt = null;
+      this.#tintAt = -1;
+      this.#dest = null;
       this.#from = this.#to = this.#anchor = this.#region = null;
       this.#unclipTrigger();
-      this.#glass?.setSample(this.#sample);
+      if (this.#sample) this.#glass?.setSample(this.#sample);
       this.#liveCarrier()?.setCarried?.(null);
       this.#anchorEl = null;
       this.#premeasureSoon();
@@ -840,26 +909,64 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       this.#settle();
     }
 
-    #paint(): void {
+    /**
+     * Closing, the trigger takes its body back the frame the drop is the size of its capsule, and the drop leaves: the
+     * glyph is then drawn on the trigger itself, out of focus as it was under the glass, and comes into focus together
+     * with the focus ring, while the drop's slow tail still runs. It all ends before the motion does.
+     */
+    #closing(box: RoundedRect, final: boolean, outgoing: number): { ink: number; ring: number; back: boolean } {
+      const home = this.#from;
+      if (this.#state.open || !home) return { ink: outgoing, ring: 1, back: false };
+      if (this.#homeAt === null && !final && Math.max(box.width - home.width, box.height - home.height) > 0.5) return { ink: outgoing, ring: 0, back: false };
+      this.#homeAt ??= performance.now();
+      const k = final ? 1 : Math.min((performance.now() - this.#homeAt) / RING_MS, 1);
+      return { ink: HAND_INK + (1 - HAND_INK) * k, ring: k, back: true };
+    }
+
+    /** The box the menu is drawn at: its place, or the way from the size it was drawn at to a size found stale while it is open. */
+    #toNow(): RoundedRect {
+      const to = this.#to!;
+      const r = this.#retarget;
+      if (!r) return to;
+      const k = smoothstep(0, 1, (performance.now() - r.at) / RETARGET_MS);
+      if (k >= 1) {
+        this.#retarget = null;
+        return to;
+      }
+      const mix = (a: number, b: number) => a + (b - a) * k;
+      return { x: mix(r.from.x, to.x), y: mix(r.from.y, to.y), width: mix(r.from.width, to.width), height: mix(r.from.height, to.height), radius: mix(r.from.radius, to.radius) };
+    }
+
+    /** `final` is the motion's last frame: the lens gets what it rests on and lands in this frame. */
+    #paint(final = false): void {
       const list = this.#list;
       if (!list || !this.#out || !this.#from || !this.#to || !this.#anchor) return;
       const phase = growthPhase(this.#growth);
-      const f = menuSurfaceFrame(this.#from, this.#to, this.#anchor, phase, this.#region ?? undefined, { outline: true });
+      const to = this.#toNow();
+      const f = menuSurfaceFrame(this.#from, to, this.#anchor, phase, this.#region ?? undefined, { outline: true });
       const settled = phase.shrink === 1 && phase.grow === 1 && (phase.focus ?? 1) === 1 && (phase.rise ?? 1) === 1;
       // The ink as drawn decides it, so what shows in focus is what can be chosen.
-      const inkIn = Math.round(f.ink.incoming * 1000) / 1000;
+      const inkIn = f.ink.incoming >= CONTENT_SHARP ? 1 : Math.round(f.ink.incoming * 1000) / 1000;
       // A key may choose once the content is drawn; a pointer waits until it is in focus and the surface past its overshoot.
       if (this.#state.open && inkIn >= CONTENT_DRAWN) this.#inSince ??= performance.now();
       if (this.#state.open && inkIn >= 1 && this.#growth.grow.v <= 0) this.#readySince ??= performance.now();
       this.toggleAttribute('data-arrived', this.#readySince !== null);
-      this.setAttribute('data-phase', settled ? 'open' : 'moving');
-      this.#setBox(f.box);
+      // The content is laid out in the box, not placed on a transform, from the frame it can no longer be told apart: switching in the last frame would change how its text is drawn after the motion.
+      const near = this.#state.open && inkIn === 1 && [f.box.x - to.x, f.box.y - to.y, f.box.width - to.width, f.box.height - to.height].every((d) => Math.abs(d) <= LENS_SNAP_PX);
+      this.setAttribute('data-phase', settled || near ? 'open' : 'moving');
+      // Over the last pixel or two the box is where it lands: the text laid out in it would otherwise move by fractions of a pixel, which is seen as its edges changing.
+      const box = near ? to : f.box;
+      const content = near ? { x: 0, y: 0 } : f.content;
+      this.toggleAttribute('data-sharp', inkIn === 1);
+      this.#setBox(box);
       const s = list.style;
       // The content rides inside the lens, magnified about the box's centre while it is out of focus.
       const scale = 1 + CONTENT_MAGNIFY * (1 - inkIn);
+      // Once the content is in focus it sits on whole pixels, where the open menu lays it out: the tail of the spring moves it by fractions of one, which is seen as the text's edges changing.
+      const place = (v: number) => (inkIn === 1 ? Math.round(v) : v);
       const { padding: pad, row } = menuSize(this.#size());
-      s.setProperty('--vk-tx', `${(f.box.width / 2 + scale * (f.content.x + pad - f.box.width / 2)).toFixed(2)}px`);
-      s.setProperty('--vk-ty', `${(f.box.height / 2 + scale * (f.content.y + pad - f.box.height / 2) - CONTENT_RISE * row * (1 - inkIn)).toFixed(2)}px`);
+      s.setProperty('--vk-tx', `${place(box.width / 2 + scale * (content.x + pad - box.width / 2)).toFixed(2)}px`);
+      s.setProperty('--vk-ty', `${place(box.height / 2 + scale * (content.y + pad - box.height / 2) - CONTENT_RISE * row * (1 - inkIn)).toFixed(2)}px`);
       s.setProperty('--vk-s', scale.toFixed(3));
       this.toggleAttribute('data-joined', f.outline !== undefined);
       const clip = f.outline ? `polygon(${f.outline.map((p) => `${p.x.toFixed(1)}px ${p.y.toFixed(1)}px`).join(',')})` : null;
@@ -869,41 +976,117 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       s.setProperty('--vk-lit', f.lit.toFixed(3));
       const halo = Math.min(f.activity + HALO_LIT * f.lit, 1) * (1 - f.capsule);
       s.setProperty('--vk-halo', halo.toFixed(3));
-      this.#shine(f.box, clip, halo);
-      const body = menuBody(VIREGLASS_CONTROL_MATERIAL, f.activity, this.#presentation?.frost ?? false);
+      this.#shine(box, clip, halo);
+      const drop = menuBody(VIREGLASS_CONTROL_MATERIAL, f.activity, this.#presentation?.frost ?? false);
+      // The drop is the trigger's body while it is its capsule, so the handover, going out and coming back, finds the same body.
+      const rest = this.#rest?.body;
+      const k = Math.min(Math.max(f.capsule, 0), 1);
+      const body = rest ? { alpha: drop.alpha + (rest.alpha - drop.alpha) * k, white: drop.white + (rest.white - drop.white) * k, lift: drop.lift + (rest.lift - drop.lift) * k } : drop;
       s.setProperty('--vk-body-alpha', body.alpha.toFixed(3));
       s.setProperty('--vk-body-white', body.white.toFixed(3));
       s.setProperty('--vk-body-lift', body.lift.toFixed(3));
-      this.#liveCarrier()?.setCarried?.(f.ink.outgoing);
-      this.#clipTrigger(f.box);
-      this.#pushGlass(f.box, f.morph, f.activity, f.capsule, !settled && this.#forced() === null);
+      const closing = this.#closing(box, final, f.ink.outgoing);
+      list.style.visibility = closing.back ? 'hidden' : '';
+      this.#liveCarrier()?.setCarried?.(closing.ink, closing.ring, closing.back);
+      if (closing.back) this.#unclipTrigger();
+      else this.#clipTrigger(box);
+      // The lens lands once the picture can no longer be told from where it ends, and the tail of the springs runs on with nothing left to change in it.
+      const landed = near && f.activity < ACTIVITY_AT_REST && this.#retarget === null;
+      this.#tint(this.#state.open || !final ? f.capsule : 1);
+      const moving = !final && !landed && !closing.back && (!settled || !this.#state.open || this.#retarget !== null) && this.#forced() === null;
+      this.#pushGlass(box, f.morph, f.activity, f.capsule, moving, !this.#state.open && (final || closing.back), this.#state.open && f.capsule >= 0.95);
     }
 
     /** Hands the lens only what changed: a new morph or material rebuilds its filter, a moved box needs nothing. */
-    #pushGlass(box: RoundedRect, morph: VireGlassMorph | undefined, activity: number, capsule: number, moving: boolean): void {
+    #pushGlass(box: RoundedRect, morph: VireGlassMorph | undefined, activity: number, capsule: number, moving: boolean, closed: boolean, capsule1 = false): void {
       const glass = this.#glass;
       if (!glass) return;
-      // Whole pixels, so a repeated open finds its displacement maps in the core's cache.
-      const round = Math.round;
-      const step = round(Math.min(Math.max(activity, 0), 1) * MATERIAL_STEPS) / MATERIAL_STEPS;
-      const geometry = { width: round(box.width), height: round(box.height), cornerRadius: round(box.radius) };
-      const lens = glassMorph(morph, moving);
+      let lens = closed ? this.#closedLens() : this.#lensOf(box, morph, activity, capsule, moving);
+      if (capsule1 && this.#rest) lens = { ...lens, material: this.#rest.material, materialKey: 'rest' };
+      // The tail of the springs moves the box by a pixel or two over the last stretch: the lens is already at the box it is to land on, whose maps are ready, instead of asking for a map for each of those sizes.
+      const dest = this.#dest;
+      if (dest && Math.abs(lens.geometry.width - dest.width) <= LENS_SNAP_PX && Math.abs(lens.geometry.height - dest.height) <= LENS_SNAP_PX) lens = { ...lens, geometry: dest };
       const key = {
-        material: `${step}/${round(capsule * MATERIAL_STEPS)}`,
-        morph: lens ? JSON.stringify(lens) : 'none',
-        geometry: `${geometry.width}x${geometry.height}r${geometry.cornerRadius}`,
+        material: lens.materialKey,
+        morph: lens.morph ? JSON.stringify(lens.morph) : 'none',
+        geometry: `${lens.geometry.width}x${lens.geometry.height}r${lens.geometry.cornerRadius}`,
       };
       moveGlass(glass, moving, () => {
         const last = this.#lastLens;
         if (key.material === last.material && key.morph === last.morph && key.geometry === last.geometry) return;
         const next: GlassFrame = {};
-        if (key.geometry !== last.geometry) next.geometry = geometry;
-        if (key.material !== last.material) next.material = menuMaterial(VIREGLASS_CONTROL_MATERIAL, step, round(capsule * MATERIAL_STEPS) / MATERIAL_STEPS);
+        if (key.geometry !== last.geometry) next.geometry = lens.geometry;
+        if (key.material !== last.material) next.material = lens.material;
         // A morph never sent needs no null to take it away; sent, it costs the lens an interim map.
-        if (key.morph !== last.morph && !(lens === null && last.morph === '')) next.morph = lens;
+        if (key.morph !== last.morph && !(lens.morph === null && last.morph === '')) next.morph = lens.morph;
         this.#lastLens = key;
         glass.frame(next);
       });
+    }
+
+    #lensOf(box: RoundedRect, morph: VireGlassMorph | undefined, activity: number, capsule: number, moving: boolean): Lens {
+      // Whole pixels, so a repeated open finds its displacement maps in the core's cache.
+      const round = Math.round;
+      const step = activity < ACTIVITY_AT_REST ? 0 : round(Math.min(activity, 1) * MATERIAL_STEPS) / MATERIAL_STEPS;
+      const cap = round(capsule * MATERIAL_STEPS);
+      return {
+        geometry: { width: round(box.width), height: round(box.height), cornerRadius: round(box.radius) },
+        morph: glassMorph(morph, moving),
+        material: menuMaterial(VIREGLASS_CONTROL_MATERIAL, step, cap / MATERIAL_STEPS),
+        materialKey: `${step}/${cap}`,
+      };
+    }
+
+    /** The lens's colours follow the motion: the trigger's backdrop while the drop is its capsule, the menu's while it is the menu, and between them as far as it has become either. */
+    #tint(capsule: number): void {
+      const glass = this.#glass;
+      const rest = this.#rest?.sample;
+      const held = this.#held;
+      if (!glass || !rest || !held || this.#sample) return;
+      const k = Math.round(Math.min(Math.max(capsule, 0), 1) * 20) / 20;
+      if (k === this.#tintAt) return;
+      this.#tintAt = k;
+      const mix = (key: keyof BackdropSample) => held[key] + (rest[key] - held[key]) * k;
+      glass.setSample(k === 0 ? held : k === 1 ? rest : { luma: mix('luma'), busy: mix('busy'), lo: mix('lo'), hi: mix('hi'), r: mix('r'), g: mix('g'), b: mix('b') });
+    }
+
+    /** What the drop ends as when it closes: the trigger's own lens, or the growth's closed frame when the trigger has none. */
+    #closedLens(): Lens & { sample: BackdropSample | null } {
+      const rest = this.#rest;
+      if (rest) return { geometry: rest.geometry, morph: null, material: rest.material, materialKey: 'rest', sample: rest.sample };
+      const f = menuSurfaceFrame(this.#from!, this.#to!, this.#anchor!, growthPhase(heldGrowthState(0)), this.#region ?? undefined, { outline: true });
+      return { ...this.#lensOf(f.box, f.morph, f.activity, f.capsule, false), sample: this.#held ?? this.#sample };
+    }
+
+    /** Tells the lens where the motion that is starting ends, so its maps and colours are ready by the last frame. */
+    #prepareDestination(motion = false): void {
+      const glass = this.#glass;
+      if (!glass || !this.#out || !this.#from || !this.#to || !this.#anchor) return;
+      // The colours start easing to the destination's backdrop only for a lens that is moving.
+      if (motion) glass.setInterim(true);
+      if (this.#state.open) {
+        const f = menuSurfaceFrame(this.#from, this.#to, this.#anchor, growthPhase(heldGrowthState(1)), this.#region ?? undefined, { outline: true });
+        const l = this.#lensOf(f.box, f.morph, f.activity, f.capsule, false);
+        const sample = this.#held ?? this.#sample;
+        this.#dest = l.geometry;
+        glass.prepare({ geometry: l.geometry, morph: l.morph, material: l.material, ...(sample ? { sample } : {}) });
+      } else {
+        const l = this.#closedLens();
+        this.#dest = l.geometry;
+        glass.prepare({ geometry: l.geometry, morph: null, material: l.material, ...(l.sample ? { sample: l.sample } : {}) });
+      }
+    }
+
+    /** While the page is idle: the open box with its maps and the backdrop behind it, so the first open lands on a pair that is already built. */
+    #prepareIdle(): void {
+      const glass = this.#glass;
+      const natural = this.#natural;
+      if (!glass || !natural || this.#out || !this.#list?.isConnected) return;
+      const { trigger, region, placement } = this.#layout(natural);
+      const to = wholePixels(placement.rect, menuSize(this.#size()).radius);
+      const f = menuSurfaceFrame(trigger, to, placement.anchor, growthPhase(heldGrowthState(1)), region, { outline: true });
+      const l = this.#lensOf(f.box, f.morph, f.activity, f.capsule, false);
+      glass.prepare({ geometry: l.geometry, morph: l.morph, material: l.material, rect: { left: f.box.x, top: f.box.y, width: f.box.width, height: f.box.height } });
     }
 
     #forced(): string | null {
@@ -979,7 +1162,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       if (changed) this.#reattachGlass(mode);
       this.#natural = null;
       this.#premeasured = false;
-      if (this.#out) this.#place();
+      if (this.#out) this.#replace();
       else this.#premeasureSoon();
     }
 
@@ -1031,7 +1214,10 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
           if (!session) return;
           this.#glass = session;
           this.#lastLens = { material: '', morph: '', geometry: '' };
-          if (this.#out) this.#holdSample();
+          if (this.#out) {
+            this.#holdSample();
+            this.#prepareDestination();
+          } else this.#prepareIdle();
           this.dispatchEvent(new CustomEvent('vire-glass-ready'));
         })
         .catch(() => {

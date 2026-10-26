@@ -14,6 +14,8 @@ export type LabLens = {
   morph: GlassMorph | null | undefined;
   appear: number | undefined;
   options: AttachGlassOptions | undefined;
+  /** What each `land()` that reached the core answered. */
+  lands: ('exact' | 'blend')[];
 };
 
 declare global {
@@ -41,7 +43,7 @@ declare global {
 export function attachGlass(el: HTMLElement, options?: AttachGlassOptions): GlassHandle {
   window.__labAttached = (window.__labAttached ?? 0) + 1;
   const handle = attachReal(el, options);
-  const lens: LabLens = { el, alive: true, entered: false, interim: null, morph: undefined, appear: undefined, options };
+  const lens: LabLens = { el, alive: true, entered: false, interim: null, morph: undefined, appear: undefined, options, lands: [] };
   (window.__labGlass ??= []).push(lens);
   window.__labGlassMark ??= () => {
     for (const l of window.__labGlass ?? []) l.entered = false;
@@ -61,7 +63,9 @@ export function attachGlass(el: HTMLElement, options?: AttachGlassOptions): Glas
   handle.land = () => {
     if (window.__labNoLand && el.matches(window.__labNoLand)) return 'exact';
     lens.interim = false;
-    return realLand();
+    const how = realLand();
+    lens.lands.push(how);
+    return how;
   };
   const realMorph = handle.setMorph.bind(handle);
   handle.setMorph = (morph) => {

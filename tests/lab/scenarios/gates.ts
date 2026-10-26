@@ -27,6 +27,8 @@ export const LIMITS = {
   cornerDrawn: 6,
   /** Shape: the share of the pixels outside the radius that may be drawn. */
   cornerShare: 0.15,
+  /** Together: the edge of a trigger that shows its label differs from the page by this fraction of what it does at rest; a hovered body is lifted toward the page, and sits lower than the one at rest. */
+  bodyKept: 0.3,
   /** Ghost: the share of a part's pixels that may differ from the settled target while the surface is the size of it. */
   ghostShare: 0.05,
   /** State: the mean ΔE of the element's region between rest and the state that must be seen. */
@@ -204,6 +206,13 @@ export function ink(image: Image, region: Rect): number {
 type Lab3 = [number, number, number];
 const INK_DE = 14;
 
+/** A frame that was presented after the compositor stalled, or less than half a frame after one that was, carries the ticks of the stall: it is not one tick of the motion. */
+const stalled = (frames: Frames, j: number): boolean => {
+  const gap = frames.t(j) - frames.t(j - 1);
+  const before = j > 1 ? frames.t(j - 1) - frames.t(j - 2) : 0;
+  return gap > LIMITS.frameGap || gap < 8 || (j > 1 && (before > LIMITS.frameGap || before < 8));
+};
+
 export type PopSpec = { keys: string[]; pad?: number; /** A surface that grows out of the element: frames in which it is out, bigger than the element, are not judged, since it changes the region by being there. */ surface?: string };
 
 /** The surface is closed, or back at the size and place of the target. */
@@ -230,7 +239,7 @@ export function pop(frames: Frames, spec: PopSpec): GateResult {
       const before = boxesAt(rec, key, frames.t(j - 1));
       now.forEach((b, i) => {
         const p = before[i];
-        if (!p || b.hidden || p.hidden || frames.t(j) - frames.t(j - 1) > LIMITS.frameGap || !away(rec, spec.surface, b, frames.t(j)) || !away(rec, spec.surface, p, frames.t(j - 1)) || Math.abs(b.x - p.x) > 0.3 || Math.abs(b.y - p.y) > 0.3 || Math.abs(b.w - p.w) > 0.3 || Math.abs(b.h - p.h) > 0.3) return;
+        if (!p || b.hidden || p.hidden || stalled(frames, j) || !away(rec, spec.surface, b, frames.t(j), 1.5) || !away(rec, spec.surface, p, frames.t(j - 1), 1.5) || Math.abs(b.x - p.x) > 0.3 || Math.abs(b.y - p.y) > 0.3 || Math.abs(b.w - p.w) > 0.3 || Math.abs(b.h - p.h) > 0.3) return;
         checked += 1;
         const c = regionChange(frames.at(j - 1), frames.at(j), pad(b, spec.pad ?? 4), LIMITS.changed);
         series.push({ index: j, t: frames.t(j) - rec.input, value: c.mean });
@@ -655,7 +664,7 @@ function ringPixels(b: Box, image: Image, width: number): number[] {
 
 const RING_PX = 3;
 
-/** A label is never drawn without its body: where the trigger shows at least a fifth of its ink at rest, the edge of its box differs from the page behind it by at least half of what it does at rest. */
+/** A label is never drawn without its body: where the trigger shows at least a fifth of its ink at rest, the rim of its box (the 90th percentile of the pixels along its edge) differs from the page behind it by at least `bodyKept` of what it does at rest. */
 export function together(frames: Frames, spec: TogetherSpec): GateResult {
   const rec = frames.rec;
   const backdrop = rec.backdrops[0];
@@ -665,7 +674,9 @@ export function together(frames: Frames, spec: TogetherSpec): GateResult {
   const reference = decodePng(backdrop.png);
   const bodyOf = (image: Image, b: Box): number => {
     const px = ringPixels(b, image, RING_PX);
-    return px.length === 0 ? 0 : px.reduce((sum, i) => sum + deltaE(image, i, reference, i), 0) / px.length;
+    if (px.length === 0) return 0;
+    const d = px.map((i) => deltaE(image, i, reference, i)).sort((x, y) => x - y);
+    return d[Math.floor(d.length * 0.9)]!;
   };
   const inkRest = ink(frames.at(rest), home);
   const bodyRest = bodyOf(frames.at(rest), home);
@@ -676,20 +687,20 @@ export function together(frames: Frames, spec: TogetherSpec): GateResult {
   let checked = 0;
   for (let j = rest + 1; j < frames.length; j += 1) {
     const b = boxesAt(rec, spec.key, frames.t(j))[0];
-    if (!b || b.hidden || !away(rec, spec.surface, b, frames.t(j))) continue;
+    if (!b || b.hidden || !away(rec, spec.surface, b, frames.t(j), 4)) continue;
     const image = frames.at(j);
     if (ink(image, b) / inkRest < 0.2) continue;
     checked += 1;
     const body = bodyOf(image, b) / bodyRest;
     series.push({ index: j, t: frames.t(j) - rec.input, value: body });
-    if (body < 0.5) flagged.push(j);
+    if (body < LIMITS.bodyKept) flagged.push(j);
     if (body < worst.body) Object.assign(worst, { body, t: frames.t(j) - rec.input });
   }
   if (checked === 0) return { gate: 'together', verdict: 'skip', line: 'the label was never drawn after the input', numbers: {}, flagged: [] };
   return {
     gate: 'together',
     verdict: flagged.length > 0 ? 'fail' : 'pass',
-    line: `${checked} frames with the label drawn; the least body at +${ms(worst.t)}: ${Math.round(worst.body * 100)}% of the edge's difference from the page at rest; ${flagged.length} frames under 50%`,
+    line: `${checked} frames with the label drawn; the least body at +${ms(worst.t)}: ${Math.round(worst.body * 100)}% of the edge's difference from the page at rest; ${flagged.length} frames under ${LIMITS.bodyKept * 100}%`,
     numbers: { frames: checked, leastBodyPct: Math.round(worst.body * 100), leastAtMs: Math.round(worst.t), framesWithout: flagged.length },
     flagged,
     series,

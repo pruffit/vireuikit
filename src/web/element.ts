@@ -134,6 +134,8 @@ export function createControlElementClass(
         this.style.setProperty('--vk-ring', Math.min(Math.max(ring, 0), 1).toFixed(3));
       }
       if (handedOver && this.#glassMode() !== 'touch') this.#glass?.setAppear(bodyOut ? 0 : 1);
+      // While the menu carries the body the pointer's comings and goings are not the control's: it is as hovered as it was when the menu came out, and finds out where the pointer is when it is handed back.
+      if (handedOver && !bodyOut && this.#state.hovered && !this.matches(':hover')) this.#dispatch({ type: 'leave' });
     }
 
     restLens(probe = true): RestLens | null {
@@ -309,11 +311,11 @@ export function createControlElementClass(
           if (mine(e)) this.#dispatch({ type: 'cancel' });
         });
         on<PointerEvent>(target, 'pointerenter', (e) => {
-          if (mine(e)) this.#dispatch({ type: 'enter' }, hoversWith(e.pointerType) ? HOVER : NO_HOVER);
+          if (mine(e) && !this.#bodyOut) this.#dispatch({ type: 'enter' }, hoversWith(e.pointerType) ? HOVER : NO_HOVER);
         });
         on<PointerEvent>(target, 'pointerleave', (e) => {
           // A captured pointer never leaves; the move handler decides by position instead.
-          if (mine(e) && !control.hasPointerCapture?.(e.pointerId)) this.#dispatch({ type: 'leave' });
+          if (mine(e) && !this.#bodyOut && !control.hasPointerCapture?.(e.pointerId)) this.#dispatch({ type: 'leave' });
         });
       };
       bind(control, true);
