@@ -57,6 +57,12 @@ export function attachGlass(el: HTMLElement, options?: AttachGlassOptions): Glas
     if (on) lens.entered = true;
     realInterim?.(on);
   };
+  const realLand = handle.land.bind(handle);
+  handle.land = () => {
+    if (window.__labNoLand && el.matches(window.__labNoLand)) return 'exact';
+    lens.interim = false;
+    return realLand();
+  };
   const realMorph = handle.setMorph.bind(handle);
   handle.setMorph = (morph) => {
     lens.morph = morph;

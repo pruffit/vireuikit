@@ -48,7 +48,7 @@ import {
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { cancelMotionFrame, deepActive, dropEmptyStyle, requestMotionFrame, rootsOf, whenIdle } from './dom';
 import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, isEditable, shellOf, watchAdaptiveContext, windowRect } from './environment';
-import { attachControlGlass, ensureGlass, glassLoaded, glassMorph, holdGlass, landGlass, moveGlass, probeRect, type GlassFrame, type GlassSession } from './glass';
+import { attachControlGlass, ensureGlass, glassLoaded, glassMorph, holdGlass, moveGlass, probeRect, type GlassFrame, type GlassSession } from './glass';
 import { createScrollEdge, type ScrollEdge } from './scroll-edge';
 import { ensureStyles } from './styles';
 
@@ -1112,7 +1112,7 @@ export function createSurfaceElementClass(tag: 'popover' | 'sheet', options: Sur
 
     #settle(): void {
       const surface = this.#surface!;
-      if (this.#glass) landGlass(this.#glass);
+      this.#glass?.land();
       const back = this.#focusTarget();
       this.#hiding = true;
       try {

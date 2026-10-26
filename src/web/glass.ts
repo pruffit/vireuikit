@@ -1,5 +1,5 @@
 import type { BackdropSample, VireGlassAccessibility, VireGlassGeometry, VireGlassMaterial } from 'vireglass';
-import type { AttachGlassOptions, GlassHandle, GlassMorph, ScrollEdgeHandle, ScrollEdgeOptions } from 'vireglass/dom';
+import type { AttachGlassOptions, GlassHandle, GlassMorph, PrepareTarget, ScrollEdgeHandle, ScrollEdgeOptions } from 'vireglass/dom';
 import type { Rect } from '../kit/geometry';
 
 export type GlassParams = {
@@ -28,8 +28,14 @@ export type GlassSession = {
   setAppear(t: number): void;
   setMorph(morph: GlassMorph | null): void;
   setSample(sample: BackdropSample | null): void;
-  /** While on, the lens keeps its probe and baked maps through changes of shape; turning it off bakes once. */
+  /** While on, the lens keeps its probe and baked maps through changes of shape; turning it off lands it. */
   setInterim(on: boolean): void;
+  /** Announces where the motion ends, so the maps and colours of that end are ready by its last frame. */
+  prepare(target: PrepareTarget | null): void;
+  /** Lands a lens that is in interim, in this task; does nothing for one that is not. */
+  land(): void;
+  /** Resolves when the prepared destination is decoded, or has failed, or nothing is prepared. */
+  whenPrepared(): Promise<void>;
   /** Tells the core a held gesture is still going: restarts its 2 s safety net if this lens is in interim, and does nothing otherwise. */
   beat(): void;
   /** What the probe reads behind the element where it is now. */
@@ -60,38 +66,14 @@ export function glassMorph(
   };
 }
 
-const LAND_AFTER_MS = 120;
-const LAND_APART_MS = 50;
-const waiting = new Set<GlassSession>();
-let landTimer = 0;
-
-function land(): void {
-  landTimer = 0;
-  const next = waiting.values().next();
-  if (next.done) return;
-  waiting.delete(next.value);
-  next.value.setInterim(false);
-  if (waiting.size > 0) landTimer = window.setTimeout(land, LAND_APART_MS);
-}
-
-/** Ends a lens's interim once the page has been still for a moment, one lens at a time: a full bake is several milliseconds, and none of them belongs in the last frame of a motion. */
-export function landGlass(session: GlassSession): void {
-  waiting.add(session);
-  if (landTimer === 0) landTimer = window.setTimeout(land, LAND_AFTER_MS);
-}
-
-/**
- * Runs the changes to a lens inside interim while its element moves. What lands the element is applied before interim
- * ends, so landing is one bake and not a bake for the last frame and another for interim ending.
- */
+/** Runs the changes to a lens inside interim while its element moves. The last frame applies what lands the element and lands the lens in the same task. */
 export function moveGlass(session: GlassSession, moving: boolean, apply: () => void): void {
   if (moving) {
-    waiting.delete(session);
     session.setInterim(true);
     apply();
   } else {
     apply();
-    landGlass(session);
+    session.land();
   }
 }
 
@@ -195,14 +177,18 @@ function attachLoaded(el: HTMLElement, params: GlassParams): GlassSession {
       interim = on;
       handle.setInterim(on);
     },
+    prepare: (target) => handle.prepare(target),
+    land() {
+      if (!interim) return;
+      interim = false;
+      handle.land();
+    },
+    whenPrepared: () => handle.whenPrepared(),
     beat() {
       if (interim) handle.setInterim(true);
     },
     probe: () => probeBackdrop(el),
-    destroy: () => {
-      waiting.delete(session);
-      handle.destroy();
-    },
+    destroy: () => handle.destroy(),
   };
   return session;
 }

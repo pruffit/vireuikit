@@ -41,7 +41,7 @@ import {
 import { effectiveA11y, watchA11yOverride, watchSystemA11y } from './a11y';
 import { SHEET_INSET_EVENT, SHEET_INSET_PROPERTY, effectiveInput, isEditable, shellOf, watchAdaptiveContext } from './environment';
 import { cancelMotionFrame, deepActive, dropEmptyStyle, requestMotionFrame } from './dom';
-import { attachControlGlass, holdGlass, landGlass, moveGlass, type GlassSession } from './glass';
+import { attachControlGlass, holdGlass, moveGlass, type GlassSession } from './glass';
 import { createScrollEdge, type ScrollEdge } from './scroll-edge';
 import { ensureStyles } from './styles';
 
@@ -1238,7 +1238,7 @@ export function createNavElementClass(options: NavElementOptions = {}) {
       const shownLens = lens !== null && (lens.dragging || round(clamp01(lens.lift) * 100) / 100 > 0);
       this.toggleAttribute('data-lens', shownLens);
       if (!lens || !shownLens) {
-        if (!moving && slot.session) landGlass(slot.session);
+        if (!moving) slot.session?.land();
         this.#markUnder([], null);
         return;
       }
