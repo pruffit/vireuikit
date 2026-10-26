@@ -51,6 +51,8 @@ const CONTENT_SHARP = 0.99;
 const CONTENT_DRAWN = 0.34;
 // How much of the light of the lit body goes to the halo, besides the drop's own.
 const HALO_LIT = 0.15;
+// The reference's drop blooms less past its edge at the height of the growth than a full halo does.
+const HALO_SHARE = 0.85;
 // The content comes in this many rows high and slides down into place as it comes into focus.
 const CONTENT_RISE = 2.2;
 const VIEWPORT_MARGIN = 8;
@@ -1014,7 +1016,7 @@ export function createMenuElementClass(options: MenuElementOptions = {}) {
       else s.removeProperty('--vk-outline');
       s.setProperty('--vk-ink-in', inkIn.toFixed(3));
       s.setProperty('--vk-lit', f.lit.toFixed(3));
-      const halo = Math.min(f.activity + HALO_LIT * f.lit, 1) * (1 - f.capsule);
+      const halo = Math.min(f.activity + HALO_LIT * f.lit, 1) * (1 - f.capsule) * HALO_SHARE;
       s.setProperty('--vk-halo', halo.toFixed(3));
       this.#shine(box, clip, halo);
       const drop = menuBody(VIREGLASS_CONTROL_MATERIAL, f.activity, this.#presentation?.frost ?? false);

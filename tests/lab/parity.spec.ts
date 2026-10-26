@@ -40,7 +40,6 @@ const KNOWN: { instant: string; measure: Measure; reason: string }[] = [
   { instant: 'o+0.051', measure: 'iou', reason: 'the reference capsule is 14 dp wider (a critically damped spring contracts 0.01 s early) and has a bud; the union draws neither' },
   { instant: 'c+0.084', measure: 'iou', reason: 'the reference drop has a tail toward the capsule; the union outline draws a round body' },
   { instant: 'c+0.084', measure: 'taper', reason: 'the reference drop is wider at the top than at the bottom (its tail), ours is a rounded pear' },
-  { instant: 'c+0.084', measure: 'rim', reason: 'ours bleeds 5.6 px of light past its edge against the reference at 3.2: the halo does not know the direction of travel' },
 ];
 // A reference frame fed in 0.1 s late or early is told from a match at 9 of the 9 moving instants; the gate holds 8.
 const CANARY_CAUGHT = 8;
