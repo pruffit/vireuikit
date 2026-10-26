@@ -92,7 +92,7 @@ attribute, a development aid of the elements that the lab and the snapshots use.
 | `npm run check:lab:visual` | the screenshot set: atom × state × backdrop × glass on/off, the navigation's four forms and the lens frozen mid-morph, the scroll edge's dissolve, dimming and flat band, and the adaptive stage at six presets, against committed baselines in `tests/lab/__screenshots__/<platform>/`. Local only: the baselines are Windows renders and CI does not run it. `npm run check:lab:visual:update` rewrites them |
 | `npm run check:lab:reference` | local only, needs the third-party frames in `VIREUIKIT_REFERENCE_DIR` (never committed): the menu parity gate on the `view=menu-reference` stage, ours against the reference at ten instants of the growth and the retraction (silhouette overlap, lightness, edge energy of the content, centroid; acceptance N29). Skips with a message without the frames |
 | `npm run check:lab:perf` | local only, a headed Chromium with the GPU: the frames of every transition of `tests/lab/transitions.ts` with glass on and off beside an idle control, and the headroom of a frame (see "The frame gate") |
-| `npm run check:lab:scenarios` | local only, headless: every presented frame of what a user does with the menu, popover, sheet, toolbar, navigation and the atoms (open, close, drag, tap, hover, press, resize) through 1.5 s after the last motion, with gates on those frames (seam, vanish, shape, ghost, state) and canaries that must fail them (see "Scenario recordings") |
+| `npm run check:lab:scenarios` | local only, headless in two projects (`gpu` on the machine's adapter, which judges, and `swiftshader`, the control): every presented frame of what a user does with the menu, popover, sheet, toolbar, navigation and the atoms (open, close, drag, click, hover, press, resize, scroll), at its own size and as the owner opens it, through 1.5 s after the last motion, with gates on those frames (seam, pop, hole, converge, vanish, shape, state, highlight, ghost, scrollbar) and canaries that must fail them (see "Scenario recordings") |
 | existing | `check:english`, `check:package`, `check:readme`, `typecheck` (the model under `src/kit` is also checked with no DOM lib), `build` |
 
 Visual baselines change only on purpose, in the same commit as the code that changes the look.
@@ -171,64 +171,130 @@ The runs behind these choices, on a Ryzen 5 3500U with Vega 8, are in issue #39.
 sees, from just before the input to 1.5 s after the last kit motion ends. The frame gate above times frames and the
 visual baselines hold forced still states; neither looks at the picture during and after an interaction, which is
 where the acceptance of 25.10 (issue #44) found a pop after every motion, hover that cannot be seen, items that vanish
-in a drag and shapes that are square for a second. It is local (`npm run check:lab:scenarios`), headless, and runs
-its own lab on port 5180 (`VIREUIKIT_LAB_PORT`) built the way the frame gate's is.
+in a drag and shapes that are square for a second. It is local (`npm run check:lab:scenarios`), and runs its own lab on
+port 5180 (`VIREUIKIT_LAB_PORT`) built the way the frame gate's is.
+
+**Two projects, both headless.** Nothing opens on the desktop and nothing takes focus.
+
+- `gpu` renders on the machine's adapter: `--use-angle=d3d11 --enable-gpu --ignore-gpu-blocklist
+  --enable-gpu-rasterization`. Before its first test the run reads the GPU process (`SystemInfo.getInfo`) and fails if
+  the adapter is a software one; the evidence is written to `lab-scenarios/gpu/adapter.txt`. On the Ryzen 5 3500U
+  it reads `ANGLE (AMD, AMD Radeon(TM) Vega 8 Graphics (0x000015D8) Direct3D11 vs_5_0 ps_5_0, D3D11-31.0.21925.1001)` with
+  `gpu_compositing: enabled`. This project judges.
+- `swiftshader` is the software render (`Vulkan 1.3.0 (SwiftShader Device)`, `gpu_compositing: disabled_software`): the
+  same pixels on every run, the control. It plays the cases at their own size only.
+
+The GPU project plays every case twice: at its own size (the 450 × 780 window of the case), and *as the owner opens it*
+(`@owner`): a 1920 × 960 viewport at DPR 1, the lab with its chrome on and no size parameter (`/?view=menu`, `nav`,
+`sheet`, `toolbar`, `adaptive`; the `?view=sandbox` for the atoms), which is a maximised Chrome window on a 1920 × 1080
+screen. Playwright's headless mode passes `--hide-scrollbars`; the recorder removes it, since the owner's browser shows them.
+
+A GPU process compiles shaders in its first seconds and stalls frames while it does; one throw-away page with a filter
+and a moving backdrop pays that before the first recording (`warmUp`). On an idle machine the GPU then delivers a frame
+every 16 ms (a page changing on every frame gave 180 of 180 frames over 3 s at 1920 × 960, PNG, and the same on
+SwiftShader); on a machine in use some frames are dropped, and uneven gaps are printed in the sheet's header. The gates
+judge pixels, not cadence, and the one that looks at the frame before a motion's last tick compares it only when that
+frame is a neighbour (at most 26 ms before).
 
 **Capture.** `Page.startScreencast` as lossless PNG, every frame acknowledged at once. A frame comes with the
 compositor's timestamp, which is on the page's clock (`performance.timeOrigin + now()`; the frame of a change lands 2
 to 4 ms after it), so frames, inputs and motion edges share one timeline. A frame is delivered for each presented
 frame that changed, so a still page gives none, and that is what "nothing changed" means here. Tracing screenshots
 (`disabled-by-default-devtools.screenshot`) were measured and rejected: they are scaled to 498 px wide and compressed to
-about 6 kB, and they come at roughly every second to third frame. The screencast delivered 90 of 91 frames of a page
-changing on every frame, at 900 × 700 and at 480 × 560, as PNG and as JPEG. The browser is Playwright's headless
-Chromium with its software renderer (SwiftShader): the same pixels on every run, which a gate on pixels needs, where
-a GPU adapter gave frames that varied from run to run while its shaders were compiled. Software rendering makes a
-frame slower than on a GPU, so the recording is a verdict on what is drawn, not on how fast; `check:lab:perf` is the
-verdict on speed.
+about 6 kB, and they come at roughly every second to third frame. Software rendering makes a frame slower than on a GPU,
+and the GPU makes shapes and filters the way the owner sees them; the recording is a verdict on what is drawn, not on how
+fast; `check:lab:perf` is the verdict on speed.
 
 **Motion edges.** `requestMotionFrame` in `src/web/dom.ts` calls `globalThis.__vireMotion('start' | 'end')` when the
 count of pending motion frames goes 0 → 1 and when, at the end of a frame's callback, it is 0 again; without a probe
 that is a property read at two instants per motion. The recorder installs the probe before the page's scripts, merges
 motions less than 50 ms apart, and reads the boxes of the elements a scenario names after each frame's callbacks
-(`MessageChannel`), so a frame can be judged against where its elements were.
+(`MessageChannel`; `samples.json` beside the sheet), so a frame can be judged against where its elements were.
+
+**Regions.** A gate that looks at pixels near an element looks at each element in its own region, not at the union of
+them: the seam gate takes one region per element of every key (its boxes at the motion's start and end, 20 px around)
+and the union, so the pop of a 44 px trigger is not diluted by the 390 × 720 surface beside it. The trigger is tracked
+through its host (`trigHost`), which stays in the layout while the surface has its body, so its place is watched
+through the whole motion. A scenario that resizes a window names the layouts (`layouts`, with a mark in the act), and the
+backdrop the shape gate compares with is read again in each.
 
 **Gates**, each printing its numbers; the limits are `LIMITS` in `gates.ts`. Colour difference is CIE76 ΔE in Lab; a
 pixel "changed" above ΔE 3. A still page between two frames of the same content measures 0.000 (the render is
-deterministic and the PNG lossless), so there is no noise floor to hide a threshold in.
+deterministic and the PNG lossless), so there is no noise floor to hide a threshold in; on the GPU a few pixels at a
+limit move from run to run, so a gate near its limit can flip (see the ledger below).
 
 | Gate | Definition | Limit | Data behind it |
 | --- | --- | --- | --- |
-| seam | in the region of the scenario's elements (their boxes at the motion's start and end, 20 px around), the frame that presents a motion's last tick and every frame after it, up to 1.5 s or the next motion, differ from the frame before by no more than the limit; and the first of them differs from the last by less than the drift limit | share of pixels changed ≤ 0.2 %, mean ΔE ≤ 0.15, drift ≤ 0.4 % | still steps 0.000; a canary that settles 0.000; pops of #44 from mean ΔE 0.08 (0.5 % changed) to 3.8 (35 %) |
-| vanish | every item keeps its ink in every frame: ink is the pixels more than ΔE 14 from the median colour of the item's box, counted against the same count in the frame before the input; the real glyph or the lens's magnified copy both count | ≥ 50 % of the ink at rest | tapping every item: lowest 83 % (touch 92 %); items that vanish in a drag: 0 to 33 % |
-| shape | outside the radius of a capsule (half the short side, whatever the element declares), further than a fifth of the radius from the arc, a frame shows the backdrop (the page with the kit hidden, or the frame before the input for an element on glass of its own); judged in frames outside the kit's motions, where a box is the shape drawn in it | ≤ 15 % of those pixels more than ΔE 6 from the reference | a resting capsule 0.8 % (its shadow); a square behind a capsule 100 % |
-| ghost | while a surface is the size of its target (± 8 px), the part of it that belongs to the open form (the grabber) looks like the settled target in its box | ≤ 5 % of the part's pixels over ΔE 3 | a clean pill 0 %, a strip left on it 100 % |
-| state | the element's box at the mark a scenario sets (hover, press, settled) differs from its box before the input | mean ΔE ≥ 2.3, a just noticeable difference | press 2.8 to 10.6; the lab's toolbar buttons hover at 4.2 to 5.5 and the navigation's at 2.7 to 3.2 |
+| seam | in the region of each element (its boxes at the motion's start and end, 20 px around) and of all of them, the frame that presents a motion's last tick and every frame after it, up to 1.5 s or the next motion, differ from the frame before by no more than the limit; and the first of them differs from the last by less than the drift limit | share of pixels changed ≤ 0.2 %, mean ΔE ≤ 0.15, drift ≤ 0.4 % | still steps 0.000; a canary that settles 0.000; pops of #44 from mean ΔE 0.08 (0.5 % changed) to 3.8 (35 %) |
+| pop | the region of an element whose box is the same in two consecutive frames does not change between them by more than the limit: a body, a label or a grabber swapped in one frame, which the seam gate cannot see because it only looks after the motion's end | mean ΔE ≤ 1.2 | a label that fades 0.2 to 0.3 per frame, one that goes at once 4.1; the sheet's trigger 7.1 to 7.3, the adaptive popover's 13.5 |
+| hole | a trigger that is alone in its place (its surface closed, or back at its size) keeps the ink of its label: at least half of what it has at rest | ≥ 50 % | a label gone for 360 ms: 0 %; the sheet's trigger 37 %, the adaptive popover's 0 % |
+| converge | the distance (mean ΔE over the region) between a frame and the picture the motion settles to falls; after it has fallen it does not rise by more than the limit, which is the picture turning back | ≤ 3 ΔE | a box that runs past its place and returns 17.3; a straight one 0.0; a navigation tap 0.9 to 1.7; a tap while the selection still moves 3.2 to 3.6 (swiftshader 2.8 to 3.5) |
+| vanish | every item keeps its ink in every frame: ink is the pixels more than ΔE 14 from the median colour of the item's box, counted against the same count in the frame before the input; the real glyph or the lens's magnified copy both count | ≥ 50 % of the ink at rest | tapping and clicking every item: lowest 82 to 95 %; items that vanish in a drag: 0 to 33 % |
+| shape | outside the radius of a capsule (half the short side, whatever the element declares), further than a fifth of the radius from the arc, a frame shows the backdrop (the page with the kit hidden, in the layout of that frame, or the frame before the input for an element on glass of its own); judged in frames outside the kit's motions, and with `during` also inside them, in a frame where the element's box is the size it was a frame before | ≤ 15 % of those pixels more than ΔE 6 from the reference | a resting capsule 0.8 % (its shadow); a square behind a capsule 100 %; the toolbar collapsing: 29 % on the GPU (10 frames), 16 % on SwiftShader (1 frame) |
+| state | the element's box at the mark a scenario sets (hover, press, settled) differs from its box before the input in one of three ways: the mean ΔE is at least a just noticeable difference, or, over at least 1 % of the box, the 95th percentile of the changed pixels' ΔE is at least 8 (a thin rim) or their relative luminance step is at least 8 % (a small step on a dark surface) | mean ≥ 2.3, or p95 ΔE ≥ 8, or p95 relative step ≥ 0.08 | see the hover table below |
+| highlight | what a state paints is the element's own shape: the box of the pixels it changes leaves the corners of a capsule on that box alone | ≤ 36 % of those corners | capsule hovers 0 %; a navigation item 0 to 32 %; the toolbar's items 42 to 60 % (a rectangle) |
+| ghost | while a surface is the size of its target (± 8 px), the part of it that belongs to the open form (the grabber) looks like the settled target in its box | ≤ 5 % of the part's pixels over ΔE 3 | a clean pill 0 %, a strip left on it 100 %; the sheet 83 to 89 % |
+| scrollbar | a container that scrolls inside a kit surface hides the platform's bar: `scrollbar-width: none` or a `::-webkit-scrollbar` with no display, and the gutter the bar would take at its edge is not drawn unlike the content beside it | no platform bar | the sheet's list: `scrollbar-width: thin`, a 10 px gutter, 88 % of it drawn; a canary with `none` 0 % |
 
-**Scenarios** are in `scenarios.ts`: the menu opening, closing and opening again; the popover and the popover as a
-bottom sheet; the sheet growing and collapsing into its trigger, dragged between detents and scrolled; the toolbar
-collapsing into its button and back, changing place, hovered button by button; the navigation with its lens dragged
-across every item and back at 600 px/s (moves every 8 ms), every item tapped by mouse and by touch, a tap during a form
-morph, resized bar → rail → sidebar and back, hovered item by item; button and icon button hover and press over the
-lab's light, dark, busy and mid backdrops and across a light/dark border (`backdrop=split&split=<selector>`). A scenario
-that fails a gate on a finding of #44 carries it in `known`: the table prints it as known, the run stays green, and the
-run fails the day the gate passes, so the label is removed with the fix (`VIREUIKIT_SCENARIOS_STRICT=1` fails on known
-findings too; `VIREUIKIT_SCENARIOS_ONLY=<regex>` runs some scenarios; `VIREUIKIT_LAB_REUSE=1` reuses a lab already
-served on the port, for work on the gates only).
+**Hover over every backdrop.** The state metric first read the mean ΔE of the box only; a rim a pixel or two wide barely
+moves a mean over 63 × 42 px, and a step of 4 ΔE is large on a dark surface and small on a light one. The same hover on
+both projects (the numbers are within noise of each other, GPU first, then SwiftShader):
 
-**Output**, in `lab-scenarios/` (git-ignored; `VIREUIKIT_SCENARIOS_OUT`): per scenario `sheet.png` (every presented
-frame in a grid, labelled in ms from the input; the frame that presents a motion's last tick is blue, a frame a gate
-points at is red), `sheet.html` and `frames/` (the frames as PNG), `metrics.json` (frame times and gaps, motions,
-marks, each gate's numbers and per-frame series), and at the end `summary.txt` and `summary.json`; the summary table
-is printed. Look at the sheets before a handoff.
+| backdrop | button mean / p95 ΔE / relative step | icon button | seen |
+| --- | --- | --- | --- |
+| light | 1.12 / 7.9 / 0.04 · 1.13 / 7.7 / 0.04 | 1.14 / 9.3 / 0.04 · 1.15 / 8.6 / 0.04 | the icon button by its rim; the button not |
+| mid | 0.85 / 5.1 / 0.04 · 0.80 / 5.7 / 0.04 | 0.86 / 5.2 / 0.04 · 0.86 / 5.8 / 0.04 | neither |
+| dark | 1.06 / 3.9 / 0.10 · 1.08 / 3.9 / 0.10 | 0.96 / 4.1 / 0.09 · 0.99 / 4.1 / 0.10 | both, by the relative step (not by ΔE) |
+| busy | 1.37 / 10.5 / 0.25 · 1.42 / 11.0 / 0.26 | 1.14 / 8.3 / 0.19 · 1.17 / 8.8 / 0.20 | both |
+| split | 1.56 / 7.3 / 0.21 · 1.54 / 7.8 / 0.31 | 1.50 / 7.8 / 0.21 · 1.58 / 8.1 / 0.31 | both, by the relative step |
 
-**Canaries** (`canaries.ts`, `canaries.spec.ts`, run with the scenarios): a synthetic page per gate that must fail it
-(a label that arrives 400 ms after the motion, an item erased in a drag, a square behind a capsule, a strip left on a
-pill, a hover of ΔE 1.3) and the same page without the defect that must pass it. Run them after any change to a gate.
+Dark does not read weak only on SwiftShader: on both, a hover on dark moves little in ΔE (peak 4.3) and a lot in
+relative terms (about 10 %, against 4 % on light), which is why the owner saw it and the ΔE mean did not. The threshold of
+8 % sits between the 4 % of light and mid and the 10 % of dark; 8 ΔE at the 95th percentile is the 95th percentile of the
+button's rim on busy (10.5) and on light (7.9). The toolbar's buttons hover at a mean of 3.2 to 4.4 and the navigation's
+at 2.3 to 2.8, so both are seen; what the highlight gate adds is that the toolbar's is a 32 × 32 px rectangle.
 
-**What it does not see.** It judges what is drawn in a software render, so a difference that only the GPU makes is
-not in it. A gate reads the boxes of the elements a scenario names, so a defect in an element nobody tracked is not in
-it either. A defect that is a single wrong pixel colour in a region that moves with the motion (a spring's last
-tick) is bounded by the seam's limit, not zero.
+**Scenarios** are in `scenarios.ts`: the menu opening, closing and opening again; the popover, the popover as a bottom
+sheet and both in the adaptive stage; the sheet growing and collapsing into its trigger, dragged between detents and
+scrolled; the toolbar collapsing into its button and back (at the owner's default width it is already collapsed, so that
+variant expands it first), changing place, hovered button by button; the navigation with its lens dragged across every item
+and back at 600 px/s (moves every 8 ms), every item tapped by mouse and by touch, a tap during a form morph, resized bar →
+rail → sidebar and back, hovered item by item, and clicked as a hand clicks: each item at normal speed (a move at 800 px/s,
+150 ms on the item, 90 ms down), different items 250 ms apart, the selected item, a click while the selection is still
+moving, and each item with a slip of 3 to 6 px between down and up; button and icon button hover and press over the lab's
+light, dark, busy and mid backdrops and across a light/dark border (`backdrop=split&split=<selector>`).
+`VIREUIKIT_SCENARIOS_ONLY=<regex>` runs some scenarios; `VIREUIKIT_LAB_REUSE=1` reuses a lab already served on the port,
+for work on the gates only; `--project=gpu` or `--project=swiftshader` runs one project.
+
+**The ledger** (`known.ts`) lists, per scenario and profile (`gpu`, `gpu@owner`, `swiftshader`), the gates that fail on a
+finding of #44. The table marks them as known and the run stays green; the run fails on a failure that is not listed.
+A listed gate that passes is printed as possibly stale (with `VIREUIKIT_SCENARIOS_STALE=1` it fails the run), because a
+gate near its limit passes on the GPU from time to time; `VIREUIKIT_SCENARIOS_STRICT=1` fails on the known ones too.
+The ledger is also the record of what each project sees: an entry missing from `swiftshader` is a finding only the GPU
+sees (the toolbar's shape while it moves is at 29 % there and at 16 % in software).
+
+**Output**, in `lab-scenarios/<project>/` (git-ignored; `VIREUIKIT_SCENARIOS_OUT`): per scenario `sheet.png` (every
+presented frame in a grid, labelled in ms from the input; the frame that presents a motion's last tick is blue, a frame
+a gate points at is red), `sheet.html` and `frames/` (the frames as PNG), `metrics.json` (frame times and gaps, motions,
+marks, each gate's numbers and per-frame series), `samples.json` (the boxes in every frame), and at the end `summary.txt`
+and `summary.json`; the table is printed per project. Look at the sheets before a handoff.
+
+**Canaries** (`canaries.ts`, `canaries.spec.ts`, run with the scenarios in both projects): a synthetic page per gate that
+must fail it and the same page without the defect that must pass it: a label that arrives 400 ms after the motion; an
+item erased in a drag; a square behind a capsule; a capsule that is square for the first 350 ms of its motion; a strip left
+on a pill; a hover of ΔE 1.3; a rim on a dark button; a rectangle hovered inside a capsule; a label that goes in one frame;
+a trigger without its label for 360 ms; a box that runs past its place and comes back; a scroll container with the
+platform's bar. Run them after any change to a gate.
+
+**What it does not see.** A gate reads the boxes of the elements a scenario names, so a defect in an element nobody tracked
+is not in it. A defect that is a single wrong pixel colour in a region that moves with the motion (a spring's last tick) is
+bounded by the seam's limit, not zero. Two of the owner's findings are not caught by a gate; the frames show them and
+the issue records them: the navigation's tap, in which two selection indicators are on screen for about 350 ms (the old
+pill fades where it was while the lens and a blue copy of the label grow on the new item, and the settled pill arrives
+at about 850 ms; the picture still falls monotonically toward its settled one, which is all `converge` asks), and the
+trigger of a sheet that comes back to its place full width and centred (no frame of the lab's sheet, popover or adaptive
+popover at 1920 × 960 shows a body at that size; the trigger's glass does arrive late, without its label and with the
+grabber on it, then swaps in one step, which `ghost`, `hole` and `pop` fail).
 
 ## The menu
 

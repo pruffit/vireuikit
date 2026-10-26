@@ -40,14 +40,18 @@ run it. The comparison is strict (`docs/design.md`); refresh the baselines with
 serves the lab; set `VIREUIKIT_REFERENCE_DIR` to a local folder of reference frames to see them in its side pane.
 Reference frames are third-party and are never committed.
 
-`npm run check:lab:scenarios` plays the interactions of every element (open, close, drag, tap, hover, press, resize) in a
-headless Chromium and keeps every presented frame from before the input to 1.5 s after the last kit motion. It judges
-the frames: nothing changes after a motion ends (seam), no item vanishes in a drag or tap, rounded shapes keep their
-radius, a part of an open surface is gone when it has shrunk to its trigger, and hover and press are seen over every
-backdrop. It prints a table, and writes contact sheets and per-frame metrics to `lab-scenarios/` (git-ignored); look at
-the sheets before handing an element over. Its canaries (synthetic pages that must fail each gate) run with it. A gate
-that fails on a known finding is labelled in `tests/lab/scenarios/scenarios.ts`; fixing the finding turns the run red
-until the label is removed. Definitions, limits and the data behind them: `docs/design.md`, "Scenario recordings".
+`npm run check:lab:scenarios` plays the interactions of every element (open, close, drag, click, hover, press, resize, scroll) in
+a headless Chromium, in two projects: `gpu`, which renders on the machine's adapter (ANGLE/D3D11) and judges, and
+`swiftshader`, the software render, which is the control. It keeps every presented frame from before the input to 1.5 s
+after the last kit motion, nothing on the desktop and no focus taken. It judges the frames: nothing changes after a
+motion ends (seam), nothing changes at once where nothing moves (pop), no item vanishes in a drag or tap, a trigger is
+not left without its label (hole), the picture does not turn back from where it settles (converge), rounded shapes keep
+their radius, even in a motion, a part of an open surface is gone when it has shrunk to its trigger, hover and press are
+seen over every backdrop and paint the element's own shape, and what scrolls inside a surface shows no platform
+scrollbar. It prints a table per project, and writes contact sheets and per-frame metrics to `lab-scenarios/<project>/`
+(git-ignored); look at the sheets before handing an element over. Its canaries (synthetic pages that must fail each gate)
+run with it. A gate that fails on a known finding is listed in `tests/lab/scenarios/known.ts`; fixing the finding turns
+the run red until the entry is removed. Definitions, limits and the data behind them: `docs/design.md`, "Scenario recordings".
 
 `npm run check:lab:perf` replays every transition of `tests/lab/transitions.ts` in a headed Chromium and times its
 frames with glass on and off, each replay after an idle control of the same page, under a trace; it prints a table
