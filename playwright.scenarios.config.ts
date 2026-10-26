@@ -24,7 +24,7 @@ export default defineConfig({
     colorScheme: 'light',
   },
   projects: [
-    { name: 'gpu', testMatch: ['gpu.spec.ts', 'canaries.spec.ts'], use: { launchOptions: { args: GPU_ARGS, ignoreDefaultArgs: SHOW_SCROLLBARS } } },
+    { name: 'gpu', testMatch: ['gpu.spec.ts', 'canaries.spec.ts', 'handover.spec.ts'], use: { launchOptions: { args: GPU_ARGS, ignoreDefaultArgs: SHOW_SCROLLBARS } } },
     { name: 'swiftshader', testMatch: ['swiftshader.spec.ts', 'canaries.spec.ts'], use: { launchOptions: { ignoreDefaultArgs: SHOW_SCROLLBARS } } },
   ],
   webServer: {
