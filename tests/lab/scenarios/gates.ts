@@ -349,8 +349,9 @@ export function converge(frames: Frames, spec: ConvergeSpec): GateResult {
     const region = regions.find((r) => r.name === 'all') ?? regions[0];
     if (!region) return;
     const settled = frames.before(until);
-    if (frames.t(settled) < segment.end) return;
     const from = frames.from(segment.start - 40);
+    // A still page delivers no frame, so the picture a motion settles to may be the last one it delivered before the motion's own end.
+    if (settled <= from) return;
     evaluated += 1;
     let least = Infinity;
     for (let j = from; j < settled; j += 1) {
