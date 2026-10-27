@@ -15,8 +15,9 @@ export const LIMITS = {
   seamDrift: 0.004,
   /** Seam: the frame that presents a motion's last tick is compared with the one before it only when they are neighbours, at most this many ms apart; across a dropped frame the step holds motion. */
   frameGap: 26,
-  /** Pop: across a stall the change of the frames it spans may be this many ms of motion per `popMean`. */
+  /** Pop: across a stall the change of the frames it spans may be one `popMean` per this many ms of motion, for at most `stallTicks` of them. */
   tickMs: 20,
+  stallTicks: 8,
   /** Pop: the mean ΔE between two consecutive frames in the region of an element whose box did not move between them. */
   popMean: 1.2,
   /** Hole: the ink of a trigger that is alone in its place, glyphs out of focus included, may fall to this fraction of its ink at rest. */
@@ -259,10 +260,13 @@ export function pop(frames: Frames, spec: PopSpec): GateResult {
   for (let j = 1; j < frames.length; j += 1) {
     for (const key of spec.keys) {
       let from = j - 1;
-      if (stalled(frames, j)) while (from > 0 && stalled(frames, from)) from -= 1;
+      const late = stalled(frames, j);
+      // A frame that carries a stall is judged only where a surface hands a place back: against the last frame before the stall, over the ticks it spans.
+      if (late && !spec.surface) continue;
+      if (late) while (from > 0 && stalled(frames, from)) from -= 1;
       const now = boxesAt(rec, key, frames.t(j));
       const before = boxesAt(rec, key, frames.t(from));
-      const span = Math.max(1, Math.ceil((frames.t(j) - frames.t(from)) / LIMITS.tickMs));
+      const span = late ? Math.min(Math.max(1, Math.ceil((frames.t(j) - frames.t(from)) / LIMITS.tickMs)), LIMITS.stallTicks) : 1;
       const limit = LIMITS.popMean * span;
       now.forEach((b, i) => {
         const p = before[i];
@@ -299,7 +303,8 @@ export function hole(frames: Frames, spec: HoleSpec): GateResult {
   const home = boxesAt(rec, spec.target, frames.t(rest))[0];
   if (!home || home.hidden) return { gate: 'hole', verdict: 'skip', line: `no box of "${spec.target}" at rest`, numbers: {}, flagged: [] };
   const base = inkMass(frames.at(rest), home);
-  if (base === 0) return { gate: 'hole', verdict: 'skip', line: 'the trigger has no ink at rest', numbers: {}, flagged: [] };
+  const baseCount = ink(frames.at(rest), home);
+  if (base === 0 || baseCount === 0) return { gate: 'hole', verdict: 'skip', line: 'the trigger has no ink at rest', numbers: {}, flagged: [] };
   const tol = spec.tol ?? 8;
   const flagged: number[] = [];
   const series: NonNullable<GateResult['series']> = [];
@@ -312,7 +317,7 @@ export function hole(frames: Frames, spec: HoleSpec): GateResult {
     const away = !surface || surface.hidden || (Math.abs(surface.w - target.w) <= tol && Math.abs(surface.h - target.h) <= tol && Math.abs(surface.x - target.x) <= tol && Math.abs(surface.y - target.y) <= tol);
     if (!away) continue;
     checked += 1;
-    const ratio = inkMass(frames.at(j), target) / base;
+    const ratio = Math.max(inkMass(frames.at(j), target) / base, ink(frames.at(j), target) / baseCount);
     series.push({ index: j, t: frames.t(j) - rec.input, value: ratio });
     if (ratio < LIMITS.holeInk) flagged.push(j);
     if (ratio < worst.ratio) Object.assign(worst, { ratio, t: frames.t(j) - rec.input });
