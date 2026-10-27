@@ -257,7 +257,10 @@ export function pop(frames: Frames, spec: PopSpec): GateResult {
   const series: NonNullable<GateResult['series']> = [];
   const worst = { mean: 0, t: 0, key: '', gap: 0 };
   let checked = 0;
+  // Before the surface has been seen out, a sample that says it is closed may be a frame ahead of the first one that shows it growing.
+  const out = spec.surface ? rec.samples.find((x) => x.boxes[spec.surface!]?.[0]?.hidden === false)?.t ?? Infinity : 0;
   for (let j = 1; j < frames.length; j += 1) {
+    if (frames.t(j) < out) continue;
     for (const key of spec.keys) {
       let from = j - 1;
       const late = stalled(frames, j);
